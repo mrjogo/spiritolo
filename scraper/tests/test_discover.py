@@ -2,7 +2,7 @@ import responses
 
 from scraper.src.client import ScraperAPIClient
 from scraper.src.db import Database
-from scraper.src.discover import discover_sitemap, discover_crawl, load_sites_config, run_discovery
+from scraper.src.discover import discover_sitemap, discover_crawl, load_sites_config, probe_sitemap
 
 
 SAMPLE_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
@@ -110,15 +110,13 @@ def test_load_sites_config(tmp_path):
     config_file.write_text("""sites:
   - name: testsite
     domain: example.com
-    discovery:
-      method: sitemap
-      sitemap_url: https://example.com/sitemap.xml
-      url_pattern: "/recipes/"
+    url_pattern: "/recipes/"
+    sitemap_url: https://example.com/sitemap.xml
 """)
     sites = load_sites_config(config_file)
     assert len(sites) == 1
     assert sites[0]["name"] == "testsite"
-    assert sites[0]["discovery"]["method"] == "sitemap"
+    assert sites[0]["sitemap_url"] == "https://example.com/sitemap.xml"
 
 
 @responses.activate
@@ -135,3 +133,33 @@ def test_discover_sitemap_is_idempotent(tmp_db):
     pending = db.get_pending()
     assert len(pending) == 3  # no duplicates
     db.close()
+
+
+@responses.activate
+def test_probe_sitemap_from_robots_txt():
+    responses.add(
+        responses.GET,
+        "https://www.example.com/robots.txt",
+        body="User-agent: *\nDisallow: /admin/\nSitemap: https://www.example.com/sitemap.xml\n",
+        status=200,
+    )
+    assert probe_sitemap("example.com") == "https://www.example.com/sitemap.xml"
+
+
+@responses.activate
+def test_probe_sitemap_from_direct_url():
+    responses.add(responses.GET, "https://www.example.com/robots.txt", status=404)
+    responses.add(
+        responses.GET,
+        "https://www.example.com/sitemap.xml",
+        body='<?xml version="1.0"?><urlset></urlset>',
+        status=200,
+    )
+    assert probe_sitemap("example.com") == "https://www.example.com/sitemap.xml"
+
+
+@responses.activate
+def test_probe_sitemap_not_found():
+    responses.add(responses.GET, "https://www.example.com/robots.txt", status=404)
+    responses.add(responses.GET, "https://www.example.com/sitemap.xml", status=404)
+    assert probe_sitemap("example.com") is None
