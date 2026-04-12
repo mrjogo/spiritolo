@@ -13,13 +13,18 @@ Copy and paste the following into Claude Code:
 
 ---
 
-Classify all unclassified URLs in `data/scraper.db` as `likely_drink` or `likely_food` based on the URL slug.
+Classify all unclassified URLs in `data/scraper.db` by URL slug into one of four categories.
+
+**Categories:**
+- `likely_drink_recipe` — URL slug suggests a drink recipe (cocktail name, drink type, spirit-based drink)
+- `likely_food_recipe` — URL slug suggests a food recipe (dish name, cooking method, food ingredient)
+- `likely_drink_nonrecipe` — drink-related but not a recipe (articles, listicles, bar guides, "best-of" roundups, technique explainers)
+- `likely_food_nonrecipe` — food-related but not a recipe (articles, tips, reviews, restaurant guides)
 
 **Rules:**
-- If the URL slug suggests a drink recipe (cocktail name, drink type, spirit-based drink), set `content_type = 'likely_drink'`
-- If the URL slug suggests a food recipe (dish name, cooking method, food ingredient), set `content_type = 'likely_food'`
-- If ambiguous, lean toward `likely_drink` — false positives are cheaper than missed drinks
-- Non-recipe URLs that slipped through sitemap filtering (articles, listicles, about pages) should be `likely_food`
+- If ambiguous between drink and food, lean toward drink — false positives are cheaper than missed drinks
+- If ambiguous between recipe and nonrecipe, lean toward recipe
+- URLs with slugs like `/best-`, `/guide-`, `/how-to-choose-`, `/review-`, `/tips-` are almost always nonrecipe
 
 **Process:**
 - Work through one site at a time
@@ -29,7 +34,7 @@ Classify all unclassified URLs in `data/scraper.db` as `likely_drink` or `likely
   2. Classify each URL by reading the slug
   3. Update in a single transaction: `BEGIN; UPDATE pages SET content_type = ? WHERE id IN (...); COMMIT;`
   4. Repeat until no NULL rows remain for that site
-  5. Report back only the counts: `{site}: {n_drink} likely_drink, {n_food} likely_food`
+  5. Report back only the counts: `{site}: {n} likely_drink_recipe, {n} likely_food_recipe, {n} likely_drink_nonrecipe, {n} likely_food_nonrecipe`
 - After all sites are done, run `SELECT site, content_type, COUNT(*) FROM pages GROUP BY site, content_type` and show the summary
 
 **Sites to process (in order):**
@@ -42,7 +47,7 @@ Start with the smallest sites to validate the approach before hitting the large 
 
 ## After classification
 
-Run the fetch pipeline, which will only fetch `likely_drink` pages:
+Run the fetch pipeline, which will only fetch `likely_drink_recipe` pages:
 
 ```bash
 SCRAPERAPI_KEY=your-key python3 -m scraper.src.fetch --site {site_name} --limit 50

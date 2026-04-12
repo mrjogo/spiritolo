@@ -39,12 +39,16 @@ CREATE TABLE IF NOT EXISTS pages (
 | Value | Set by | Meaning |
 |---|---|---|
 | `NULL` | default | Unclassified (fresh from sitemap) |
-| `likely_drink` | Claude Code | URL slug looks like a drink recipe |
-| `likely_food` | Claude Code | URL slug looks like a food recipe |
-| `confirmed_drink` | fetch pipeline | JSON-LD structured signals confirm drink |
+| `likely_drink_recipe` | Claude Code | URL slug looks like a drink recipe |
+| `likely_food_recipe` | Claude Code | URL slug looks like a food recipe |
+| `likely_drink_nonrecipe` | Claude Code | Drink-related but not a recipe (articles, listicles, bar guides) |
+| `likely_food_nonrecipe` | Claude Code | Food-related but not a recipe (articles, tips, reviews) |
+| `confirmed_drink` | fetch pipeline | JSON-LD structured signals confirm drink recipe |
 | `confirmed_food` | fetch pipeline | JSON-LD has no drink signals |
 
-Note: `likely_drink` remaining after fetch means JSON-LD was inconclusive (e.g. no Recipe JSON-LD at all). These should be reviewed manually.
+Note: `likely_drink_recipe` remaining after fetch means JSON-LD was inconclusive (e.g. no Recipe JSON-LD at all). These should be reviewed manually.
+
+The nonrecipe values are never fetched — they exist purely so those URLs are classified and don't show up as unprocessed NULLs.
 
 ### Indexes
 
@@ -53,7 +57,7 @@ CREATE INDEX IF NOT EXISTS idx_pages_content_type ON pages(content_type);
 CREATE INDEX IF NOT EXISTS idx_pages_status_content_type ON pages(status, content_type);
 ```
 
-The composite index covers the primary fetch query: `WHERE status = 'pending' AND content_type = 'likely_drink'`.
+The composite index covers the primary fetch query: `WHERE status = 'pending' AND content_type = 'likely_drink_recipe'`.
 
 ### New methods on `Database`
 
@@ -65,16 +69,16 @@ Modify `get_pending()` to accept an optional `content_type` filter.
 
 ## Fetch pipeline
 
-`fetch_pages()` defaults to only fetching rows where `content_type = 'likely_drink'`. The `get_pending()` call becomes:
+`fetch_pages()` defaults to only fetching rows where `content_type = 'likely_drink_recipe'`. The `get_pending()` call becomes:
 
 ```python
-pending = db.get_pending(site=site, limit=limit, content_type="likely_drink")
+pending = db.get_pending(site=site, limit=limit, content_type="likely_drink_recipe")
 ```
 
 After fetch and validation, the pipeline calls `classify_drink(html)` and updates `content_type`:
 - Returns `confirmed_drink` → update to `confirmed_drink`
 - Returns `confirmed_food` → update to `confirmed_food`
-- Returns `None` (no Recipe JSON-LD) → leave as `likely_drink`
+- Returns `None` (no Recipe JSON-LD) → leave as `likely_drink_recipe`
 
 ## Drink confirmation logic
 
