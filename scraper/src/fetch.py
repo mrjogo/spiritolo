@@ -32,7 +32,7 @@ def check_circuit_breaker(recent_statuses: list[str]) -> bool:
     if n < CIRCUIT_BREAKER_WINDOW:
         return False
     window = recent_statuses[:CIRCUIT_BREAKER_WINDOW]
-    bad_count = sum(1 for s in window if s in ("blocked", "unverified"))
+    bad_count = sum(1 for s in window if s == "blocked")
     return bad_count / CIRCUIT_BREAKER_WINDOW > CIRCUIT_BREAKER_THRESHOLD
 
 
@@ -47,7 +47,7 @@ def fetch_pages(
 ) -> dict:
     pending = db.get_pending(site=site or force_site, limit=limit)
     paused_sites: set[str] = set()
-    results = {"fetched": 0, "blocked": 0, "unverified": 0, "errors": 0, "paused_sites": []}
+    results: dict = {"blocked": 0, "errors": 0, "paused_sites": []}
 
     total = len(pending)
     for i, row in enumerate(pending):
@@ -78,22 +78,16 @@ def fetch_pages(
 
         result = validate(html)
 
-        if result.status == "fetched":
-            filename = url_to_filename(url)
-            rel_path = save_html(html_dir, page_site, filename, html)
-            db.mark_fetched(url, rel_path)
-            results["fetched"] += 1
-        elif result.status == "blocked":
+        if result.status == "blocked":
             db.mark_blocked(url, result.reason or "blocked")
             results["blocked"] += 1
             print(f"  BLOCKED: {result.reason}")
-        elif result.status == "unverified":
-            # Still save the HTML — it might be valid, we just can't confirm
+        else:
             filename = url_to_filename(url)
             rel_path = save_html(html_dir, page_site, filename, html)
-            db.mark_unverified(url, result.reason or "unverified", html_path=rel_path)
-            results["unverified"] += 1
-            print(f"  UNVERIFIED: {result.reason}")
+            db.mark_content(url, result.status, result.reason or result.status, html_path=rel_path)
+            results[result.status] = results.get(result.status, 0) + 1
+            print(f"  {result.status}: {result.reason}")
 
         # Re-check circuit breaker after each fetch to detect mid-run failures
         if page_site not in paused_sites and page_site != force_site:
@@ -123,10 +117,11 @@ if __name__ == "__main__":
     results = fetch_pages(db, client, site=args.site, limit=args.limit, force_site=args.force_site)
 
     print("\n--- Results ---")
-    print(f"Fetched:    {results['fetched']}")
     print(f"Blocked:    {results['blocked']}")
-    print(f"Unverified: {results['unverified']}")
     print(f"Errors:     {results['errors']}")
+    other = {k: v for k, v in results.items() if k not in ("blocked", "errors", "paused_sites") and v}
+    for status, count in sorted(other.items()):
+        print(f"{status + ':':12s}{count}")
     if results["paused_sites"]:
         print(f"Paused:     {', '.join(results['paused_sites'])}")
 

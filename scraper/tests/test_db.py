@@ -33,7 +33,7 @@ def test_get_pending_returns_pending_only(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")
     db.add_url("testsite", "https://example.com/recipe/2")
-    db.mark_fetched("https://example.com/recipe/1", "html/testsite/abc123.html")
+    db.mark_content("https://example.com/recipe/1", "Recipe", "JSON-LD @type: Recipe", html_path="html/testsite/abc123.html")
     pending = db.get_pending()
     assert len(pending) == 1
     assert pending[0]["url"] == "https://example.com/recipe/2"
@@ -59,17 +59,6 @@ def test_get_pending_respects_limit(tmp_db):
     db.close()
 
 
-def test_mark_fetched(tmp_db):
-    db = Database(tmp_db)
-    db.add_url("testsite", "https://example.com/recipe/1")
-    db.mark_fetched("https://example.com/recipe/1", "html/testsite/abc123.html")
-    row = db.conn.execute("SELECT * FROM pages WHERE url = ?", ("https://example.com/recipe/1",)).fetchone()
-    assert row["status"] == "fetched"
-    assert row["html_path"] == "html/testsite/abc123.html"
-    assert row["fetched_at"] is not None
-    db.close()
-
-
 def test_mark_blocked(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")
@@ -80,12 +69,13 @@ def test_mark_blocked(tmp_db):
     db.close()
 
 
-def test_mark_unverified(tmp_db):
+def test_mark_content(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")
-    db.mark_unverified("https://example.com/recipe/1", "no JSON-LD, content looks plausible")
+    db.mark_content("https://example.com/recipe/1", "Article", "JSON-LD @type: Article")
     row = db.conn.execute("SELECT * FROM pages WHERE url = ?", ("https://example.com/recipe/1",)).fetchone()
-    assert row["status"] == "unverified"
+    assert row["status"] == "Article"
+    assert row["fetched_at"] is not None
     db.close()
 
 
@@ -109,7 +99,7 @@ def test_get_recent_statuses(tmp_db):
     db = Database(tmp_db)
     for i in range(5):
         db.add_url("testsite", f"https://example.com/recipe/{i}")
-        db.mark_fetched(f"https://example.com/recipe/{i}", f"html/testsite/{i}.html")
+        db.mark_content(f"https://example.com/recipe/{i}", "Recipe", "JSON-LD @type: Recipe", html_path=f"html/testsite/{i}.html")
     for i in range(5, 8):
         db.add_url("testsite", f"https://example.com/recipe/{i}")
         db.mark_blocked(f"https://example.com/recipe/{i}", "blocked")
@@ -124,8 +114,8 @@ def test_get_stats(tmp_db):
     db = Database(tmp_db)
     db.add_url("site_a", "https://a.com/1")
     db.add_url("site_a", "https://a.com/2")
-    db.mark_fetched("https://a.com/1", "html/site_a/1.html")
+    db.mark_content("https://a.com/1", "Recipe", "JSON-LD @type: Recipe", html_path="html/site_a/1.html")
     db.add_url("site_b", "https://b.com/1")
     stats = db.get_stats()
-    assert stats == {"site_a": {"pending": 1, "fetched": 1}, "site_b": {"pending": 1}}
+    assert stats == {"site_a": {"pending": 1, "Recipe": 1}, "site_b": {"pending": 1}}
     db.close()

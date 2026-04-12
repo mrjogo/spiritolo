@@ -65,12 +65,12 @@ def test_full_pipeline(tmp_db, tmp_path):
 
     # Fetch
     results = fetch_pages(db, client, html_dir=tmp_path, delay=0)
-    assert results["fetched"] == 1
+    assert results["Recipe"] == 1
     assert results["blocked"] == 1
 
     # Verify state
     stats = db.get_stats()
-    assert stats["testsite"]["fetched"] == 1
+    assert stats["testsite"]["Recipe"] == 1
     assert stats["testsite"]["blocked"] == 1
 
     # Verify HTML was saved for the fetched page

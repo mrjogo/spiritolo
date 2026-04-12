@@ -36,9 +36,9 @@ def test_circuit_breaker_triggered():
     assert check_circuit_breaker(statuses) is True
 
 
-def test_circuit_breaker_counts_unverified():
-    statuses = ["unverified"] * 5 + ["blocked"] * 4 + ["fetched"] * 11
-    assert check_circuit_breaker(statuses) is True
+def test_circuit_breaker_ignores_non_recipe_content():
+    statuses = ["Article"] * 5 + ["blocked"] * 4 + ["fetched"] * 11
+    assert check_circuit_breaker(statuses) is False
 
 
 def test_circuit_breaker_not_enough_data():
@@ -46,7 +46,7 @@ def test_circuit_breaker_not_enough_data():
     assert check_circuit_breaker(statuses) is False
 
 
-def test_fetch_pages_marks_fetched(tmp_db, tmp_path, sample_recipe_html):
+def test_fetch_pages_marks_recipe(tmp_db, tmp_path, sample_recipe_html):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipes/margarita")
 
@@ -55,9 +55,9 @@ def test_fetch_pages_marks_fetched(tmp_db, tmp_path, sample_recipe_html):
 
     results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
 
-    assert results["fetched"] == 1
-    pending = db.get_pending()
-    assert len(pending) == 0
+    assert results["Recipe"] == 1
+    row = db.conn.execute("SELECT status FROM pages WHERE url = ?", ("https://example.com/recipes/margarita",)).fetchone()
+    assert row["status"] == "Recipe"
     db.close()
 
 
@@ -101,7 +101,7 @@ def test_fetch_pages_respects_limit(tmp_db, tmp_path, sample_recipe_html):
 
     results = fetch_pages(db, mock_client, html_dir=tmp_path, limit=3, delay=0)
 
-    assert results["fetched"] == 3
+    assert results["Recipe"] == 3
     pending = db.get_pending()
     assert len(pending) == 7
     db.close()

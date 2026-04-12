@@ -58,18 +58,20 @@ def _extract_visible_text(html: str) -> str:
     return extractor.get_text()
 
 
-def _find_recipe_jsonld(html: str) -> dict | None:
-    pattern = re.compile(
-        r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-        re.DOTALL | re.IGNORECASE,
-    )
-    for match in pattern.finditer(html):
+_JSONLD_PATTERN = re.compile(
+    r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _iter_jsonld_objects(html: str):
+    """Yield all top-level objects from JSON-LD blocks."""
+    for match in _JSONLD_PATTERN.finditer(html):
         try:
             data = json.loads(match.group(1))
         except (json.JSONDecodeError, ValueError):
             continue
 
-        # Handle both direct objects and @graph arrays
         candidates = []
         if isinstance(data, list):
             candidates.extend(data)
@@ -80,16 +82,21 @@ def _find_recipe_jsonld(html: str) -> dict | None:
                 candidates.append(data)
 
         for obj in candidates:
-            if not isinstance(obj, dict):
-                continue
-            obj_type = obj.get("@type", "")
-            if isinstance(obj_type, list):
-                type_match = "Recipe" in obj_type
-            else:
-                type_match = obj_type == "Recipe"
-            if type_match and "name" in obj and "recipeIngredient" in obj:
-                return obj
+            if isinstance(obj, dict):
+                yield obj
 
+
+def _find_jsonld_type(html: str) -> str | None:
+    """Return the first @type found across all JSON-LD blocks, or None."""
+    for obj in _iter_jsonld_objects(html):
+        obj_type = obj.get("@type")
+        if obj_type is None:
+            continue
+        if isinstance(obj_type, list):
+            if obj_type:
+                return obj_type[0]
+        else:
+            return obj_type
     return None
 
 
@@ -106,28 +113,25 @@ def _check_soft_404(html: str) -> bool:
 
 
 def validate(html: str) -> ValidationResult:
-    # 1. Size gate
-    if len(html.encode("utf-8")) < MIN_PAGE_SIZE:
-        return ValidationResult("blocked", "Size under 5KB — too small for a recipe page")
+    # 1. JSON-LD — if present, the page has real structured content
+    jsonld_type = _find_jsonld_type(html)
+    if jsonld_type:
+        return ValidationResult(jsonld_type, f"JSON-LD @type: {jsonld_type}")
 
-    # 2. Blocker fingerprints
+    # 2. No JSON-LD — check for blockers
+    if len(html.encode("utf-8")) < MIN_PAGE_SIZE:
+        return ValidationResult("blocked", "Size under 5KB — likely not a content page")
+
     for fingerprint, reason in BLOCKER_FINGERPRINTS:
         if fingerprint in html:
             return ValidationResult("blocked", reason)
 
-    # 3. Recipe JSON-LD (primary accept gate)
-    recipe = _find_recipe_jsonld(html)
-    if recipe:
-        return ValidationResult("fetched")
-
-    # 4. Soft 404 check
     if _check_soft_404(html):
         return ValidationResult("blocked", "Soft 404 detected")
 
-    # 5. Content length check
     visible_text = _extract_visible_text(html)
     if len(visible_text) < MIN_TEXT_LENGTH:
         return ValidationResult("blocked", "Insufficient visible text — likely empty JS shell")
 
-    # 6. Inconclusive — has content but no JSON-LD
-    return ValidationResult("unverified", "No Recipe JSON-LD found, content looks plausible")
+    # 3. Has content but no JSON-LD
+    return ValidationResult("unverified", "No JSON-LD found")

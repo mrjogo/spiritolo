@@ -59,14 +59,6 @@ class Database:
         rows = self.conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
-    def mark_fetched(self, url: str, html_path: str):
-        now = datetime.now(timezone.utc).isoformat()
-        self.conn.execute(
-            "UPDATE pages SET status = 'fetched', html_path = ?, fetched_at = ? WHERE url = ?",
-            (html_path, now, url),
-        )
-        self.conn.commit()
-
     def mark_blocked(self, url: str, reason: str):
         self.conn.execute(
             "UPDATE pages SET status = 'blocked', error = ? WHERE url = ?",
@@ -74,10 +66,12 @@ class Database:
         )
         self.conn.commit()
 
-    def mark_unverified(self, url: str, reason: str, html_path: str | None = None):
+    def mark_content(self, url: str, status: str, reason: str, html_path: str | None = None):
+        """Mark a page with an arbitrary content status (JSON-LD @type, 'unverified', etc.)."""
+        now = datetime.now(timezone.utc).isoformat()
         self.conn.execute(
-            "UPDATE pages SET status = 'unverified', error = ?, html_path = ? WHERE url = ?",
-            (reason, html_path, url),
+            "UPDATE pages SET status = ?, error = ?, html_path = ?, fetched_at = ? WHERE url = ?",
+            (status, reason, html_path, now, url),
         )
         self.conn.commit()
 
