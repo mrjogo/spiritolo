@@ -47,6 +47,17 @@ class Database:
             (site, url, now),
         )
         self.conn.commit()
+
+    def add_urls_batch(self, site: str, urls: list[str]) -> int:
+        """Insert multiple URLs in a single transaction. Returns count of new rows inserted."""
+        now = datetime.now(timezone.utc).isoformat()
+        rows = [(site, url, now) for url in urls]
+        cursor = self.conn.executemany(
+            "INSERT OR IGNORE INTO pages (site, url, discovered_at) VALUES (?, ?, ?)",
+            rows,
+        )
+        self.conn.commit()
+        return cursor.rowcount
         return cursor.rowcount > 0
 
     def get_pending(self, site: str | None = None, limit: int | None = None, content_type: str | None = None) -> list[dict]:

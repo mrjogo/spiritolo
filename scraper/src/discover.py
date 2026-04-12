@@ -75,14 +75,12 @@ def discover_sitemap(
             total += discover_sitemap(client, db, site_name, sub_url, url_pattern)
         return total
 
-    # Regular sitemap — extract URLs
+    # Regular sitemap — extract URLs and batch insert
     locs = root.xpath("//sm:url/sm:loc/text()", namespaces=SITEMAP_NS)
-    added = 0
-    for loc in locs:
-        if url_pattern in loc:
-            if db.add_url(site_name, loc):
-                added += 1
-    return added
+    matched = [loc for loc in locs if url_pattern in loc]
+    if not matched:
+        return 0
+    return db.add_urls_batch(site_name, matched)
 
 
 
