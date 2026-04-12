@@ -64,15 +64,18 @@ def discover_sitemap(
     url_pattern: str,
 ) -> int:
     """Fetch sitemap, filter URLs by pattern, add to database. Returns count of new URLs added."""
+    print(f"  Fetching {sitemap_url}")
     xml_text = client.fetch(sitemap_url)
     root = etree.fromstring(xml_text.encode("utf-8"))
 
     # Check if this is a sitemap index
     sub_sitemaps = root.xpath("//sm:sitemap/sm:loc/text()", namespaces=SITEMAP_NS)
     if sub_sitemaps:
+        print(f"  Sitemap index with {len(sub_sitemaps)} sub-sitemaps")
         total = 0
-        for sub_url in sub_sitemaps:
+        for i, sub_url in enumerate(sub_sitemaps, 1):
             total += discover_sitemap(client, db, site_name, sub_url, url_pattern)
+            print(f"  [{i}/{len(sub_sitemaps)}] {total} URLs so far")
         return total
 
     # Regular sitemap — extract URLs and batch insert
