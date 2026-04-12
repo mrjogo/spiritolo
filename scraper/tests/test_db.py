@@ -175,3 +175,16 @@ def test_get_by_content_type(tmp_db):
     limited = db.get_by_content_type("likely_drink_recipe", limit=1)
     assert len(limited) == 1
     db.close()
+
+
+def test_get_pending_filters_by_content_type(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipe/1")
+    db.add_url("testsite", "https://example.com/recipe/2")
+    db.add_url("testsite", "https://example.com/recipe/3")
+    db.set_content_type("https://example.com/recipe/1", "likely_drink_recipe")
+    db.set_content_type("https://example.com/recipe/2", "likely_food_recipe")
+    pending = db.get_pending(content_type="likely_drink_recipe")
+    assert len(pending) == 1
+    assert pending[0]["url"] == "https://example.com/recipe/1"
+    db.close()

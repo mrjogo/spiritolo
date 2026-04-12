@@ -49,12 +49,15 @@ class Database:
         self.conn.commit()
         return cursor.rowcount > 0
 
-    def get_pending(self, site: str | None = None, limit: int | None = None) -> list[dict]:
+    def get_pending(self, site: str | None = None, limit: int | None = None, content_type: str | None = None) -> list[dict]:
         query = "SELECT * FROM pages WHERE status = 'pending'"
         params: list = []
         if site:
             query += " AND site = ?"
             params.append(site)
+        if content_type:
+            query += " AND content_type = ?"
+            params.append(content_type)
         query += " ORDER BY site, discovered_at"
         if limit:
             query += " LIMIT ?"
