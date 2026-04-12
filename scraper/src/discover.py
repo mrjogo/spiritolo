@@ -6,7 +6,7 @@ import requests
 import yaml
 from lxml import etree
 
-from scraper.src.client import ScraperAPIClient
+from scraper.src.client import USER_AGENT, ScraperAPIClient
 from scraper.src.db import Database
 
 SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
@@ -27,11 +27,18 @@ def probe_sitemap(domain: str, timeout: int = 10) -> str | None:
 
     Uses plain requests (no ScraperAPI) since these are public endpoints.
     """
-    base = f"https://www.{domain}"
+    # Don't add www. if domain already has a subdomain (e.g. cooking.nytimes.com)
+    parts = domain.split(".")
+    if len(parts) > 2:
+        base = f"https://{domain}"
+    else:
+        base = f"https://www.{domain}"
+
+    headers = {"User-Agent": USER_AGENT}
 
     # 1. Check robots.txt for Sitemap: directives
     try:
-        resp = requests.get(f"{base}/robots.txt", timeout=timeout)
+        resp = requests.get(f"{base}/robots.txt", headers=headers, timeout=timeout)
         if resp.status_code == 200:
             for match in re.finditer(r"^Sitemap:\s*(\S+)", resp.text, re.MULTILINE | re.IGNORECASE):
                 return match.group(1)
@@ -40,7 +47,7 @@ def probe_sitemap(domain: str, timeout: int = 10) -> str | None:
 
     # 2. Try /sitemap.xml directly
     try:
-        resp = requests.get(f"{base}/sitemap.xml", timeout=timeout)
+        resp = requests.get(f"{base}/sitemap.xml", headers=headers, timeout=timeout)
         if resp.status_code == 200 and "<?xml" in resp.text[:100]:
             return f"{base}/sitemap.xml"
     except requests.RequestException:
@@ -77,40 +84,6 @@ def discover_sitemap(
                 added += 1
     return added
 
-
-def discover_crawl(
-    client: ScraperAPIClient,
-    db: Database,
-    site_name: str,
-    start_url: str,
-    url_pattern: str,
-    next_page_selector: str,
-) -> int:
-    """Crawl paginated index pages, extract recipe URLs, add to database. Returns count of new URLs added."""
-    added = 0
-    current_url = start_url
-    seen_urls: set[str] = set()
-
-    while current_url:
-        html_text = client.fetch(current_url)
-        tree = etree.HTML(html_text)
-
-        # Extract recipe links
-        links = tree.xpath("//a/@href")
-        for link in links:
-            if url_pattern in link and link not in seen_urls:
-                seen_urls.add(link)
-                if db.add_url(site_name, link):
-                    added += 1
-
-        # Follow pagination
-        next_links = tree.cssselect(next_page_selector) if next_page_selector else []
-        if next_links:
-            current_url = next_links[0].get("href")
-        else:
-            current_url = None
-
-    return added
 
 
 def run_probe(site_filter: str | None = None, config_path: Path = DEFAULT_CONFIG_PATH):
@@ -156,29 +129,12 @@ def run_discovery(site_filter: str | None = None):
 
         name = site["name"]
         url_pattern = site["url_pattern"]
+
+        if "sitemap_url" not in site:
+            raise ValueError(f"[{name}] Missing required sitemap_url in sites.yaml")
+
         print(f"[{name}] Discovering URLs...")
-
-        if site.get("sitemap_url"):
-            # Known sitemap — use it, fail hard if broken
-            count = discover_sitemap(client, db, name, site["sitemap_url"], url_pattern)
-        else:
-            # No known sitemap — probe first, fall back to crawl
-            probed_url = probe_sitemap(site["domain"])
-            if probed_url:
-                print(f"[{name}] Found sitemap at {probed_url}")
-                count = discover_sitemap(client, db, name, probed_url, url_pattern)
-            elif site.get("start_url"):
-                print(f"[{name}] No sitemap, falling back to crawl")
-                count = discover_crawl(
-                    client, db, name,
-                    start_url=site["start_url"],
-                    url_pattern=url_pattern,
-                    next_page_selector=site.get("next_page_selector", ""),
-                )
-            else:
-                print(f"[{name}] No sitemap found and no crawl config — skipping")
-                continue
-
+        count = discover_sitemap(client, db, name, site["sitemap_url"], url_pattern)
         print(f"[{name}] Added {count} new URLs")
 
     db.close()

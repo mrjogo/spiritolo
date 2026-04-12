@@ -2,7 +2,7 @@ import responses
 
 from scraper.src.client import ScraperAPIClient
 from scraper.src.db import Database
-from scraper.src.discover import discover_sitemap, discover_crawl, load_sites_config, probe_sitemap
+from scraper.src.discover import discover_sitemap, load_sites_config, probe_sitemap
 
 
 SAMPLE_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
@@ -33,19 +33,6 @@ SAMPLE_SITEMAP_ARTICLES = """<?xml version="1.0" encoding="UTF-8"?>
   <url><loc>https://example.com/articles/best-bars</loc></url>
 </urlset>"""
 
-
-SAMPLE_CRAWL_PAGE_1 = """<html><body>
-<a href="https://example.com/recipes/margarita">Margarita</a>
-<a href="https://example.com/recipes/mojito">Mojito</a>
-<a href="https://example.com/about">About</a>
-<a class="next-page" href="https://example.com/recipes?page=2">Next</a>
-</body></html>"""
-
-
-SAMPLE_CRAWL_PAGE_2 = """<html><body>
-<a href="https://example.com/recipes/negroni">Negroni</a>
-<a href="https://example.com/recipes/mojito">Mojito</a>
-</body></html>"""
 
 
 @responses.activate
@@ -83,26 +70,6 @@ def test_discover_sitemap_handles_sitemap_index(tmp_db):
     assert "https://example.com/recipes/old-fashioned" in urls
     db.close()
 
-
-@responses.activate
-def test_discover_crawl_follows_pagination(tmp_db):
-    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_CRAWL_PAGE_1, status=200)
-    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_CRAWL_PAGE_2, status=200)
-    client = ScraperAPIClient(api_key="test-key")
-    db = Database(tmp_db)
-
-    count = discover_crawl(
-        client, db, "testsite",
-        start_url="https://example.com/recipes",
-        url_pattern="/recipes/",
-        next_page_selector="a.next-page",
-    )
-
-    assert count == 3  # margarita, mojito, negroni (mojito deduped)
-    pending = db.get_pending()
-    urls = [row["url"] for row in pending]
-    assert len(urls) == 3
-    db.close()
 
 
 def test_load_sites_config(tmp_path):

@@ -2,6 +2,8 @@ import os
 
 import requests
 
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+
 
 class ScraperAPIError(Exception):
     pass
@@ -25,7 +27,7 @@ class ScraperAPIClient:
         if render:
             params["render"] = "true"
 
-        resp = requests.get(self.BASE_URL, params=params, timeout=60)
+        resp = requests.get(self.BASE_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=60)
         if resp.status_code != 200:
             raise ScraperAPIError(
                 f"ScraperAPI returned {resp.status_code} for {url}: {resp.text[:200]}"
