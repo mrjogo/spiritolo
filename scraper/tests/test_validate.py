@@ -1,4 +1,4 @@
-from scraper.src.validate import validate, ValidationResult
+from scraper.src.validate import validate, ValidationResult, classify_drink
 
 
 def test_valid_recipe_with_jsonld(sample_recipe_html):
@@ -79,3 +79,58 @@ def test_jsonld_list_type():
     """ + "<p>content</p>" * 500 + "</body></html>"
     result = validate(html)
     assert result.status == "Article"
+
+
+def test_classify_drink_from_category(sample_drink_recipe_html):
+    result = classify_drink(sample_drink_recipe_html)
+    assert result == "confirmed_drink"
+
+
+def test_classify_drink_from_breadcrumb(sample_drink_breadcrumb_html):
+    result = classify_drink(sample_drink_breadcrumb_html)
+    assert result == "confirmed_drink"
+
+
+def test_classify_drink_from_keywords(sample_drink_keywords_html):
+    result = classify_drink(sample_drink_keywords_html)
+    assert result == "confirmed_drink"
+
+
+def test_classify_drink_food_recipe(sample_food_recipe_html):
+    result = classify_drink(sample_food_recipe_html)
+    assert result == "confirmed_food"
+
+
+def test_classify_drink_no_recipe_jsonld():
+    html = """<html><body>
+    <script type="application/ld+json">
+    {"@type": "Article", "name": "Best Cocktails"}
+    </script>
+    """ + "<p>content</p>" * 500 + "</body></html>"
+    result = classify_drink(html)
+    assert result is None
+
+
+def test_classify_drink_no_jsonld_at_all():
+    html = "<html><body>" + "<p>content</p>" * 500 + "</body></html>"
+    result = classify_drink(html)
+    assert result is None
+
+
+def test_classify_drink_spirit_in_food_is_not_drink():
+    """A food recipe with a spirit name in keywords should NOT be classified as drink."""
+    body = "<p>A delicious glazed dish.</p>\n" * 40
+    html = """<!DOCTYPE html>
+<html><body>
+""" + body + """<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Recipe",
+    "name": "Bourbon Glazed Ribs",
+    "recipeCategory": "Dinner, BBQ",
+    "keywords": "bourbon, ribs, bbq, grilled"
+}
+</script>
+</body></html>"""
+    result = classify_drink(html)
+    assert result == "confirmed_food"
