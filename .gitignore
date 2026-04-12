@@ -20,3 +20,9 @@
 
 # Local data — HTML archive and scraper state DB
 data/
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
