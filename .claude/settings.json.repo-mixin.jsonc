@@ -1,0 +1,28 @@
+// This file is maintained by repo-mixin. Do not edit manually.
+// It mirrors settings.json with inline annotations explaining what each block does.
+// To change settings, edit settings.json — this file will be regenerated on mixin re-apply.
+{
+  "permissions": {
+    "allow": [
+      // [repo-mixin:devcontainer-claude] Starter permissions — safe read-only commands pre-allowed.
+      // Add more permissions as you work. Use manage_settings.py to sort and merge.
+      "Bash(cat:*)",
+      "Bash(echo:*)",
+      "Bash(env:*)",
+      "Bash(find:*)",
+      "Bash(git branch:*)",
+      "Bash(git diff:*)",
+      "Bash(git log:*)",
+      "Bash(git status:*)",
+      "Bash(grep:*)",
+      "Bash(head:*)",
+      "Bash(ls:*)",
+      "Bash(pwd:*)",
+      "Bash(rg:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(which:*)"
+      // [/repo-mixin:devcontainer-claude]
+    ]
+  }
+}

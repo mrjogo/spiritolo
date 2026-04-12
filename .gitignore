@@ -1,0 +1,19 @@
+# --- repo-mixin:devcontainer-claude ---
+# [repo-mixin:devcontainer-claude] Generated env file with host paths and tokens
+.devcontainer/.env.devcontainer
+# --- /repo-mixin:devcontainer-claude ---
+
+# Common OS and editor artifacts
+.DS_Store
+.AppleDouble
+.LSOverride
+*~
+.directory
+
+# Environment files — never commit secrets
+.env
+.env.*
+!.env.example
+
+# Log files
+*.log

@@ -1,0 +1,5 @@
+# [repo-mixin:devcontainer-claude] Arrow-key history prefix search.
+# Type a prefix then press up/down to search through history entries
+# that start with that prefix. Much faster than ctrl-r for recent commands.
+"\e[A": history-search-backward
+"\e[B": history-search-forward
