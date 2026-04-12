@@ -132,14 +132,11 @@ class Database:
     def set_content_type_batch(self, ids: list[int], content_type: str):
         if not ids:
             return
-        chunk_size = 500
-        for i in range(0, len(ids), chunk_size):
-            chunk = ids[i : i + chunk_size]
-            placeholders = ",".join("?" for _ in chunk)
-            self.conn.execute(
-                f"UPDATE pages SET content_type = ? WHERE id IN ({placeholders})",
-                [content_type] + chunk,
-            )
+        placeholders = ",".join("?" for _ in ids)
+        self.conn.execute(
+            f"UPDATE pages SET content_type = ? WHERE id IN ({placeholders})",
+            [content_type] + ids,
+        )
         self.conn.commit()
 
     def get_by_content_type(self, content_type: str, site: str | None = None, limit: int | None = None) -> list[dict]:
