@@ -7,17 +7,19 @@
 | Serious Eats | https://www.seriouseats.com | Food + drink | 1 |
 | Bon Appétit | https://www.bonappetit.com | Food + drink | 1 |
 | NYT Cooking | https://cooking.nytimes.com | Food + drink | 1 |
-| Liquor.com | https://www.liquor.com | Drinks only | 1 |
-| Punch | https://punchdrink.com | Drinks only | 1 |
-| Difford's Guide | https://www.diffordsguide.com | Drinks only | 1 |
+| Liquor.com | https://www.liquor.com | Drinks focused | 1 |
+| Punch | https://punchdrink.com | Drinks focused | 1 |
+| Difford's Guide | https://www.diffordsguide.com | Drinks focused | 1 |
 | Food Network | https://www.foodnetwork.com | Food + drink | 2 |
 | Epicurious | https://www.epicurious.com | Food + drink | 2 |
 | Food & Wine | https://www.foodandwine.com | Food + drink | 2 |
 | The Kitchn | https://www.thekitchn.com | Food + drink | 2 |
-| Imbibe Magazine | https://imbibemagazine.com | Drinks only | 2 |
+| Imbibe Magazine | https://imbibemagazine.com | Drinks focused | 2 |
 | Martha Stewart | https://www.marthastewart.com | Food + drink | 3 |
 | Simply Recipes | https://www.simplyrecipes.com | Food + drink | 3 |
 | Tasting Table | https://www.tastingtable.com | Food + drink | 3 |
+
+**Note:** Even "drinks focused" sites like Liquor.com carry some food recipes (e.g. [ham deviled eggs](https://www.liquor.com/ham-deviled-eggs-recipe-5115303)), so all sites need drink detection — none can be assumed 100% drinks.
 
 **Excluded:** Saveur — mixed Food + drink site, but no structured way in JSON-LD to determine if a recipe is for drink/cocktail (no recipeCategory, no breadcrumb, no relevant keywords). It's a 3rd tier site, so not worth the hassle.
 
