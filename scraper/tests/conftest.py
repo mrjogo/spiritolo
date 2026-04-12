@@ -10,13 +10,16 @@ def tmp_db(tmp_path):
 @pytest.fixture
 def sample_recipe_html():
     """Minimal HTML that contains valid Recipe JSON-LD."""
+    padding = "<!-- " + ("x" * 100) + " -->\n"
+    body_padding = ("<p>The Classic Margarita is a timeless tequila cocktail with a perfect balance of "
+                    "sweet and sour flavors, finished with a salted rim.</p>\n") * 40
     return """<!DOCTYPE html>
 <html>
 <head><title>Classic Margarita</title></head>
 <body>
 <h1>Classic Margarita</h1>
 <p>A timeless tequila cocktail.</p>
-<script type="application/ld+json">
+""" + body_padding + """<script type="application/ld+json">
 {
     "@context": "https://schema.org",
     "@type": "Recipe",
