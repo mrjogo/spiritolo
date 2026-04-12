@@ -17,3 +17,6 @@
 
 # Log files
 *.log
+
+# Local data — HTML archive and scraper state DB
+data/
