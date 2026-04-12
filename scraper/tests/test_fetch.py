@@ -49,6 +49,7 @@ def test_circuit_breaker_not_enough_data():
 def test_fetch_pages_marks_recipe(tmp_db, tmp_path, sample_recipe_html):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
 
     mock_client = MagicMock()
     mock_client.fetch.return_value = sample_recipe_html
@@ -64,6 +65,7 @@ def test_fetch_pages_marks_recipe(tmp_db, tmp_path, sample_recipe_html):
 def test_fetch_pages_marks_blocked(tmp_db, tmp_path, sample_blocked_html):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
 
     mock_client = MagicMock()
     mock_client.fetch.return_value = sample_blocked_html
@@ -79,6 +81,7 @@ def test_fetch_pages_marks_blocked(tmp_db, tmp_path, sample_blocked_html):
 def test_fetch_pages_handles_network_error(tmp_db, tmp_path):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
 
     mock_client = MagicMock()
     mock_client.fetch.side_effect = Exception("Connection timeout")
@@ -95,6 +98,8 @@ def test_fetch_pages_respects_limit(tmp_db, tmp_path, sample_recipe_html):
     db = Database(tmp_db)
     for i in range(10):
         db.add_url("testsite", f"https://example.com/recipes/{i}")
+    for i in range(10):
+        db.set_content_type(f"https://example.com/recipes/{i}", "likely_drink_recipe")
 
     mock_client = MagicMock()
     mock_client.fetch.return_value = sample_recipe_html
@@ -107,6 +112,23 @@ def test_fetch_pages_respects_limit(tmp_db, tmp_path, sample_recipe_html):
     db.close()
 
 
+def test_fetch_pages_only_fetches_likely_drink_recipe(tmp_db, tmp_path, sample_drink_recipe_html):
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.add_url("testsite", "https://example.com/recipes/salmon")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
+    db.set_content_type("https://example.com/recipes/salmon", "likely_food_recipe")
+
+    mock_client = MagicMock()
+    mock_client.fetch.return_value = sample_drink_recipe_html
+
+    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+
+    assert mock_client.fetch.call_count == 1
+    mock_client.fetch.assert_called_once_with("https://example.com/recipes/margarita")
+    db.close()
+
+
 def test_fetch_pages_circuit_breaker_pauses_site(tmp_db, tmp_path, sample_blocked_html):
     db = Database(tmp_db)
     # Pre-populate with enough blocked pages to trigger circuit breaker
@@ -116,8 +138,11 @@ def test_fetch_pages_circuit_breaker_pauses_site(tmp_db, tmp_path, sample_blocke
     # Add more pending pages for this site
     for i in range(15, 20):
         db.add_url("badsite", f"https://bad.com/recipes/{i}")
+    for i in range(15, 20):
+        db.set_content_type(f"https://bad.com/recipes/{i}", "likely_drink_recipe")
     # Add pages for a good site
     db.add_url("goodsite", "https://good.com/recipes/1")
+    db.set_content_type("https://good.com/recipes/1", "likely_drink_recipe")
 
     mock_client = MagicMock()
     mock_client.fetch.return_value = sample_blocked_html

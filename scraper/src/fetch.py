@@ -45,7 +45,7 @@ def fetch_pages(
     force_site: str | None = None,
     delay: float = 1.5,
 ) -> dict:
-    pending = db.get_pending(site=site or force_site, limit=limit)
+    pending = db.get_pending(site=site or force_site, limit=limit, content_type="likely_drink_recipe")
     paused_sites: set[str] = set()
     results: dict = {"blocked": 0, "errors": 0, "paused_sites": []}
 
