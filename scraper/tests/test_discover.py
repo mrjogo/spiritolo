@@ -1,6 +1,7 @@
+import requests
 import responses
 
-from scraper.src.client import ScraperAPIClient
+from scraper.src.client import ScraperAPIClient, ScraperAPIError
 from scraper.src.db import Database
 from scraper.src.discover import discover_sitemap, load_sites_config, probe_sitemap
 
@@ -34,22 +35,21 @@ SAMPLE_SITEMAP_ARTICLES = """<?xml version="1.0" encoding="UTF-8"?>
 </urlset>"""
 
 
-
 @responses.activate
-def test_discover_sitemap_filters_by_pattern(tmp_db):
+def test_discover_sitemap_adds_all_urls(tmp_db):
     responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
     client = ScraperAPIClient(api_key="test-key")
     db = Database(tmp_db)
 
-    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml", "/cocktails/recipe/")
+    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml")
 
-    assert count == 3
+    assert count == 4
     pending = db.get_pending()
     urls = [row["url"] for row in pending]
     assert "https://example.com/cocktails/recipe/margarita" in urls
     assert "https://example.com/cocktails/recipe/mojito" in urls
     assert "https://example.com/cocktails/recipe/negroni" in urls
-    assert "https://example.com/about" not in urls
+    assert "https://example.com/about" in urls
     db.close()
 
 
@@ -61,15 +61,15 @@ def test_discover_sitemap_handles_sitemap_index(tmp_db):
     client = ScraperAPIClient(api_key="test-key")
     db = Database(tmp_db)
 
-    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml", "/recipes/")
+    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml")
 
-    assert count == 2
+    assert count == 3
     pending = db.get_pending()
     urls = [row["url"] for row in pending]
     assert "https://example.com/recipes/daiquiri" in urls
     assert "https://example.com/recipes/old-fashioned" in urls
+    assert "https://example.com/articles/best-bars" in urls
     db.close()
-
 
 
 def test_load_sites_config(tmp_path):
@@ -77,7 +77,6 @@ def test_load_sites_config(tmp_path):
     config_file.write_text("""sites:
   - name: testsite
     domain: example.com
-    url_pattern: "/recipes/"
     sitemap_url: https://example.com/sitemap.xml
 """)
     sites = load_sites_config(config_file)
@@ -93,12 +92,33 @@ def test_discover_sitemap_is_idempotent(tmp_db):
     client = ScraperAPIClient(api_key="test-key")
     db = Database(tmp_db)
 
-    discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml", "/cocktails/recipe/")
-    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml", "/cocktails/recipe/")
+    discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml")
+    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml")
 
     assert count == 0  # all already exist
     pending = db.get_pending()
-    assert len(pending) == 3  # no duplicates
+    assert len(pending) == 4  # no duplicates
+    db.close()
+
+
+@responses.activate
+def test_discover_sitemap_skips_failed_sub_sitemap(tmp_db):
+    """If a sub-sitemap fetch fails, skip it and continue with the rest."""
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP_INDEX, status=200)
+    # First sub-sitemap times out
+    responses.add(responses.GET, "https://api.scraperapi.com", body=requests.exceptions.ReadTimeout())
+    # Second sub-sitemap succeeds
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP_ARTICLES, status=200)
+    client = ScraperAPIClient(api_key="test-key")
+    db = Database(tmp_db)
+
+    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml")
+
+    # Should have the 1 URL from articles, despite recipes timing out
+    assert count == 1
+    pending = db.get_pending()
+    urls = [row["url"] for row in pending]
+    assert "https://example.com/articles/best-bars" in urls
     db.close()
 
 

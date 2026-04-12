@@ -61,11 +61,14 @@ def discover_sitemap(
     db: Database,
     site_name: str,
     sitemap_url: str,
-    url_pattern: str,
 ) -> int:
-    """Fetch sitemap, filter URLs by pattern, add to database. Returns count of new URLs added."""
+    """Fetch sitemap, add all URLs to database. Returns count of new URLs added."""
     print(f"  Fetching {sitemap_url}")
-    xml_text = client.fetch(sitemap_url)
+    try:
+        xml_text = client.fetch(sitemap_url)
+    except Exception as e:
+        print(f"  ERROR fetching {sitemap_url}: {e}")
+        return 0
     root = etree.fromstring(xml_text.encode("utf-8"))
 
     # Check if this is a sitemap index
@@ -74,16 +77,15 @@ def discover_sitemap(
         print(f"  Sitemap index with {len(sub_sitemaps)} sub-sitemaps")
         total = 0
         for i, sub_url in enumerate(sub_sitemaps, 1):
-            total += discover_sitemap(client, db, site_name, sub_url, url_pattern)
+            total += discover_sitemap(client, db, site_name, sub_url)
             print(f"  [{i}/{len(sub_sitemaps)}] {total} URLs so far")
         return total
 
-    # Regular sitemap — extract URLs and batch insert
+    # Regular sitemap — extract and batch insert all URLs
     locs = root.xpath("//sm:url/sm:loc/text()", namespaces=SITEMAP_NS)
-    matched = [loc for loc in locs if url_pattern in loc]
-    if not matched:
+    if not locs:
         return 0
-    return db.add_urls_batch(site_name, matched)
+    return db.add_urls_batch(site_name, locs)
 
 
 
@@ -129,13 +131,12 @@ def run_discovery(site_filter: str | None = None):
             continue
 
         name = site["name"]
-        url_pattern = site["url_pattern"]
 
         if "sitemap_url" not in site:
             raise ValueError(f"[{name}] Missing required sitemap_url in sites.yaml")
 
         print(f"[{name}] Discovering URLs...")
-        count = discover_sitemap(client, db, name, site["sitemap_url"], url_pattern)
+        count = discover_sitemap(client, db, name, site["sitemap_url"])
         print(f"[{name}] Added {count} new URLs")
 
     db.close()

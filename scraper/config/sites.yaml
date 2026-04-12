@@ -1,57 +1,43 @@
 sites:
 - name: diffordsguide
   domain: diffordsguide.com
-  url_pattern: /cocktails/recipe/
   sitemap_url: https://www.diffordsguide.com/sitemap.xml
 - name: liquor
   domain: liquor.com
-  url_pattern: /recipes/
   sitemap_url: https://www.liquor.com/sitemap.xml
 - name: punch
   domain: punchdrink.com
-  url_pattern: /recipe/
   sitemap_url: https://punchdrink.com/sitemap_index.xml
 - name: imbibe
   domain: imbibemagazine.com
-  url_pattern: /recipe/
   sitemap_url: https://imbibemagazine.com/sitemap_index.xml
 - name: seriouseats
   domain: seriouseats.com
-  url_pattern: /recipes/
   sitemap_url: https://www.seriouseats.com/sitemap.xml
 - name: bonappetit
   domain: bonappetit.com
-  url_pattern: /recipe/
   sitemap_url: https://www.bonappetit.com/sitemap.xml
 - name: nytcooking
   domain: cooking.nytimes.com
-  url_pattern: /recipes/
   sitemap_url: https://www.nytimes.com/sitemaps/new/cooking.xml.gz
 - name: foodnetwork
   domain: foodnetwork.com
-  url_pattern: /recipes/
   sitemap_url: https://www.foodnetwork.com/sitemaps/sitemap_food_index.xml
 - name: epicurious
   domain: epicurious.com
-  url_pattern: /recipes/
   sitemap_url: https://www.epicurious.com/sitemap.xml
 - name: foodandwine
   domain: foodandwine.com
-  url_pattern: /
   sitemap_url: https://www.foodandwine.com/sitemap.xml
 - name: thekitchn
   domain: thekitchn.com
-  url_pattern: /
   sitemap_url: https://www.thekitchn.com/sitemap.xml
 - name: marthastewart
   domain: marthastewart.com
-  url_pattern: /
   sitemap_url: https://www.marthastewart.com/sitemap.xml
 - name: simplyrecipes
   domain: simplyrecipes.com
-  url_pattern: /
   sitemap_url: https://www.simplyrecipes.com/sitemap.xml
 - name: tastingtable
   domain: tastingtable.com
-  url_pattern: /
   sitemap_url: https://www.tastingtable.com/sitemap_index.xml

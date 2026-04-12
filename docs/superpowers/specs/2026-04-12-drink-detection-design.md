@@ -36,19 +36,20 @@ CREATE TABLE IF NOT EXISTS pages (
 
 ### Column values
 
-| Value | Set by | Meaning |
-|---|---|---|
-| `NULL` | default | Unclassified (fresh from sitemap) |
-| `likely_drink_recipe` | Claude Code | URL slug looks like a drink recipe |
-| `likely_food_recipe` | Claude Code | URL slug looks like a food recipe |
-| `likely_drink_nonrecipe` | Claude Code | Drink-related but not a recipe (articles, listicles, bar guides) |
-| `likely_food_nonrecipe` | Claude Code | Food-related but not a recipe (articles, tips, reviews) |
-| `confirmed_drink` | fetch pipeline | JSON-LD structured signals confirm drink recipe |
-| `confirmed_food` | fetch pipeline | JSON-LD has no drink signals |
+| Value | Set by | Fetched? | Meaning |
+|---|---|---|---|
+| `NULL` | default | No | Unclassified (fresh from sitemap) |
+| `likely_drink_recipe` | Claude Code | Yes | Cocktail/drink recipe |
+| `likely_food_recipe` | Claude Code | No (for now) | Food recipe |
+| `likely_drink_article` | Claude Code | Not yet | Drink-related article, listicle, guide |
+| `likely_food_article` | Claude Code | Not yet | Food-related article, listicle, guide |
+| `likely_junk` | Claude Code | Never | About pages, FAQs, privacy policy, author bios, tag indexes |
+| `confirmed_drink` | fetch pipeline | Already fetched | JSON-LD structured signals confirm drink recipe |
+| `confirmed_food` | fetch pipeline | Already fetched | JSON-LD has no drink signals |
 
 Note: `likely_drink_recipe` remaining after fetch means JSON-LD was inconclusive (e.g. no Recipe JSON-LD at all). These should be reviewed manually.
 
-The nonrecipe values are never fetched — they exist purely so those URLs are classified and don't show up as unprocessed NULLs.
+Article values have future value (listicles, guides) and can be flipped to fetchable later. Junk pages have zero content value and are never fetched.
 
 ### Indexes
 
