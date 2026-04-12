@@ -36,13 +36,15 @@ class Database:
     def close(self):
         self.conn.close()
 
-    def add_url(self, site: str, url: str):
+    def add_url(self, site: str, url: str) -> bool:
+        """Insert a URL if it doesn't exist. Returns True if inserted, False if duplicate."""
         now = datetime.now(timezone.utc).isoformat()
-        self.conn.execute(
+        cursor = self.conn.execute(
             "INSERT OR IGNORE INTO pages (site, url, discovered_at) VALUES (?, ?, ?)",
             (site, url, now),
         )
         self.conn.commit()
+        return cursor.rowcount > 0
 
     def get_pending(self, site: str | None = None, limit: int | None = None) -> list[dict]:
         query = "SELECT * FROM pages WHERE status = 'pending'"
@@ -72,10 +74,10 @@ class Database:
         )
         self.conn.commit()
 
-    def mark_unverified(self, url: str, reason: str):
+    def mark_unverified(self, url: str, reason: str, html_path: str | None = None):
         self.conn.execute(
-            "UPDATE pages SET status = 'unverified', error = ? WHERE url = ?",
-            (reason, url),
+            "UPDATE pages SET status = 'unverified', error = ?, html_path = ? WHERE url = ?",
+            (reason, html_path, url),
         )
         self.conn.commit()
 

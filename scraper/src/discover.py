@@ -44,9 +44,7 @@ def discover_sitemap(
     added = 0
     for loc in locs:
         if url_pattern in loc:
-            existing = db.conn.execute("SELECT 1 FROM pages WHERE url = ?", (loc,)).fetchone()
-            if not existing:
-                db.add_url(site_name, loc)
+            if db.add_url(site_name, loc):
                 added += 1
     return added
 
@@ -73,9 +71,7 @@ def discover_crawl(
         for link in links:
             if url_pattern in link and link not in seen_urls:
                 seen_urls.add(link)
-                existing = db.conn.execute("SELECT 1 FROM pages WHERE url = ?", (link,)).fetchone()
-                if not existing:
-                    db.add_url(site_name, link)
+                if db.add_url(site_name, link):
                     added += 1
 
         # Follow pagination

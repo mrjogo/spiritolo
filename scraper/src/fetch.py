@@ -91,7 +91,7 @@ def fetch_pages(
             # Still save the HTML — it might be valid, we just can't confirm
             filename = url_to_filename(url)
             rel_path = save_html(html_dir, page_site, filename, html)
-            db.mark_unverified(url, result.reason or "unverified")
+            db.mark_unverified(url, result.reason or "unverified", html_path=rel_path)
             results["unverified"] += 1
             print(f"  UNVERIFIED: {result.reason}")
 
