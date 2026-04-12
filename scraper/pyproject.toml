@@ -6,6 +6,7 @@ dependencies = [
     "requests>=2.31",
     "lxml>=5.0",
     "pyyaml>=6.0",
+    "cssselect>=1.2",
 ]
 
 [project.optional-dependencies]
