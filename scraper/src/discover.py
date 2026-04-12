@@ -85,7 +85,7 @@ def discover_sitemap(
     locs = root.xpath("//sm:url/sm:loc/text()", namespaces=SITEMAP_NS)
     if not locs:
         return 0
-    return db.add_urls_batch(site_name, locs)
+    return db.add_urls_batch(site_name, locs, sitemap_source=sitemap_url)
 
 
 

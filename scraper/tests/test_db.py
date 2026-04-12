@@ -177,6 +177,23 @@ def test_get_by_content_type(tmp_db):
     db.close()
 
 
+def test_schema_has_sitemap_source_column(tmp_db):
+    db = Database(tmp_db)
+    row = db.conn.execute("PRAGMA table_info(pages)").fetchall()
+    columns = [r[1] for r in row]
+    assert "sitemap_source" in columns
+    db.close()
+
+
+def test_add_urls_batch_stores_sitemap_source(tmp_db):
+    db = Database(tmp_db)
+    urls = ["https://example.com/recipe/1", "https://example.com/recipe/2"]
+    db.add_urls_batch("testsite", urls, sitemap_source="https://example.com/sitemap-recipes.xml")
+    rows = db.conn.execute("SELECT sitemap_source FROM pages").fetchall()
+    assert all(r["sitemap_source"] == "https://example.com/sitemap-recipes.xml" for r in rows)
+    db.close()
+
+
 def test_get_pending_filters_by_content_type(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")

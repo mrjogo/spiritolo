@@ -50,6 +50,34 @@ def test_discover_sitemap_adds_all_urls(tmp_db):
     assert "https://example.com/cocktails/recipe/mojito" in urls
     assert "https://example.com/cocktails/recipe/negroni" in urls
     assert "https://example.com/about" in urls
+    # All URLs should have sitemap_source set
+    sources = [row["sitemap_source"] for row in pending]
+    assert all(s == "https://example.com/sitemap.xml" for s in sources)
+    db.close()
+
+
+@responses.activate
+def test_discover_sitemap_index_tracks_sub_sitemap_source(tmp_db):
+    """Each URL should record which sub-sitemap it came from, not the index."""
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP_INDEX, status=200)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP_RECIPES, status=200)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP_ARTICLES, status=200)
+    client = ScraperAPIClient(api_key="test-key")
+    db = Database(tmp_db)
+
+    discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml")
+
+    row = db.conn.execute(
+        "SELECT sitemap_source FROM pages WHERE url = ?",
+        ("https://example.com/recipes/daiquiri",),
+    ).fetchone()
+    assert row["sitemap_source"] == "https://example.com/sitemap-recipes.xml"
+
+    row = db.conn.execute(
+        "SELECT sitemap_source FROM pages WHERE url = ?",
+        ("https://example.com/articles/best-bars",),
+    ).fetchone()
+    assert row["sitemap_source"] == "https://example.com/sitemap-articles.xml"
     db.close()
 
 

@@ -11,6 +11,7 @@ CREATE TABLE IF NOT EXISTS pages (
     url TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL DEFAULT 'pending',
     content_type TEXT,
+    sitemap_source TEXT,
     attempts INTEGER NOT NULL DEFAULT 0,
     discovered_at TEXT NOT NULL,
     fetched_at TEXT,
@@ -49,12 +50,12 @@ class Database:
         self.conn.commit()
         return cursor.rowcount > 0
 
-    def add_urls_batch(self, site: str, urls: list[str]) -> int:
+    def add_urls_batch(self, site: str, urls: list[str], sitemap_source: str | None = None) -> int:
         """Insert multiple URLs in a single transaction. Returns count of new rows inserted."""
         now = datetime.now(timezone.utc).isoformat()
-        rows = [(site, url, now) for url in urls]
+        rows = [(site, url, sitemap_source, now) for url in urls]
         cursor = self.conn.executemany(
-            "INSERT OR IGNORE INTO pages (site, url, discovered_at) VALUES (?, ?, ?)",
+            "INSERT OR IGNORE INTO pages (site, url, sitemap_source, discovered_at) VALUES (?, ?, ?, ?)",
             rows,
         )
         self.conn.commit()

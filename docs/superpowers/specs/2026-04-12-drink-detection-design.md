@@ -44,12 +44,21 @@ CREATE TABLE IF NOT EXISTS pages (
 | `likely_drink_article` | Claude Code | Not yet | Drink-related article, listicle, guide |
 | `likely_food_article` | Claude Code | Not yet | Food-related article, listicle, guide |
 | `likely_junk` | Claude Code | Never | About pages, FAQs, privacy policy, author bios, tag indexes |
+| `likely_user_generated` | Claude Code | Never | User-submitted content (Difford's UGC cocktails, Punch guest authors) |
 | `confirmed_drink` | fetch pipeline | Already fetched | JSON-LD structured signals confirm drink recipe |
 | `confirmed_food` | fetch pipeline | Already fetched | JSON-LD has no drink signals |
 
 Note: `likely_drink_recipe` remaining after fetch means JSON-LD was inconclusive (e.g. no Recipe JSON-LD at all). These should be reviewed manually.
 
-Article values have future value (listicles, guides) and can be flipped to fetchable later. Junk pages have zero content value and are never fetched.
+Article values have future value (listicles, guides) and can be flipped to fetchable later. Junk and user-generated pages are never fetched.
+
+### sitemap_source column
+
+Each URL records which specific sitemap it was discovered from (e.g. `cocktail-user-generated.xml`, `recipe-sitemap2.xml`). This aids classification — URLs from a UGC sitemap can be bulk-classified as `likely_user_generated`.
+
+Known UGC sitemaps:
+- Difford's Guide: `https://www.diffordsguide.com/sitemap/cocktail-user-generated.xml`
+- Punch: `https://punchdrink.com/guest-author-sitemap.xml`
 
 ### Indexes
 
