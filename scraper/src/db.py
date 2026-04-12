@@ -107,3 +107,33 @@ class Database:
                 stats[site] = {}
             stats[site][row["status"]] = row["cnt"]
         return stats
+
+    def set_content_type(self, url: str, content_type: str):
+        self.conn.execute(
+            "UPDATE pages SET content_type = ? WHERE url = ?",
+            (content_type, url),
+        )
+        self.conn.commit()
+
+    def set_content_type_batch(self, ids: list[int], content_type: str):
+        if not ids:
+            return
+        placeholders = ",".join("?" for _ in ids)
+        self.conn.execute(
+            f"UPDATE pages SET content_type = ? WHERE id IN ({placeholders})",
+            [content_type] + ids,
+        )
+        self.conn.commit()
+
+    def get_by_content_type(self, content_type: str, site: str | None = None, limit: int | None = None) -> list[dict]:
+        query = "SELECT * FROM pages WHERE content_type = ?"
+        params: list = [content_type]
+        if site:
+            query += " AND site = ?"
+            params.append(site)
+        query += " ORDER BY site, discovered_at"
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+        rows = self.conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]

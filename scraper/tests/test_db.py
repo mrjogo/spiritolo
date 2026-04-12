@@ -127,3 +127,51 @@ def test_schema_has_content_type_column(tmp_db):
     columns = [r[1] for r in row]
     assert "content_type" in columns
     db.close()
+
+
+def test_set_content_type(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipe/1")
+    db.set_content_type("https://example.com/recipe/1", "likely_drink_recipe")
+    row = db.conn.execute(
+        "SELECT content_type FROM pages WHERE url = ?",
+        ("https://example.com/recipe/1",),
+    ).fetchone()
+    assert row["content_type"] == "likely_drink_recipe"
+    db.close()
+
+
+def test_set_content_type_batch(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipe/1")
+    db.add_url("testsite", "https://example.com/recipe/2")
+    db.add_url("testsite", "https://example.com/recipe/3")
+    rows = db.conn.execute("SELECT id FROM pages ORDER BY id").fetchall()
+    ids = [rows[0]["id"], rows[1]["id"]]
+    db.set_content_type_batch(ids, "likely_food_recipe")
+    updated = db.conn.execute(
+        "SELECT content_type FROM pages WHERE id IN (?, ?)", tuple(ids)
+    ).fetchall()
+    assert all(r["content_type"] == "likely_food_recipe" for r in updated)
+    third = db.conn.execute(
+        "SELECT content_type FROM pages WHERE id = ?", (rows[2]["id"],)
+    ).fetchone()
+    assert third["content_type"] is None
+    db.close()
+
+
+def test_get_by_content_type(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("site_a", "https://a.com/recipe/1")
+    db.add_url("site_a", "https://a.com/recipe/2")
+    db.add_url("site_b", "https://b.com/recipe/1")
+    db.set_content_type("https://a.com/recipe/1", "likely_drink_recipe")
+    db.set_content_type("https://a.com/recipe/2", "likely_drink_recipe")
+    db.set_content_type("https://b.com/recipe/1", "likely_drink_recipe")
+    all_drinks = db.get_by_content_type("likely_drink_recipe")
+    assert len(all_drinks) == 3
+    site_a_drinks = db.get_by_content_type("likely_drink_recipe", site="site_a")
+    assert len(site_a_drinks) == 2
+    limited = db.get_by_content_type("likely_drink_recipe", limit=1)
+    assert len(limited) == 1
+    db.close()
