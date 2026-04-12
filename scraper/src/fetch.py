@@ -1,0 +1,139 @@
+import argparse
+import hashlib
+import time
+from pathlib import Path
+
+from scraper.src.client import ScraperAPIClient
+from scraper.src.db import Database
+from scraper.src.validate import validate
+
+DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
+DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
+DEFAULT_HTML_DIR = DATA_DIR / "html"
+
+CIRCUIT_BREAKER_WINDOW = 20
+CIRCUIT_BREAKER_THRESHOLD = 0.4  # 40% failure rate
+
+
+def url_to_filename(url: str) -> str:
+    return hashlib.sha256(url.encode()).hexdigest()[:16] + ".html"
+
+
+def save_html(html_dir: Path, site_name: str, filename: str, html: str) -> str:
+    site_dir = html_dir / site_name
+    site_dir.mkdir(parents=True, exist_ok=True)
+    file_path = site_dir / filename
+    file_path.write_text(html, encoding="utf-8")
+    return f"{site_name}/{filename}"
+
+
+def check_circuit_breaker(recent_statuses: list[str]) -> bool:
+    n = len(recent_statuses)
+    if n < CIRCUIT_BREAKER_WINDOW:
+        return False
+    window = recent_statuses[:CIRCUIT_BREAKER_WINDOW]
+    bad_count = sum(1 for s in window if s in ("blocked", "unverified"))
+    return bad_count / CIRCUIT_BREAKER_WINDOW > CIRCUIT_BREAKER_THRESHOLD
+
+
+def fetch_pages(
+    db: Database,
+    client: ScraperAPIClient,
+    html_dir: Path = DEFAULT_HTML_DIR,
+    site: str | None = None,
+    limit: int | None = None,
+    force_site: str | None = None,
+    delay: float = 1.5,
+) -> dict:
+    pending = db.get_pending(site=site or force_site, limit=limit)
+    paused_sites: set[str] = set()
+    results = {"fetched": 0, "blocked": 0, "unverified": 0, "errors": 0, "paused_sites": []}
+
+    total = len(pending)
+    for i, row in enumerate(pending):
+        page_site = row["site"]
+        url = row["url"]
+
+        # Circuit breaker check (skip if --force-site)
+        if page_site not in paused_sites and page_site != force_site:
+            recent = db.get_recent_statuses(page_site, count=CIRCUIT_BREAKER_WINDOW)
+            if check_circuit_breaker(recent):
+                print(f"[{page_site}] PAUSED — >{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% of last {CIRCUIT_BREAKER_WINDOW} pages failed validation")
+                paused_sites.add(page_site)
+
+        if page_site in paused_sites:
+            continue
+
+        print(f"[{page_site}] {i+1}/{total} — {url}")
+
+        try:
+            html = client.fetch(url)
+        except Exception as e:
+            db.mark_failed(url, str(e))
+            results["errors"] += 1
+            print(f"  ERROR: {e}")
+            if delay > 0:
+                time.sleep(delay)
+            continue
+
+        result = validate(html)
+
+        if result.status == "fetched":
+            filename = url_to_filename(url)
+            rel_path = save_html(html_dir, page_site, filename, html)
+            db.mark_fetched(url, rel_path)
+            results["fetched"] += 1
+        elif result.status == "blocked":
+            db.mark_blocked(url, result.reason or "blocked")
+            results["blocked"] += 1
+            print(f"  BLOCKED: {result.reason}")
+        elif result.status == "unverified":
+            # Still save the HTML — it might be valid, we just can't confirm
+            filename = url_to_filename(url)
+            rel_path = save_html(html_dir, page_site, filename, html)
+            db.mark_unverified(url, result.reason or "unverified")
+            results["unverified"] += 1
+            print(f"  UNVERIFIED: {result.reason}")
+
+        # Re-check circuit breaker after each fetch to detect mid-run failures
+        if page_site not in paused_sites and page_site != force_site:
+            recent = db.get_recent_statuses(page_site, count=CIRCUIT_BREAKER_WINDOW)
+            if check_circuit_breaker(recent):
+                print(f"[{page_site}] PAUSED — >{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% of last {CIRCUIT_BREAKER_WINDOW} pages failed validation")
+                paused_sites.add(page_site)
+
+        if delay > 0:
+            time.sleep(delay)
+
+    results["paused_sites"] = list(paused_sites)
+    return results
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Fetch pending recipe pages via ScraperAPI")
+    parser.add_argument("--site", help="Only fetch for a specific site")
+    parser.add_argument("--limit", type=int, help="Max number of pages to fetch")
+    parser.add_argument("--force-site", help="Resume a paused site (bypasses circuit breaker)")
+    args = parser.parse_args()
+
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    db = Database(DEFAULT_DB_PATH)
+    client = ScraperAPIClient()
+
+    results = fetch_pages(db, client, site=args.site, limit=args.limit, force_site=args.force_site)
+
+    print("\n--- Results ---")
+    print(f"Fetched:    {results['fetched']}")
+    print(f"Blocked:    {results['blocked']}")
+    print(f"Unverified: {results['unverified']}")
+    print(f"Errors:     {results['errors']}")
+    if results["paused_sites"]:
+        print(f"Paused:     {', '.join(results['paused_sites'])}")
+
+    stats = db.get_stats()
+    print("\n--- Overall ---")
+    for site_name, counts in stats.items():
+        parts = [f"{status}: {count}" for status, count in counts.items()]
+        print(f"  {site_name}: {', '.join(parts)}")
+
+    db.close()
