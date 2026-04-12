@@ -119,3 +119,11 @@ def test_get_stats(tmp_db):
     stats = db.get_stats()
     assert stats == {"site_a": {"pending": 1, "Recipe": 1}, "site_b": {"pending": 1}}
     db.close()
+
+
+def test_schema_has_content_type_column(tmp_db):
+    db = Database(tmp_db)
+    row = db.conn.execute("PRAGMA table_info(pages)").fetchall()
+    columns = [r[1] for r in row]
+    assert "content_type" in columns
+    db.close()

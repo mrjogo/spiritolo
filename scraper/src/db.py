@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS pages (
     site TEXT NOT NULL,
     url TEXT NOT NULL UNIQUE,
     status TEXT NOT NULL DEFAULT 'pending',
+    content_type TEXT,
     attempts INTEGER NOT NULL DEFAULT 0,
     discovered_at TEXT NOT NULL,
     fetched_at TEXT,
@@ -21,6 +22,8 @@ CREATE TABLE IF NOT EXISTS pages (
 CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_pages_status ON pages(status);",
     "CREATE INDEX IF NOT EXISTS idx_pages_site ON pages(site);",
+    "CREATE INDEX IF NOT EXISTS idx_pages_content_type ON pages(content_type);",
+    "CREATE INDEX IF NOT EXISTS idx_pages_status_content_type ON pages(status, content_type);",
 ]
 
 
