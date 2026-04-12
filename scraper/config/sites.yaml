@@ -1,0 +1,14 @@
+sites:
+  - name: diffordsguide
+    domain: diffordsguide.com
+    discovery:
+      method: sitemap
+      sitemap_url: https://www.diffordsguide.com/sitemap.xml
+      url_pattern: "/cocktails/recipe/"
+
+  - name: liquor
+    domain: liquor.com
+    discovery:
+      method: sitemap
+      sitemap_url: https://www.liquor.com/sitemap.xml
+      url_pattern: "/recipes/"

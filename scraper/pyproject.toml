@@ -1,0 +1,29 @@
+[project]
+name = "spiritolo-scraper"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+    "lxml>=5.0",
+    "pyyaml>=6.0",
+    "cssselect>=1.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "responses>=0.25",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages]
+find = {where = ["."]}
+
+[tool.setuptools.package-dir]
+"scraper.src" = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
