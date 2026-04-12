@@ -18,5 +18,11 @@ dev = [
 requires = ["setuptools>=68.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages]
+find = {where = ["."]}
+
+[tool.setuptools.package-dir]
+"scraper.src" = "src"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
