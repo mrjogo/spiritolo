@@ -63,6 +63,10 @@ def test_full_pipeline(tmp_db, tmp_path):
     count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml", "/recipes/")
     assert count == 2  # margarita and mojito, not /about
 
+    # Set content_type so fetch picks them up
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
+    db.set_content_type("https://example.com/recipes/mojito", "likely_drink_recipe")
+
     # Fetch
     results = fetch_pages(db, client, html_dir=tmp_path, delay=0)
     assert results["Recipe"] == 1

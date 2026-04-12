@@ -5,7 +5,7 @@ from pathlib import Path
 
 from scraper.src.client import ScraperAPIClient
 from scraper.src.db import Database
-from scraper.src.validate import validate
+from scraper.src.validate import validate, classify_drink
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
@@ -88,6 +88,11 @@ def fetch_pages(
             db.mark_content(url, result.status, result.reason or result.status, html_path=rel_path)
             results[result.status] = results.get(result.status, 0) + 1
             print(f"  {result.status}: {result.reason}")
+
+            # Classify drink/food from JSON-LD
+            drink_result = classify_drink(html)
+            if drink_result:
+                db.set_content_type(url, drink_result)
 
         # Re-check circuit breaker after each fetch to detect mid-run failures
         if page_site not in paused_sites and page_site != force_site:
