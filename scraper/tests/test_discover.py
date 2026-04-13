@@ -3,7 +3,7 @@ import responses
 
 from scraper.src.client import ScraperAPIClient, ScraperAPIError
 from scraper.src.db import Database
-from scraper.src.discover import discover_sitemap, load_sites_config, probe_sitemap
+from scraper.src.discover import SmartFetcher, discover_sitemap, load_sites_config, probe_sitemap
 
 
 SAMPLE_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
@@ -111,6 +111,77 @@ def test_load_sites_config(tmp_path):
     assert len(sites) == 1
     assert sites[0]["name"] == "testsite"
     assert sites[0]["sitemap_url"] == "https://example.com/sitemap.xml"
+
+
+@responses.activate
+def test_smart_fetcher_tries_direct_first():
+    """SmartFetcher should try direct request before ScraperAPI."""
+    responses.add(responses.GET, "https://example.com/sitemap.xml", body=SAMPLE_SITEMAP, status=200)
+    client = ScraperAPIClient(api_key="test-key")
+    fetcher = SmartFetcher(client)
+
+    xml = fetcher.fetch("https://example.com/sitemap.xml")
+
+    assert "margarita" in xml
+    scraper_calls = [c for c in responses.calls if "api.scraperapi.com" in c.request.url]
+    assert len(scraper_calls) == 0
+
+
+@responses.activate
+def test_smart_fetcher_falls_back_to_scraperapi():
+    """If direct request fails, fall back to ScraperAPI."""
+    responses.add(responses.GET, "https://example.com/sitemap.xml", status=403)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
+    client = ScraperAPIClient(api_key="test-key")
+    fetcher = SmartFetcher(client)
+
+    xml = fetcher.fetch("https://example.com/sitemap.xml")
+
+    assert "margarita" in xml
+    scraper_calls = [c for c in responses.calls if "api.scraperapi.com" in c.request.url]
+    assert len(scraper_calls) == 1
+
+
+@responses.activate
+def test_smart_fetcher_upgrades_after_two_consecutive_failures():
+    """After 2 consecutive direct failures, skip direct and go straight to ScraperAPI."""
+    # First two requests fail direct, succeed via ScraperAPI
+    responses.add(responses.GET, "https://example.com/a.xml", status=403)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
+    responses.add(responses.GET, "https://example.com/b.xml", status=403)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
+    # Third request should skip direct entirely
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
+    client = ScraperAPIClient(api_key="test-key")
+    fetcher = SmartFetcher(client)
+
+    fetcher.fetch("https://example.com/a.xml")
+    fetcher.fetch("https://example.com/b.xml")
+    fetcher.fetch("https://example.com/c.xml")
+
+    # c.xml should NOT have a direct request attempt
+    direct_calls = [c for c in responses.calls if "example.com/c.xml" in c.request.url]
+    assert len(direct_calls) == 0
+    assert fetcher.proxy_only
+
+
+@responses.activate
+def test_smart_fetcher_resets_on_direct_success():
+    """A successful direct request resets the consecutive failure counter."""
+    # First fails, second succeeds, third fails — should NOT upgrade
+    responses.add(responses.GET, "https://example.com/a.xml", status=403)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
+    responses.add(responses.GET, "https://example.com/b.xml", body=SAMPLE_SITEMAP, status=200)
+    responses.add(responses.GET, "https://example.com/c.xml", status=403)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
+    client = ScraperAPIClient(api_key="test-key")
+    fetcher = SmartFetcher(client)
+
+    fetcher.fetch("https://example.com/a.xml")  # fail direct, fallback
+    fetcher.fetch("https://example.com/b.xml")  # success direct, resets counter
+    fetcher.fetch("https://example.com/c.xml")  # fail direct, fallback (but only 1 consecutive)
+
+    assert not fetcher.proxy_only
 
 
 @responses.activate

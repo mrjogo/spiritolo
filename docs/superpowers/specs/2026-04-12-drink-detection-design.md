@@ -58,7 +58,6 @@ Each URL records which specific sitemap it was discovered from (e.g. `cocktail-u
 
 Known UGC sitemaps:
 - Difford's Guide: `https://www.diffordsguide.com/sitemap/cocktail-user-generated.xml`
-- Punch: `https://punchdrink.com/guest-author-sitemap.xml`
 
 ### Indexes
 
