@@ -37,7 +37,7 @@ Classify all unclassified URLs in `data/scraper.db` by URL slug into one of six 
 - Work through one site at a time
 - For each site, spawn a subagent to handle the classification so the main context stays clean
 - Each subagent should:
-  1. Query: `SELECT id, url FROM pages WHERE content_type IS NULL AND site = '{site_name}' LIMIT 2000`
+  1. Query: `SELECT id, url, sitemap_source FROM pages WHERE content_type IS NULL AND site = '{site_name}' LIMIT 2000`
   2. Classify each URL by reading the slug
   3. Update in a single transaction: `BEGIN; UPDATE pages SET content_type = ? WHERE id IN (...); COMMIT;`
   4. Repeat until no NULL rows remain for that site
