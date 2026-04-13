@@ -1,4 +1,5 @@
 import argparse
+import gzip
 import re
 from pathlib import Path
 
@@ -36,19 +37,42 @@ class SmartFetcher:
     def _is_valid_xml(self, text: str) -> bool:
         return "<?xml" in text[:100] or "<urlset" in text[:200] or "<sitemapindex" in text[:200]
 
+    def _decode_response(self, url: str, resp: requests.Response) -> str | None:
+        """Decode response, handling gzip if needed. Returns XML text or None."""
+        if resp.status_code != 200:
+            return None
+        if url.endswith(".gz"):
+            try:
+                text = gzip.decompress(resp.content).decode("utf-8")
+            except Exception:
+                return None
+        else:
+            text = resp.text
+        if self._is_valid_xml(text):
+            return text
+        return None
+
     def fetch(self, url: str) -> str:
         if not self.proxy_only:
             try:
                 resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=15)
-                if resp.status_code == 200 and self._is_valid_xml(resp.text):
+                text = self._decode_response(url, resp)
+                if text:
                     self.consecutive_failures = 0
-                    return resp.text
+                    return text
             except requests.RequestException:
                 pass
             self.consecutive_failures += 1
             if self.consecutive_failures >= self.UPGRADE_THRESHOLD:
                 self.proxy_only = True
                 print("  Upgraded to ScraperAPI-only (2 consecutive direct failures)")
+        # ScraperAPI can't handle .gz — fetch raw and decompress ourselves
+        if url.endswith(".gz"):
+            resp = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=60)
+            text = self._decode_response(url, resp)
+            if text:
+                return text
+            raise Exception(f"Failed to fetch gzipped sitemap: {url}")
         return self.client.fetch(url)
 
 
@@ -187,13 +211,48 @@ def run_discovery(site_filter: str | None = None):
     db.close()
 
 
+def run_import(site_name: str, files: list[str]):
+    """Import URLs from local sitemap XML/GZ files."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    db = Database(DEFAULT_DB_PATH)
+    total = 0
+
+    for file_path in files:
+        path = Path(file_path)
+        if not path.exists():
+            print(f"  File not found: {file_path}")
+            continue
+
+        print(f"  Importing {path.name}")
+        raw = path.read_bytes()
+        if path.suffix == ".gz":
+            text = gzip.decompress(raw).decode("utf-8")
+        else:
+            text = raw.decode("utf-8")
+
+        root = etree.fromstring(text.encode("utf-8"))
+        locs = root.xpath("//sm:url/sm:loc/text()", namespaces=SITEMAP_NS)
+        if locs:
+            added = db.add_urls_batch(site_name, locs, sitemap_source=path.name)
+            total += added
+            print(f"  Added {added} new URLs from {path.name}")
+
+    print(f"[{site_name}] Total: {total} new URLs")
+    db.close()
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Discover recipe URLs from configured sites")
     parser.add_argument("--site", help="Only run for a specific site")
     parser.add_argument("--probe", action="store_true", help="Probe sites for sitemaps and update sites.yaml")
+    parser.add_argument("--import-files", nargs="+", metavar="FILE", help="Import URLs from local sitemap XML/GZ files (requires --site)")
     args = parser.parse_args()
 
-    if args.probe:
+    if args.import_files:
+        if not args.site:
+            parser.error("--import-files requires --site")
+        run_import(args.site, args.import_files)
+    elif args.probe:
         run_probe(site_filter=args.site)
     else:
         run_discovery(site_filter=args.site)
