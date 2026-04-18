@@ -44,7 +44,11 @@
   // Each mixin adds its own named entry; the devcontainer runtime runs them in parallel.
   "postCreateCommand": {
     // [repo-mixin:devcontainer-claude] Bridge Claude Code paths between host and container
-    "claude-code": "bash .devcontainer/postCreateCommand/setup-claude-code.sh"
+    "claude-code": "bash .devcontainer/postCreateCommand/setup-claude-code.sh",
+    // [repo-mixin:devcontainer-python-uv] Sync uv environment from lockfile on container create.
+    // Runs at repo root. If your pyproject.toml lives in a subdirectory, change to
+    // "cd <subdir> && uv sync --frozen".
+    "uv-sync": "uv sync --frozen"
   },
 
   "customizations": {
