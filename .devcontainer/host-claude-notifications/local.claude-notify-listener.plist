@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- [repo-mixin:devcontainer-claude] Keeps notify-listen.py running on login.
+     Install to ~/Library/LaunchAgents/local.claude-notify-listener.plist on your Mac.
+     Replace __HOME__ with the user's home directory (e.g. /Users/myusername) at apply time. -->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>local.claude-notify-listener</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>__HOME__/.claude/notify-listen.py</string>
+    </array>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/notify-listener.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/notify-listener.err</string>
+</dict>
+</plist>

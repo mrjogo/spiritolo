@@ -17,7 +17,8 @@
     // [repo-mixin:devcontainer-claude] Environment variables for Claude Code path bridging between host and container.
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
     "HOST_HOME": "${localEnv:HOME}",
-    "SSH_AUTH_SOCK": "/tmp/ssh-agent.sock"
+    "SSH_AUTH_SOCK": "/tmp/ssh-agent.sock",
+    "CLAUDE_NOTIFY_HOST": "host.docker.internal"
     // [/repo-mixin:devcontainer-claude]
   },
 

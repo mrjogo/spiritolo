@@ -24,5 +24,36 @@
       "Bash(which:*)"
       // [/repo-mixin:devcontainer-claude]
     ]
+  },
+  // [repo-mixin:devcontainer-claude] Notification hooks — delegate to
+  // .claude/hooks/notify.sh, which reads the transcript, extracts the current
+  // session title, and POSTs a structured payload to the local notification
+  // listener. Requires host-side setup; see
+  // .devcontainer/host-claude-notifications/README.md. Works in both CLI and
+  // VSCode extension.
+  "hooks": {
+    "PermissionRequest": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/notify.sh\""
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PROJECT_DIR:-.}/.claude/hooks/notify.sh\""
+          }
+        ]
+      }
+    ]
   }
+  // [/repo-mixin:devcontainer-claude]
 }

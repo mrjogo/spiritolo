@@ -33,7 +33,7 @@ Creates a stable symlink named `devcontainer-ssh-agent.sock` pointing to the SSH
 ### devcontainer.json
 
 - Mounts `~/.claude` (shared config/history/plugins) and the host SSH agent socket (via the stable symlink)
-- Sets `CLAUDE_CONFIG_DIR`, `HOST_HOME`, `SSH_AUTH_SOCK`, and `PATH`
+- Sets `CLAUDE_CONFIG_DIR`, `HOST_HOME`, `SSH_AUTH_SOCK`, `CLAUDE_NOTIFY_HOST`, and `PATH`
 - Installs GitHub CLI and the Claude Code VS Code extension
 
 ### postCreateCommand/setup-claude-code.sh (container)
@@ -100,6 +100,12 @@ devcontainer up --workspace-folder .
 devcontainer run-user-commands --workspace-folder .
 devcontainer exec --workspace-folder . bash
 ```
+
+## Notifications (Optional)
+
+Native macOS notifications when Claude Code needs attention. See `.devcontainer/host-claude-notifications/README.md` for host-side install instructions.
+
+In devcontainers, the `CLAUDE_NOTIFY_HOST` env var is set to `host.docker.internal` so the notification hook reaches the host's listener directly — no bridge process needed.
 
 ## Troubleshooting
 
