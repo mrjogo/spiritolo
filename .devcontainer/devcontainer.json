@@ -48,7 +48,7 @@
     // [repo-mixin:devcontainer-python-uv] Sync uv environment from lockfile on container create.
     // Runs at repo root. If your pyproject.toml lives in a subdirectory, change to
     // "cd <subdir> && uv sync --frozen".
-    "uv-sync": "uv sync --frozen"
+    "uv-sync": "cd scraper && uv sync --frozen"
   },
 
   "customizations": {
