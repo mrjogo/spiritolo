@@ -7,6 +7,7 @@ dependencies = [
     "lxml>=5.0",
     "pyyaml>=6.0",
     "cssselect>=1.2",
+    "python-dotenv>=1.0",
 ]
 
 [project.optional-dependencies]

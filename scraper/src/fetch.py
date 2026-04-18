@@ -3,9 +3,13 @@ import hashlib
 import time
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from scraper.src.client import ScraperAPIClient
 from scraper.src.db import Database
 from scraper.src.validate import validate, classify_drink
+
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
