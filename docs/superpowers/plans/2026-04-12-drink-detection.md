@@ -32,7 +32,7 @@
 - Modify: `scraper/src/db.py`
 - Test: `scraper/tests/test_db.py`
 
-- [ ] **Step 1: Write failing test for content_type column existence**
+- [x] **Step 1: Write failing test for content_type column existence**
 
 In `scraper/tests/test_db.py`, add:
 
@@ -45,12 +45,12 @@ def test_schema_has_content_type_column(tmp_db):
     db.close()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pytest scraper/tests/test_db.py::test_schema_has_content_type_column -v`
 Expected: FAIL — `content_type` not in column list
 
-- [ ] **Step 3: Add content_type column and indexes to schema**
+- [x] **Step 3: Add content_type column and indexes to schema**
 
 In `scraper/src/db.py`, update `CREATE_TABLE` to add `content_type TEXT` after the `status` line:
 
@@ -82,17 +82,17 @@ CREATE_INDEXES = [
 ]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `pytest scraper/tests/test_db.py::test_schema_has_content_type_column -v`
 Expected: PASS
 
-- [ ] **Step 5: Run full test suite to check nothing broke**
+- [x] **Step 5: Run full test suite to check nothing broke**
 
 Run: `pytest scraper/tests/ -v`
 Expected: All tests pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add scraper/src/db.py scraper/tests/test_db.py
@@ -107,7 +107,7 @@ git commit -m "Add content_type column and indexes to pages schema"
 - Modify: `scraper/src/db.py`
 - Test: `scraper/tests/test_db.py`
 
-- [ ] **Step 1: Write failing tests for all three methods**
+- [x] **Step 1: Write failing tests for all three methods**
 
 In `scraper/tests/test_db.py`, add:
 
@@ -164,12 +164,12 @@ def test_get_by_content_type(tmp_db):
     db.close()
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest scraper/tests/test_db.py::test_set_content_type scraper/tests/test_db.py::test_set_content_type_batch scraper/tests/test_db.py::test_get_by_content_type -v`
 Expected: FAIL — `Database` has no attribute `set_content_type`
 
-- [ ] **Step 3: Implement all three methods**
+- [x] **Step 3: Implement all three methods**
 
 In `scraper/src/db.py`, add to the `Database` class:
 
@@ -205,12 +205,12 @@ def get_by_content_type(self, content_type: str, site: str | None = None, limit:
     return [dict(row) for row in rows]
 ```
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [x] **Step 4: Run tests to verify they pass**
 
 Run: `pytest scraper/tests/test_db.py::test_set_content_type scraper/tests/test_db.py::test_set_content_type_batch scraper/tests/test_db.py::test_get_by_content_type -v`
 Expected: PASS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scraper/src/db.py scraper/tests/test_db.py
@@ -225,7 +225,7 @@ git commit -m "Add set_content_type, set_content_type_batch, get_by_content_type
 - Modify: `scraper/src/db.py`
 - Test: `scraper/tests/test_db.py`
 
-- [ ] **Step 1: Write failing test for content_type filter on get_pending**
+- [x] **Step 1: Write failing test for content_type filter on get_pending**
 
 In `scraper/tests/test_db.py`, add:
 
@@ -244,12 +244,12 @@ def test_get_pending_filters_by_content_type(tmp_db):
     db.close()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pytest scraper/tests/test_db.py::test_get_pending_filters_by_content_type -v`
 Expected: FAIL — `get_pending()` got unexpected keyword argument `content_type`
 
-- [ ] **Step 3: Add content_type parameter to get_pending**
+- [x] **Step 3: Add content_type parameter to get_pending**
 
 In `scraper/src/db.py`, update `get_pending`:
 
@@ -271,17 +271,17 @@ def get_pending(self, site: str | None = None, limit: int | None = None, content
     return [dict(row) for row in rows]
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `pytest scraper/tests/test_db.py::test_get_pending_filters_by_content_type -v`
 Expected: PASS
 
-- [ ] **Step 5: Run full DB test suite**
+- [x] **Step 5: Run full DB test suite**
 
 Run: `pytest scraper/tests/test_db.py -v`
 Expected: All tests pass (existing tests don't pass `content_type`, so they still work)
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add scraper/src/db.py scraper/tests/test_db.py
@@ -297,7 +297,7 @@ git commit -m "Add content_type filter to get_pending"
 - Modify: `scraper/tests/conftest.py`
 - Test: `scraper/tests/test_validate.py`
 
-- [ ] **Step 1: Add drink recipe HTML fixtures to conftest.py**
+- [x] **Step 1: Add drink recipe HTML fixtures to conftest.py**
 
 In `scraper/tests/conftest.py`, add these fixtures:
 
@@ -399,7 +399,7 @@ def sample_drink_keywords_html():
 </html>"""
 ```
 
-- [ ] **Step 2: Write failing tests for classify_drink**
+- [x] **Step 2: Write failing tests for classify_drink**
 
 In `scraper/tests/test_validate.py`, add:
 
@@ -462,12 +462,12 @@ def test_classify_drink_spirit_in_food_is_not_drink():
     assert result == "confirmed_food"
 ```
 
-- [ ] **Step 3: Run tests to verify they fail**
+- [x] **Step 3: Run tests to verify they fail**
 
 Run: `pytest scraper/tests/test_validate.py::test_classify_drink_from_category -v`
 Expected: FAIL — cannot import `classify_drink`
 
-- [ ] **Step 4: Implement classify_drink**
+- [x] **Step 4: Implement classify_drink**
 
 In `scraper/src/validate.py`, add `DRINK_TERMS` near the top (after the existing constants) and the `classify_drink` function:
 
@@ -560,7 +560,7 @@ def classify_drink(html: str) -> str | None:
     return "confirmed_food"
 ```
 
-- [ ] **Step 5: Update the import in test_validate.py**
+- [x] **Step 5: Update the import in test_validate.py**
 
 In `scraper/tests/test_validate.py`, update the existing import line at the top:
 
@@ -568,17 +568,17 @@ In `scraper/tests/test_validate.py`, update the existing import line at the top:
 from scraper.src.validate import validate, ValidationResult, classify_drink
 ```
 
-- [ ] **Step 6: Run all classify_drink tests**
+- [x] **Step 6: Run all classify_drink tests**
 
 Run: `pytest scraper/tests/test_validate.py -k classify_drink -v`
 Expected: All 7 tests PASS
 
-- [ ] **Step 7: Run full validate test suite**
+- [x] **Step 7: Run full validate test suite**
 
 Run: `pytest scraper/tests/test_validate.py -v`
 Expected: All tests pass (existing tests unaffected)
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git add scraper/src/validate.py scraper/tests/test_validate.py scraper/tests/conftest.py
@@ -594,7 +594,7 @@ git commit -m "Add classify_drink function with DRINK_TERMS checking"
 - Test: `scraper/tests/test_fetch.py`
 - Modify: `scraper/tests/conftest.py`
 
-- [ ] **Step 1: Write failing test — fetch only processes likely_drink_recipe rows**
+- [x] **Step 1: Write failing test — fetch only processes likely_drink_recipe rows**
 
 In `scraper/tests/test_fetch.py`, add:
 
@@ -617,12 +617,12 @@ def test_fetch_pages_only_fetches_likely_drink_recipe(tmp_db, tmp_path, sample_d
     db.close()
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `pytest scraper/tests/test_fetch.py::test_fetch_pages_only_fetches_likely_drink_recipe -v`
 Expected: FAIL — both URLs are fetched (call_count == 2)
 
-- [ ] **Step 3: Update fetch_pages to default to likely_drink_recipe filter**
+- [x] **Step 3: Update fetch_pages to default to likely_drink_recipe filter**
 
 In `scraper/src/fetch.py`, update the `fetch_pages` function. Change the `pending` line:
 
@@ -639,12 +639,12 @@ def fetch_pages(
     pending = db.get_pending(site=site or force_site, limit=limit, content_type="likely_drink_recipe")
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `pytest scraper/tests/test_fetch.py::test_fetch_pages_only_fetches_likely_drink_recipe -v`
 Expected: PASS
 
-- [ ] **Step 5: Fix existing fetch tests that now get no results**
+- [x] **Step 5: Fix existing fetch tests that now get no results**
 
 The existing tests in `test_fetch.py` add URLs without setting `content_type`, so `get_pending(content_type="likely_drink_recipe")` returns nothing. Update each test that calls `fetch_pages` with actual fetching to set `content_type` after `add_url`. The tests to update are:
 
@@ -679,12 +679,12 @@ And after adding the goodsite URL, add:
 db.set_content_type("https://good.com/recipes/1", "likely_drink_recipe")
 ```
 
-- [ ] **Step 6: Run all fetch tests**
+- [x] **Step 6: Run all fetch tests**
 
 Run: `pytest scraper/tests/test_fetch.py -v`
 Expected: All tests pass
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add scraper/src/fetch.py scraper/tests/test_fetch.py
@@ -699,7 +699,7 @@ git commit -m "Filter fetch to likely_drink_recipe rows only"
 - Modify: `scraper/src/fetch.py`
 - Test: `scraper/tests/test_fetch.py`
 
-- [ ] **Step 1: Write failing test — fetch confirms drink via JSON-LD**
+- [x] **Step 1: Write failing test — fetch confirms drink via JSON-LD**
 
 In `scraper/tests/test_fetch.py`, add:
 
@@ -766,12 +766,12 @@ def test_fetch_pages_leaves_likely_drink_when_no_recipe_jsonld(tmp_db, tmp_path)
     db.close()
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [x] **Step 2: Run tests to verify they fail**
 
 Run: `pytest scraper/tests/test_fetch.py::test_fetch_pages_confirms_drink scraper/tests/test_fetch.py::test_fetch_pages_confirms_food -v`
 Expected: FAIL — `content_type` is still `likely_drink_recipe`
 
-- [ ] **Step 3: Add classify_drink call to fetch_pages**
+- [x] **Step 3: Add classify_drink call to fetch_pages**
 
 In `scraper/src/fetch.py`, add the import at the top:
 
@@ -797,17 +797,17 @@ Then in the `fetch_pages` function, in the `else` branch (after `result.status !
                 db.set_content_type(url, drink_result)
 ```
 
-- [ ] **Step 4: Run all three new tests**
+- [x] **Step 4: Run all three new tests**
 
 Run: `pytest scraper/tests/test_fetch.py::test_fetch_pages_confirms_drink scraper/tests/test_fetch.py::test_fetch_pages_confirms_food scraper/tests/test_fetch.py::test_fetch_pages_leaves_likely_drink_when_no_recipe_jsonld -v`
 Expected: All 3 PASS
 
-- [ ] **Step 5: Run full test suite**
+- [x] **Step 5: Run full test suite**
 
 Run: `pytest scraper/tests/ -v`
 Expected: All tests pass
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add scraper/src/fetch.py scraper/tests/test_fetch.py scraper/tests/conftest.py
@@ -821,13 +821,13 @@ git commit -m "Classify drink/food from JSON-LD after fetch"
 **Files:**
 - None (operational step)
 
-- [ ] **Step 1: Delete the existing scraper.db so it gets recreated with the new schema**
+- [x] **Step 1: Delete the existing scraper.db so it gets recreated with the new schema**
 
 ```bash
 rm -f data/scraper.db
 ```
 
-- [ ] **Step 2: Verify the database can be recreated**
+- [x] **Step 2: Verify the database can be recreated**
 
 ```bash
 python3 -c "from scraper.src.db import Database; db = Database('data/scraper.db'); print('OK'); db.close()"
@@ -835,7 +835,7 @@ python3 -c "from scraper.src.db import Database; db = Database('data/scraper.db'
 
 Expected: `OK`
 
-- [ ] **Step 3: Verify content_type column exists**
+- [x] **Step 3: Verify content_type column exists**
 
 ```bash
 python3 -c "
@@ -851,12 +851,12 @@ db.close()
 
 Expected: Schema OK with `content_type` in the list
 
-- [ ] **Step 4: Delete the recreated empty db (discovery will create it fresh)**
+- [x] **Step 4: Delete the recreated empty db (discovery will create it fresh)**
 
 ```bash
 rm -f data/scraper.db
 ```
 
-- [ ] **Step 5: Commit (no files changed — this is just cleanup)**
+- [x] **Step 5: Commit (no files changed — this is just cleanup)**
 
 No commit needed — no source files changed.
