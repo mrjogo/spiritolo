@@ -43,9 +43,10 @@ def fetch_pages(
     site: str | None = None,
     limit: int | None = None,
     force_site: str | None = None,
+    content_type: str | None = "likely_drink_recipe",
     delay: float = 1.5,
 ) -> dict:
-    pending = db.get_pending(site=site or force_site, limit=limit, content_type="likely_drink_recipe")
+    pending = db.get_pending(site=site or force_site, limit=limit, content_type=content_type)
     paused_sites: set[str] = set()
     results: dict = {"blocked": 0, "errors": 0, "paused_sites": []}
 
@@ -113,13 +114,26 @@ if __name__ == "__main__":
     parser.add_argument("--site", help="Only fetch for a specific site")
     parser.add_argument("--limit", type=int, help="Max number of pages to fetch")
     parser.add_argument("--force-site", help="Resume a paused site (bypasses circuit breaker)")
+    parser.add_argument(
+        "--content-type",
+        default="likely_drink_recipe",
+        help="Filter pending pages by content_type (default: likely_drink_recipe). Pass 'any' to disable the filter.",
+    )
     args = parser.parse_args()
+    content_type = None if args.content_type == "any" else args.content_type
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     db = Database(DEFAULT_DB_PATH)
     client = ScraperAPIClient()
 
-    results = fetch_pages(db, client, site=args.site, limit=args.limit, force_site=args.force_site)
+    results = fetch_pages(
+        db,
+        client,
+        site=args.site,
+        limit=args.limit,
+        force_site=args.force_site,
+        content_type=content_type,
+    )
 
     print("\n--- Results ---")
     print(f"Blocked:    {results['blocked']}")
