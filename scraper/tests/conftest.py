@@ -65,3 +65,100 @@ def sample_soft_404_html():
 <p>The page you're looking for doesn't exist or has been removed.</p>
 </body>
 </html>"""
+
+
+@pytest.fixture
+def sample_drink_recipe_html():
+    """Recipe HTML with JSON-LD that has drink signals in recipeCategory."""
+    body = "<p>A classic cocktail.</p>\n" * 40
+    return """<!DOCTYPE html>
+<html>
+<head><title>Classic Margarita</title></head>
+<body>
+""" + body + """<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Recipe",
+    "name": "Classic Margarita",
+    "recipeCategory": "Cocktail",
+    "keywords": "tequila, lime",
+    "recipeIngredient": ["2 oz tequila", "1 oz lime juice"]
+}
+</script>
+</body>
+</html>"""
+
+
+@pytest.fixture
+def sample_food_recipe_html():
+    """Recipe HTML with JSON-LD that has no drink signals."""
+    body = "<p>A hearty dinner recipe.</p>\n" * 40
+    return """<!DOCTYPE html>
+<html>
+<head><title>Grilled Salmon</title></head>
+<body>
+""" + body + """<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Recipe",
+    "name": "Grilled Salmon",
+    "recipeCategory": "Dinner, Main Course",
+    "keywords": "salmon, grilled, healthy",
+    "recipeIngredient": ["1 lb salmon", "2 tbsp olive oil"]
+}
+</script>
+</body>
+</html>"""
+
+
+@pytest.fixture
+def sample_drink_breadcrumb_html():
+    """Recipe HTML where the drink signal is in the breadcrumb, not recipeCategory."""
+    body = "<p>A refreshing gin cocktail.</p>\n" * 40
+    return """<!DOCTYPE html>
+<html>
+<head><title>Negroni</title></head>
+<body>
+""" + body + """<script type="application/ld+json">
+[{
+    "@context": "https://schema.org",
+    "@type": "Recipe",
+    "name": "Negroni",
+    "recipeCategory": "Gin",
+    "keywords": "campari, vermouth",
+    "mainEntityOfPage": {
+        "@type": "WebPage",
+        "breadcrumb": {
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {"@type": "ListItem", "position": 1, "item": {"name": "Recipes"}},
+                {"@type": "ListItem", "position": 2, "item": {"name": "Drinks"}},
+                {"@type": "ListItem", "position": 3, "item": {"name": "Cocktails"}}
+            ]
+        }
+    }
+}]
+</script>
+</body>
+</html>"""
+
+
+@pytest.fixture
+def sample_drink_keywords_html():
+    """Recipe HTML where the drink signal is only in keywords."""
+    body = "<p>An easy party drink.</p>\n" * 40
+    return """<!DOCTYPE html>
+<html>
+<head><title>Espresso Martini</title></head>
+<body>
+""" + body + """<script type="application/ld+json">
+{
+    "@context": "https://schema.org",
+    "@type": "Recipe",
+    "name": "Espresso Martini",
+    "recipeCategory": "Vodka",
+    "keywords": "beverages, cocktails, party-food"
+}
+</script>
+</body>
+</html>"""

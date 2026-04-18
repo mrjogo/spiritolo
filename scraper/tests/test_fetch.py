@@ -36,9 +36,9 @@ def test_circuit_breaker_triggered():
     assert check_circuit_breaker(statuses) is True
 
 
-def test_circuit_breaker_counts_unverified():
-    statuses = ["unverified"] * 5 + ["blocked"] * 4 + ["fetched"] * 11
-    assert check_circuit_breaker(statuses) is True
+def test_circuit_breaker_ignores_non_recipe_content():
+    statuses = ["Article"] * 5 + ["blocked"] * 4 + ["fetched"] * 11
+    assert check_circuit_breaker(statuses) is False
 
 
 def test_circuit_breaker_not_enough_data():
@@ -46,24 +46,26 @@ def test_circuit_breaker_not_enough_data():
     assert check_circuit_breaker(statuses) is False
 
 
-def test_fetch_pages_marks_fetched(tmp_db, tmp_path, sample_recipe_html):
+def test_fetch_pages_marks_recipe(tmp_db, tmp_path, sample_recipe_html):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
 
     mock_client = MagicMock()
     mock_client.fetch.return_value = sample_recipe_html
 
     results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
 
-    assert results["fetched"] == 1
-    pending = db.get_pending()
-    assert len(pending) == 0
+    assert results["Recipe"] == 1
+    row = db.conn.execute("SELECT status FROM pages WHERE url = ?", ("https://example.com/recipes/margarita",)).fetchone()
+    assert row["status"] == "Recipe"
     db.close()
 
 
 def test_fetch_pages_marks_blocked(tmp_db, tmp_path, sample_blocked_html):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
 
     mock_client = MagicMock()
     mock_client.fetch.return_value = sample_blocked_html
@@ -79,6 +81,7 @@ def test_fetch_pages_marks_blocked(tmp_db, tmp_path, sample_blocked_html):
 def test_fetch_pages_handles_network_error(tmp_db, tmp_path):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
 
     mock_client = MagicMock()
     mock_client.fetch.side_effect = Exception("Connection timeout")
@@ -95,15 +98,34 @@ def test_fetch_pages_respects_limit(tmp_db, tmp_path, sample_recipe_html):
     db = Database(tmp_db)
     for i in range(10):
         db.add_url("testsite", f"https://example.com/recipes/{i}")
+    for i in range(10):
+        db.set_content_type(f"https://example.com/recipes/{i}", "likely_drink_recipe")
 
     mock_client = MagicMock()
     mock_client.fetch.return_value = sample_recipe_html
 
     results = fetch_pages(db, mock_client, html_dir=tmp_path, limit=3, delay=0)
 
-    assert results["fetched"] == 3
+    assert results["Recipe"] == 3
     pending = db.get_pending()
     assert len(pending) == 7
+    db.close()
+
+
+def test_fetch_pages_only_fetches_likely_drink_recipe(tmp_db, tmp_path, sample_drink_recipe_html):
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.add_url("testsite", "https://example.com/recipes/salmon")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
+    db.set_content_type("https://example.com/recipes/salmon", "likely_food_recipe")
+
+    mock_client = MagicMock()
+    mock_client.fetch.return_value = sample_drink_recipe_html
+
+    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+
+    assert mock_client.fetch.call_count == 1
+    mock_client.fetch.assert_called_once_with("https://example.com/recipes/margarita")
     db.close()
 
 
@@ -116,8 +138,11 @@ def test_fetch_pages_circuit_breaker_pauses_site(tmp_db, tmp_path, sample_blocke
     # Add more pending pages for this site
     for i in range(15, 20):
         db.add_url("badsite", f"https://bad.com/recipes/{i}")
+    for i in range(15, 20):
+        db.set_content_type(f"https://bad.com/recipes/{i}", "likely_drink_recipe")
     # Add pages for a good site
     db.add_url("goodsite", "https://good.com/recipes/1")
+    db.set_content_type("https://good.com/recipes/1", "likely_drink_recipe")
 
     mock_client = MagicMock()
     mock_client.fetch.return_value = sample_blocked_html
@@ -127,4 +152,66 @@ def test_fetch_pages_circuit_breaker_pauses_site(tmp_db, tmp_path, sample_blocke
     assert "badsite" in results.get("paused_sites", [])
     # Good site should still have been attempted
     assert mock_client.fetch.call_count >= 1
+    db.close()
+
+
+def test_fetch_pages_confirms_drink(tmp_db, tmp_path, sample_drink_recipe_html):
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
+
+    mock_client = MagicMock()
+    mock_client.fetch.return_value = sample_drink_recipe_html
+
+    fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+
+    row = db.conn.execute(
+        "SELECT content_type FROM pages WHERE url = ?",
+        ("https://example.com/recipes/margarita",),
+    ).fetchone()
+    assert row["content_type"] == "confirmed_drink"
+    db.close()
+
+
+def test_fetch_pages_confirms_food(tmp_db, tmp_path, sample_food_recipe_html):
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipes/salmon")
+    db.set_content_type("https://example.com/recipes/salmon", "likely_drink_recipe")
+
+    mock_client = MagicMock()
+    mock_client.fetch.return_value = sample_food_recipe_html
+
+    fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+
+    row = db.conn.execute(
+        "SELECT content_type FROM pages WHERE url = ?",
+        ("https://example.com/recipes/salmon",),
+    ).fetchone()
+    assert row["content_type"] == "confirmed_food"
+    db.close()
+
+
+def test_fetch_pages_leaves_likely_drink_when_no_recipe_jsonld(tmp_db, tmp_path):
+    """When the page has no Recipe JSON-LD, content_type stays likely_drink_recipe."""
+    body = "<p>content</p>\n" * 200
+    html_no_recipe = """<!DOCTYPE html>
+<html><head><title>Some Page</title></head><body>
+""" + body + """<script type="application/ld+json">
+{"@type": "Article", "name": "About Cocktails"}
+</script></body></html>"""
+
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipes/article")
+    db.set_content_type("https://example.com/recipes/article", "likely_drink_recipe")
+
+    mock_client = MagicMock()
+    mock_client.fetch.return_value = html_no_recipe
+
+    fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+
+    row = db.conn.execute(
+        "SELECT content_type FROM pages WHERE url = ?",
+        ("https://example.com/recipes/article",),
+    ).fetchone()
+    assert row["content_type"] == "likely_drink_recipe"
     db.close()

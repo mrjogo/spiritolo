@@ -1,8 +1,9 @@
+import requests
 import responses
 
-from scraper.src.client import ScraperAPIClient
+from scraper.src.client import ScraperAPIClient, ScraperAPIError
 from scraper.src.db import Database
-from scraper.src.discover import discover_sitemap, discover_crawl, load_sites_config, run_discovery
+from scraper.src.discover import SmartFetcher, discover_sitemap, load_sites_config, probe_sitemap
 
 
 SAMPLE_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>
@@ -34,35 +35,49 @@ SAMPLE_SITEMAP_ARTICLES = """<?xml version="1.0" encoding="UTF-8"?>
 </urlset>"""
 
 
-SAMPLE_CRAWL_PAGE_1 = """<html><body>
-<a href="https://example.com/recipes/margarita">Margarita</a>
-<a href="https://example.com/recipes/mojito">Mojito</a>
-<a href="https://example.com/about">About</a>
-<a class="next-page" href="https://example.com/recipes?page=2">Next</a>
-</body></html>"""
-
-
-SAMPLE_CRAWL_PAGE_2 = """<html><body>
-<a href="https://example.com/recipes/negroni">Negroni</a>
-<a href="https://example.com/recipes/mojito">Mojito</a>
-</body></html>"""
-
-
 @responses.activate
-def test_discover_sitemap_filters_by_pattern(tmp_db):
+def test_discover_sitemap_adds_all_urls(tmp_db):
     responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
     client = ScraperAPIClient(api_key="test-key")
     db = Database(tmp_db)
 
-    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml", "/cocktails/recipe/")
+    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml")
 
-    assert count == 3
+    assert count == 4
     pending = db.get_pending()
     urls = [row["url"] for row in pending]
     assert "https://example.com/cocktails/recipe/margarita" in urls
     assert "https://example.com/cocktails/recipe/mojito" in urls
     assert "https://example.com/cocktails/recipe/negroni" in urls
-    assert "https://example.com/about" not in urls
+    assert "https://example.com/about" in urls
+    # All URLs should have sitemap_source set
+    sources = [row["sitemap_source"] for row in pending]
+    assert all(s == "https://example.com/sitemap.xml" for s in sources)
+    db.close()
+
+
+@responses.activate
+def test_discover_sitemap_index_tracks_sub_sitemap_source(tmp_db):
+    """Each URL should record which sub-sitemap it came from, not the index."""
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP_INDEX, status=200)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP_RECIPES, status=200)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP_ARTICLES, status=200)
+    client = ScraperAPIClient(api_key="test-key")
+    db = Database(tmp_db)
+
+    discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml")
+
+    row = db.conn.execute(
+        "SELECT sitemap_source FROM pages WHERE url = ?",
+        ("https://example.com/recipes/daiquiri",),
+    ).fetchone()
+    assert row["sitemap_source"] == "https://example.com/sitemap-recipes.xml"
+
+    row = db.conn.execute(
+        "SELECT sitemap_source FROM pages WHERE url = ?",
+        ("https://example.com/articles/best-bars",),
+    ).fetchone()
+    assert row["sitemap_source"] == "https://example.com/sitemap-articles.xml"
     db.close()
 
 
@@ -74,34 +89,14 @@ def test_discover_sitemap_handles_sitemap_index(tmp_db):
     client = ScraperAPIClient(api_key="test-key")
     db = Database(tmp_db)
 
-    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml", "/recipes/")
+    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml")
 
-    assert count == 2
+    assert count == 3
     pending = db.get_pending()
     urls = [row["url"] for row in pending]
     assert "https://example.com/recipes/daiquiri" in urls
     assert "https://example.com/recipes/old-fashioned" in urls
-    db.close()
-
-
-@responses.activate
-def test_discover_crawl_follows_pagination(tmp_db):
-    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_CRAWL_PAGE_1, status=200)
-    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_CRAWL_PAGE_2, status=200)
-    client = ScraperAPIClient(api_key="test-key")
-    db = Database(tmp_db)
-
-    count = discover_crawl(
-        client, db, "testsite",
-        start_url="https://example.com/recipes",
-        url_pattern="/recipes/",
-        next_page_selector="a.next-page",
-    )
-
-    assert count == 3  # margarita, mojito, negroni (mojito deduped)
-    pending = db.get_pending()
-    urls = [row["url"] for row in pending]
-    assert len(urls) == 3
+    assert "https://example.com/articles/best-bars" in urls
     db.close()
 
 
@@ -110,15 +105,83 @@ def test_load_sites_config(tmp_path):
     config_file.write_text("""sites:
   - name: testsite
     domain: example.com
-    discovery:
-      method: sitemap
-      sitemap_url: https://example.com/sitemap.xml
-      url_pattern: "/recipes/"
+    sitemap_url: https://example.com/sitemap.xml
 """)
     sites = load_sites_config(config_file)
     assert len(sites) == 1
     assert sites[0]["name"] == "testsite"
-    assert sites[0]["discovery"]["method"] == "sitemap"
+    assert sites[0]["sitemap_url"] == "https://example.com/sitemap.xml"
+
+
+@responses.activate
+def test_smart_fetcher_tries_direct_first():
+    """SmartFetcher should try direct request before ScraperAPI."""
+    responses.add(responses.GET, "https://example.com/sitemap.xml", body=SAMPLE_SITEMAP, status=200)
+    client = ScraperAPIClient(api_key="test-key")
+    fetcher = SmartFetcher(client)
+
+    xml = fetcher.fetch("https://example.com/sitemap.xml")
+
+    assert "margarita" in xml
+    scraper_calls = [c for c in responses.calls if "api.scraperapi.com" in c.request.url]
+    assert len(scraper_calls) == 0
+
+
+@responses.activate
+def test_smart_fetcher_falls_back_to_scraperapi():
+    """If direct request fails, fall back to ScraperAPI."""
+    responses.add(responses.GET, "https://example.com/sitemap.xml", status=403)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
+    client = ScraperAPIClient(api_key="test-key")
+    fetcher = SmartFetcher(client)
+
+    xml = fetcher.fetch("https://example.com/sitemap.xml")
+
+    assert "margarita" in xml
+    scraper_calls = [c for c in responses.calls if "api.scraperapi.com" in c.request.url]
+    assert len(scraper_calls) == 1
+
+
+@responses.activate
+def test_smart_fetcher_upgrades_after_two_consecutive_failures():
+    """After 2 consecutive direct failures, skip direct and go straight to ScraperAPI."""
+    # First two requests fail direct, succeed via ScraperAPI
+    responses.add(responses.GET, "https://example.com/a.xml", status=403)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
+    responses.add(responses.GET, "https://example.com/b.xml", status=403)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
+    # Third request should skip direct entirely
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
+    client = ScraperAPIClient(api_key="test-key")
+    fetcher = SmartFetcher(client)
+
+    fetcher.fetch("https://example.com/a.xml")
+    fetcher.fetch("https://example.com/b.xml")
+    fetcher.fetch("https://example.com/c.xml")
+
+    # c.xml should NOT have a direct request attempt
+    direct_calls = [c for c in responses.calls if "example.com/c.xml" in c.request.url]
+    assert len(direct_calls) == 0
+    assert fetcher.proxy_only
+
+
+@responses.activate
+def test_smart_fetcher_resets_on_direct_success():
+    """A successful direct request resets the consecutive failure counter."""
+    # First fails, second succeeds, third fails — should NOT upgrade
+    responses.add(responses.GET, "https://example.com/a.xml", status=403)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
+    responses.add(responses.GET, "https://example.com/b.xml", body=SAMPLE_SITEMAP, status=200)
+    responses.add(responses.GET, "https://example.com/c.xml", status=403)
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP, status=200)
+    client = ScraperAPIClient(api_key="test-key")
+    fetcher = SmartFetcher(client)
+
+    fetcher.fetch("https://example.com/a.xml")  # fail direct, fallback
+    fetcher.fetch("https://example.com/b.xml")  # success direct, resets counter
+    fetcher.fetch("https://example.com/c.xml")  # fail direct, fallback (but only 1 consecutive)
+
+    assert not fetcher.proxy_only
 
 
 @responses.activate
@@ -128,10 +191,61 @@ def test_discover_sitemap_is_idempotent(tmp_db):
     client = ScraperAPIClient(api_key="test-key")
     db = Database(tmp_db)
 
-    discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml", "/cocktails/recipe/")
-    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml", "/cocktails/recipe/")
+    discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml")
+    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml")
 
     assert count == 0  # all already exist
     pending = db.get_pending()
-    assert len(pending) == 3  # no duplicates
+    assert len(pending) == 4  # no duplicates
     db.close()
+
+
+@responses.activate
+def test_discover_sitemap_skips_failed_sub_sitemap(tmp_db):
+    """If a sub-sitemap fetch fails, skip it and continue with the rest."""
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP_INDEX, status=200)
+    # First sub-sitemap times out
+    responses.add(responses.GET, "https://api.scraperapi.com", body=requests.exceptions.ReadTimeout())
+    # Second sub-sitemap succeeds
+    responses.add(responses.GET, "https://api.scraperapi.com", body=SAMPLE_SITEMAP_ARTICLES, status=200)
+    client = ScraperAPIClient(api_key="test-key")
+    db = Database(tmp_db)
+
+    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml")
+
+    # Should have the 1 URL from articles, despite recipes timing out
+    assert count == 1
+    pending = db.get_pending()
+    urls = [row["url"] for row in pending]
+    assert "https://example.com/articles/best-bars" in urls
+    db.close()
+
+
+@responses.activate
+def test_probe_sitemap_from_robots_txt():
+    responses.add(
+        responses.GET,
+        "https://www.example.com/robots.txt",
+        body="User-agent: *\nDisallow: /admin/\nSitemap: https://www.example.com/sitemap.xml\n",
+        status=200,
+    )
+    assert probe_sitemap("example.com") == "https://www.example.com/sitemap.xml"
+
+
+@responses.activate
+def test_probe_sitemap_from_direct_url():
+    responses.add(responses.GET, "https://www.example.com/robots.txt", status=404)
+    responses.add(
+        responses.GET,
+        "https://www.example.com/sitemap.xml",
+        body='<?xml version="1.0"?><urlset></urlset>',
+        status=200,
+    )
+    assert probe_sitemap("example.com") == "https://www.example.com/sitemap.xml"
+
+
+@responses.activate
+def test_probe_sitemap_not_found():
+    responses.add(responses.GET, "https://www.example.com/robots.txt", status=404)
+    responses.add(responses.GET, "https://www.example.com/sitemap.xml", status=404)
+    assert probe_sitemap("example.com") is None

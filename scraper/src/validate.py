@@ -27,6 +27,19 @@ MIN_PAGE_SIZE = 5000  # bytes
 
 MIN_TEXT_LENGTH = 500  # visible characters after stripping tags
 
+DRINK_TERMS = {
+    # drink types / categories
+    "cocktail", "cocktails", "drink", "drinks", "drinking",
+    "beverage", "beverages", "mixed drink",
+    # cocktail families and styles
+    "highball", "lowball", "aperitif", "aperitivo", "digestif",
+    "nightcap", "spritz", "sour", "fizz", "flip", "toddy",
+    "grog", "sangria", "shooter", "shot", "punch",
+    "martini", "margarita", "daiquiri", "mojito", "negroni",
+    "colada", "mule", "smash", "swizzle", "cobbler",
+    "rickey", "julep", "bellini", "mimosa", "paloma",
+}
+
 
 class TextExtractor(HTMLParser):
     """Extract visible text from HTML, skipping script/style tags."""
@@ -58,18 +71,20 @@ def _extract_visible_text(html: str) -> str:
     return extractor.get_text()
 
 
-def _find_recipe_jsonld(html: str) -> dict | None:
-    pattern = re.compile(
-        r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
-        re.DOTALL | re.IGNORECASE,
-    )
-    for match in pattern.finditer(html):
+_JSONLD_PATTERN = re.compile(
+    r'<script[^>]*type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+    re.DOTALL | re.IGNORECASE,
+)
+
+
+def _iter_jsonld_objects(html: str):
+    """Yield all top-level objects from JSON-LD blocks."""
+    for match in _JSONLD_PATTERN.finditer(html):
         try:
             data = json.loads(match.group(1))
         except (json.JSONDecodeError, ValueError):
             continue
 
-        # Handle both direct objects and @graph arrays
         candidates = []
         if isinstance(data, list):
             candidates.extend(data)
@@ -80,16 +95,21 @@ def _find_recipe_jsonld(html: str) -> dict | None:
                 candidates.append(data)
 
         for obj in candidates:
-            if not isinstance(obj, dict):
-                continue
-            obj_type = obj.get("@type", "")
-            if isinstance(obj_type, list):
-                type_match = "Recipe" in obj_type
-            else:
-                type_match = obj_type == "Recipe"
-            if type_match and "name" in obj and "recipeIngredient" in obj:
-                return obj
+            if isinstance(obj, dict):
+                yield obj
 
+
+def _find_jsonld_type(html: str) -> str | None:
+    """Return the first @type found across all JSON-LD blocks, or None."""
+    for obj in _iter_jsonld_objects(html):
+        obj_type = obj.get("@type")
+        if obj_type is None:
+            continue
+        if isinstance(obj_type, list):
+            if obj_type:
+                return obj_type[0]
+        else:
+            return obj_type
     return None
 
 
@@ -106,28 +126,99 @@ def _check_soft_404(html: str) -> bool:
 
 
 def validate(html: str) -> ValidationResult:
-    # 1. Size gate
-    if len(html.encode("utf-8")) < MIN_PAGE_SIZE:
-        return ValidationResult("blocked", "Size under 5KB — too small for a recipe page")
+    # 1. JSON-LD — if present, the page has real structured content
+    jsonld_type = _find_jsonld_type(html)
+    if jsonld_type:
+        return ValidationResult(jsonld_type, f"JSON-LD @type: {jsonld_type}")
 
-    # 2. Blocker fingerprints
+    # 2. No JSON-LD — check for blockers
+    if len(html.encode("utf-8")) < MIN_PAGE_SIZE:
+        return ValidationResult("blocked", "Size under 5KB — likely not a content page")
+
     for fingerprint, reason in BLOCKER_FINGERPRINTS:
         if fingerprint in html:
             return ValidationResult("blocked", reason)
 
-    # 3. Recipe JSON-LD (primary accept gate)
-    recipe = _find_recipe_jsonld(html)
-    if recipe:
-        return ValidationResult("fetched")
-
-    # 4. Soft 404 check
     if _check_soft_404(html):
         return ValidationResult("blocked", "Soft 404 detected")
 
-    # 5. Content length check
     visible_text = _extract_visible_text(html)
     if len(visible_text) < MIN_TEXT_LENGTH:
         return ValidationResult("blocked", "Insufficient visible text — likely empty JS shell")
 
-    # 6. Inconclusive — has content but no JSON-LD
-    return ValidationResult("unverified", "No Recipe JSON-LD found, content looks plausible")
+    # 3. Has content but no JSON-LD
+    return ValidationResult("unverified", "No JSON-LD found")
+
+
+def _check_terms(value: str) -> bool:
+    """Check if any DRINK_TERMS appear in a comma-separated metadata value."""
+    for segment in value.lower().split(","):
+        segment = segment.strip()
+        if any(term in segment for term in DRINK_TERMS):
+            return True
+    return False
+
+
+def _extract_breadcrumb_names(recipe: dict) -> list[str]:
+    """Extract breadcrumb item names from a Recipe JSON-LD object."""
+    mep = recipe.get("mainEntityOfPage", {})
+    if not isinstance(mep, dict):
+        return []
+    bc = mep.get("breadcrumb", {})
+    if not isinstance(bc, dict):
+        return []
+    items = bc.get("itemListElement", [])
+    names = []
+    for item in items:
+        if isinstance(item, dict):
+            inner = item.get("item", {})
+            if isinstance(inner, dict):
+                name = inner.get("name", "")
+                if name:
+                    names.append(name)
+            elif isinstance(inner, str):
+                names.append(inner)
+    return names
+
+
+def classify_drink(html: str) -> str | None:
+    """Classify a fetched page as confirmed_drink, confirmed_food, or None (no Recipe JSON-LD).
+
+    Checks recipeCategory, breadcrumb, and keywords against DRINK_TERMS.
+    Returns None if no Recipe JSON-LD is found at all.
+    """
+    recipes = []
+    for obj in _iter_jsonld_objects(html):
+        obj_type = obj.get("@type", "")
+        if isinstance(obj_type, list):
+            type_str = " ".join(obj_type)
+        else:
+            type_str = obj_type
+        if "Recipe" in type_str:
+            recipes.append(obj)
+
+    if not recipes:
+        return None
+
+    for recipe in recipes:
+        # Check recipeCategory
+        category = recipe.get("recipeCategory", "")
+        if isinstance(category, list):
+            category = ", ".join(category)
+        if category and _check_terms(category):
+            return "confirmed_drink"
+
+        # Check breadcrumb
+        bc_names = _extract_breadcrumb_names(recipe)
+        for name in bc_names:
+            if _check_terms(name):
+                return "confirmed_drink"
+
+        # Check keywords
+        keywords = recipe.get("keywords", "")
+        if isinstance(keywords, list):
+            keywords = ", ".join(keywords)
+        if keywords and _check_terms(keywords):
+            return "confirmed_drink"
+
+    return "confirmed_food"

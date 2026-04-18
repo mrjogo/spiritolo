@@ -59,18 +59,22 @@ def test_full_pipeline(tmp_db, tmp_path):
     client = ScraperAPIClient(api_key="test-key")
     db = Database(tmp_db)
 
-    # Discover
-    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml", "/recipes/")
-    assert count == 2  # margarita and mojito, not /about
+    # Discover — all 3 URLs are added (no url_pattern filtering)
+    count = discover_sitemap(client, db, "testsite", "https://example.com/sitemap.xml")
+    assert count == 3
+
+    # Set content_type so fetch picks up only the recipes
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
+    db.set_content_type("https://example.com/recipes/mojito", "likely_drink_recipe")
 
     # Fetch
     results = fetch_pages(db, client, html_dir=tmp_path, delay=0)
-    assert results["fetched"] == 1
+    assert results["Recipe"] == 1
     assert results["blocked"] == 1
 
     # Verify state
     stats = db.get_stats()
-    assert stats["testsite"]["fetched"] == 1
+    assert stats["testsite"]["Recipe"] == 1
     assert stats["testsite"]["blocked"] == 1
 
     # Verify HTML was saved for the fetched page
