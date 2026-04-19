@@ -52,6 +52,20 @@ BLOCKED_HTML = """<!DOCTYPE html>
 def test_full_pipeline(tmp_db, tmp_path):
     # Phase 1: Discovery — sitemap fetch
     responses.add(responses.GET, "https://api.scraperapi.com", body=SITEMAP, status=200)
+    # Phase 2: Fetch — account info (called at fetch_pages startup)
+    responses.add(
+        responses.GET,
+        "https://api.scraperapi.com/account",
+        json={
+            "concurrencyLimit": 5,
+            "concurrentRequests": 0,
+            "requestCount": 100,
+            "requestLimit": 10000,
+            "burst": 10,
+            "failedRequestCount": 0,
+        },
+        status=200,
+    )
     # Phase 2: Fetch — two recipe pages
     responses.add(responses.GET, "https://api.scraperapi.com", body=RECIPE_HTML, status=200)
     responses.add(responses.GET, "https://api.scraperapi.com", body=BLOCKED_HTML, status=200)
