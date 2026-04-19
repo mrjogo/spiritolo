@@ -158,9 +158,9 @@ def fetch_pages(
             time.sleep(delay)
 
     executor = ThreadPoolExecutor(max_workers=n_workers)
+    abort_message: str | None = None
     try:
         futures = [executor.submit(process_one, row) for row in pending]
-        abort_message: str | None = None
         for f in as_completed(futures):
             try:
                 f.result()
