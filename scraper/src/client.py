@@ -45,3 +45,17 @@ class ScraperAPIClient:
         raise ScraperAPIError(
             f"ScraperAPI returned {resp.status_code} for {url}: {resp.text[:200]}"
         )
+
+    def get_account(self) -> dict:
+        resp = requests.get(
+            "https://api.scraperapi.com/account",
+            params={"api_key": self.api_key},
+            timeout=70,
+        )
+        if resp.status_code == 401:
+            raise AuthError(f"Invalid API key (account endpoint): {resp.text[:200]}")
+        if resp.status_code != 200:
+            raise ScraperAPIError(
+                f"/account returned {resp.status_code}: {resp.text[:200]}"
+            )
+        return resp.json()

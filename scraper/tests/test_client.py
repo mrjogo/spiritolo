@@ -2,7 +2,7 @@ import os
 
 import responses
 
-from scraper.src.client import ScraperAPIClient, ScraperAPIError
+from scraper.src.client import AuthError, ScraperAPIClient, ScraperAPIError
 
 
 @responses.activate
@@ -106,3 +106,55 @@ def test_AuthError_is_ScraperAPIError_subclass():
 def test_QuotaExhaustedError_is_ScraperAPIError_subclass():
     from scraper.src.client import QuotaExhaustedError
     assert issubclass(QuotaExhaustedError, ScraperAPIError)
+
+
+@responses.activate
+def test_get_account_returns_parsed_json():
+    payload = {
+        "concurrencyLimit": 5,
+        "concurrentRequests": 0,
+        "requestCount": 100,
+        "requestLimit": 5000,
+    }
+    responses.add(
+        responses.GET,
+        "https://api.scraperapi.com/account",
+        json=payload,
+        status=200,
+    )
+    client = ScraperAPIClient(api_key="test-key")
+    result = client.get_account()
+    assert result == payload
+    assert responses.calls[0].request.params["api_key"] == "test-key"
+
+
+@responses.activate
+def test_get_account_raises_AuthError_on_401():
+    responses.add(
+        responses.GET,
+        "https://api.scraperapi.com/account",
+        body="Unauthorized",
+        status=401,
+    )
+    client = ScraperAPIClient(api_key="bad-key")
+    try:
+        client.get_account()
+        assert False, "Should have raised AuthError"
+    except AuthError as e:
+        assert "Invalid API key" in str(e)
+
+
+@responses.activate
+def test_get_account_raises_ScraperAPIError_on_500():
+    responses.add(
+        responses.GET,
+        "https://api.scraperapi.com/account",
+        body="Server error",
+        status=500,
+    )
+    client = ScraperAPIClient(api_key="test-key")
+    try:
+        client.get_account()
+        assert False, "Should have raised ScraperAPIError"
+    except ScraperAPIError as e:
+        assert "/account returned 500" in str(e)
