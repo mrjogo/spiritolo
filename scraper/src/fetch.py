@@ -48,8 +48,17 @@ def fetch_pages(
     limit: int | None = None,
     force_site: str | None = None,
     content_type: str | None = "likely_drink_recipe",
-    delay: float = 1.5,
+    delay: float = 0.0,
+    workers: int | None = None,
 ) -> dict:
+    account = client.get_account()
+    remaining = account["requestLimit"] - account["requestCount"]
+    concurrency = account["concurrencyLimit"]
+    print(
+        f"account: {remaining}/{account['requestLimit']} credits remaining, "
+        f"concurrency={concurrency}"
+    )
+
     pending = db.get_pending(site=site or force_site, limit=limit, content_type=content_type)
     paused_sites: set[str] = set()
     results: dict = {"blocked": 0, "errors": 0, "paused_sites": []}

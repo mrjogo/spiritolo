@@ -162,3 +162,23 @@ def sample_drink_keywords_html():
 </script>
 </body>
 </html>"""
+
+
+@pytest.fixture
+def make_mock_client():
+    """Factory that returns a MagicMock with get_account() returning a sensible default."""
+    from unittest.mock import MagicMock
+
+    def _make(concurrency: int = 1, request_count: int = 0, request_limit: int = 5000):
+        m = MagicMock()
+        m.get_account.return_value = {
+            "concurrencyLimit": concurrency,
+            "concurrentRequests": 0,
+            "requestCount": request_count,
+            "requestLimit": request_limit,
+            "burst": 0,
+            "failedRequestCount": 0,
+        }
+        return m
+
+    return _make
