@@ -5,7 +5,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from scraper.src.client import ScraperAPIClient
+from scraper.src.client import ScraperAPIClient, ScraperAPIError, AuthError, QuotaExhaustedError
 from scraper.src.db import Database
 from scraper.src.validate import validate, classify_drink
 
@@ -51,7 +51,14 @@ def fetch_pages(
     delay: float = 0.0,
     workers: int | None = None,
 ) -> dict:
-    account = client.get_account()
+    try:
+        account = client.get_account()
+    except AuthError as e:
+        print(f"ABORTED: AuthError: {e}")
+        return {"blocked": 0, "errors": 0, "paused_sites": []}
+    except ScraperAPIError as e:
+        print(f"ABORTED: {e}")
+        return {"blocked": 0, "errors": 0, "paused_sites": []}
     remaining = account["requestLimit"] - account["requestCount"]
     concurrency = account["concurrencyLimit"]
     print(

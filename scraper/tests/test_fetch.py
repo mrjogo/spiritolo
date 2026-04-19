@@ -271,3 +271,48 @@ def test_fetch_pages_preflight_prints_budget(tmp_db, tmp_path, make_mock_client,
     assert "concurrency=5" in captured.out
     mock_client.get_account.assert_called_once()
     db.close()
+
+
+def test_fetch_pages_aborts_on_preflight_auth_error(tmp_db, tmp_path, capsys):
+    from unittest.mock import MagicMock
+    from scraper.src.client import AuthError
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
+
+    mock_client = MagicMock()
+    mock_client.get_account.side_effect = AuthError("Invalid API key")
+
+    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+
+    # fetch() should never have been called
+    mock_client.fetch.assert_not_called()
+    # Page should still be pending
+    row = db.conn.execute(
+        "SELECT status FROM pages WHERE url = ?",
+        ("https://example.com/recipes/margarita",),
+    ).fetchone()
+    assert row["status"] == "pending"
+    captured = capsys.readouterr()
+    assert "ABORTED" in captured.out or "AuthError" in captured.out
+    assert results == {"blocked": 0, "errors": 0, "paused_sites": []}
+    db.close()
+
+
+def test_fetch_pages_aborts_on_preflight_scraperapi_error(tmp_db, tmp_path, capsys):
+    from unittest.mock import MagicMock
+    from scraper.src.client import ScraperAPIError
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
+
+    mock_client = MagicMock()
+    mock_client.get_account.side_effect = ScraperAPIError("/account returned 500")
+
+    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+
+    mock_client.fetch.assert_not_called()
+    captured = capsys.readouterr()
+    assert "ABORTED" in captured.out or "500" in captured.out
+    assert results == {"blocked": 0, "errors": 0, "paused_sites": []}
+    db.close()
