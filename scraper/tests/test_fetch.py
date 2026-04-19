@@ -316,3 +316,28 @@ def test_fetch_pages_aborts_on_preflight_scraperapi_error(tmp_db, tmp_path, caps
     assert "ABORTED" in captured.out or "500" in captured.out
     assert results == {"blocked": 0, "errors": 0, "paused_sites": []}
     db.close()
+
+
+def test_fetch_pages_parallel_happy_path(tmp_db, tmp_path, make_mock_client, sample_recipe_html):
+    """All 5 URLs get fetched and marked when running with 3 workers."""
+    db = Database(tmp_db)
+    urls = [f"https://example.com/recipes/{i}" for i in range(5)]
+    for url in urls:
+        db.add_url("testsite", url)
+        db.set_content_type(url, "likely_drink_recipe")
+
+    mock_client = make_mock_client(concurrency=3)
+    mock_client.fetch.return_value = sample_recipe_html
+
+    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+
+    assert mock_client.fetch.call_count == 5
+    assert results.get("Recipe", 0) == 5
+    for url in urls:
+        row = db.conn.execute(
+            "SELECT status FROM pages WHERE url = ?", (url,)
+        ).fetchone()
+        assert row["status"] == "Recipe"
+    # No URL should still be pending
+    assert db.get_pending() == []
+    db.close()

@@ -1,6 +1,8 @@
 import argparse
 import hashlib
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -69,63 +71,93 @@ def fetch_pages(
     pending = db.get_pending(site=site or force_site, limit=limit, content_type=content_type)
     paused_sites: set[str] = set()
     results: dict = {"blocked": 0, "errors": 0, "paused_sites": []}
+    state_lock = threading.Lock()
+
+    n_workers = workers if workers is not None else concurrency
+    if workers is not None and workers > concurrency:
+        print(
+            f"warning: --workers {workers} exceeds plan concurrency {concurrency}; "
+            "expect 429s"
+        )
 
     total = len(pending)
-    for i, row in enumerate(pending):
+    if total == 0:
+        results["paused_sites"] = []
+        return results
+
+    def process_one(row: dict) -> None:
         page_site = row["site"]
         url = row["url"]
 
         # Circuit breaker check (skip if --force-site)
-        if page_site not in paused_sites and page_site != force_site:
+        if page_site != force_site:
+            with state_lock:
+                if page_site in paused_sites:
+                    return
             recent = db.get_recent_statuses(page_site, count=CIRCUIT_BREAKER_WINDOW)
             if check_circuit_breaker(recent):
-                print(f"[{page_site}] PAUSED — >{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% of last {CIRCUIT_BREAKER_WINDOW} pages failed validation")
-                paused_sites.add(page_site)
+                with state_lock:
+                    if page_site not in paused_sites:
+                        paused_sites.add(page_site)
+                        print(
+                            f"[{page_site}] PAUSED — >{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% "
+                            f"of last {CIRCUIT_BREAKER_WINDOW} pages failed validation"
+                        )
+                return
 
-        if page_site in paused_sites:
-            continue
-
-        print(f"[{page_site}] {i+1}/{total} — {url}")
+        print(f"[{page_site}] — {url}")
 
         try:
             html = client.fetch(url)
         except Exception as e:
             db.mark_failed(url, str(e))
-            results["errors"] += 1
+            with state_lock:
+                results["errors"] += 1
             print(f"  ERROR: {e}")
             if delay > 0:
                 time.sleep(delay)
-            continue
+            return
 
         result = validate(html)
-
         if result.status == "blocked":
             db.mark_blocked(url, result.reason or "blocked")
-            results["blocked"] += 1
+            with state_lock:
+                results["blocked"] += 1
             print(f"  BLOCKED: {result.reason}")
         else:
             filename = url_to_filename(url)
             rel_path = save_html(html_dir, page_site, filename, html)
             db.mark_content(url, result.status, result.reason or result.status, html_path=rel_path)
-            results[result.status] = results.get(result.status, 0) + 1
+            with state_lock:
+                results[result.status] = results.get(result.status, 0) + 1
             print(f"  {result.status}: {result.reason}")
 
-            # Classify drink/food from JSON-LD
             drink_result = classify_drink(html)
             if drink_result:
                 db.set_content_type(url, drink_result)
 
-        # Re-check circuit breaker after each fetch to detect mid-run failures
-        if page_site not in paused_sites and page_site != force_site:
+        # Re-check circuit breaker after each fetch
+        if page_site != force_site:
             recent = db.get_recent_statuses(page_site, count=CIRCUIT_BREAKER_WINDOW)
             if check_circuit_breaker(recent):
-                print(f"[{page_site}] PAUSED — >{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% of last {CIRCUIT_BREAKER_WINDOW} pages failed validation")
-                paused_sites.add(page_site)
+                with state_lock:
+                    if page_site not in paused_sites:
+                        paused_sites.add(page_site)
+                        print(
+                            f"[{page_site}] PAUSED — >{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% "
+                            f"of last {CIRCUIT_BREAKER_WINDOW} pages failed validation"
+                        )
 
         if delay > 0:
             time.sleep(delay)
 
-    results["paused_sites"] = list(paused_sites)
+    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+        futures = [executor.submit(process_one, row) for row in pending]
+        for f in as_completed(futures):
+            f.result()  # re-raise any uncaught exception
+
+    with state_lock:
+        results["paused_sites"] = list(paused_sites)
     return results
 
 
