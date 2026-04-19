@@ -9,6 +9,14 @@ class ScraperAPIError(Exception):
     pass
 
 
+class AuthError(ScraperAPIError):
+    pass
+
+
+class QuotaExhaustedError(ScraperAPIError):
+    pass
+
+
 class ScraperAPIClient:
     BASE_URL = "https://api.scraperapi.com"
 
@@ -27,9 +35,13 @@ class ScraperAPIClient:
         if render:
             params["render"] = "true"
 
-        resp = requests.get(self.BASE_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=60)
-        if resp.status_code != 200:
-            raise ScraperAPIError(
-                f"ScraperAPI returned {resp.status_code} for {url}: {resp.text[:200]}"
-            )
-        return resp.text
+        resp = requests.get(self.BASE_URL, params=params, headers={"User-Agent": USER_AGENT}, timeout=70)
+        if resp.status_code == 200:
+            return resp.text
+        if resp.status_code == 401:
+            raise AuthError(f"Invalid API key: {resp.text[:200]}")
+        if resp.status_code == 403:
+            raise QuotaExhaustedError(f"Credits exhausted: {resp.text[:200]}")
+        raise ScraperAPIError(
+            f"ScraperAPI returned {resp.status_code} for {url}: {resp.text[:200]}"
+        )

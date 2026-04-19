@@ -37,19 +37,20 @@ def test_fetch_raises_on_500():
 
 
 @responses.activate
-def test_fetch_raises_on_403():
+def test_fetch_raises_QuotaExhaustedError_on_403():
+    from scraper.src.client import QuotaExhaustedError
     responses.add(
         responses.GET,
         "https://api.scraperapi.com",
-        body="Forbidden",
+        body="You have exhausted credits",
         status=403,
     )
     client = ScraperAPIClient(api_key="test-key")
     try:
         client.fetch("https://example.com/recipe/1")
-        assert False, "Should have raised ScraperAPIError"
-    except ScraperAPIError as e:
-        assert "403" in str(e)
+        assert False, "Should have raised QuotaExhaustedError"
+    except QuotaExhaustedError as e:
+        assert "Credits exhausted" in str(e)
 
 
 @responses.activate
@@ -78,3 +79,30 @@ def test_client_raises_without_api_key(monkeypatch):
         assert False, "Should have raised ValueError"
     except ValueError as e:
         assert "SCRAPERAPI_KEY" in str(e)
+
+
+@responses.activate
+def test_fetch_raises_AuthError_on_401():
+    from scraper.src.client import AuthError
+    responses.add(
+        responses.GET,
+        "https://api.scraperapi.com",
+        body="Unauthorized, please check your API key",
+        status=401,
+    )
+    client = ScraperAPIClient(api_key="bad-key")
+    try:
+        client.fetch("https://example.com/recipe/1")
+        assert False, "Should have raised AuthError"
+    except AuthError as e:
+        assert "Invalid API key" in str(e)
+
+
+def test_AuthError_is_ScraperAPIError_subclass():
+    from scraper.src.client import AuthError
+    assert issubclass(AuthError, ScraperAPIError)
+
+
+def test_QuotaExhaustedError_is_ScraperAPIError_subclass():
+    from scraper.src.client import QuotaExhaustedError
+    assert issubclass(QuotaExhaustedError, ScraperAPIError)
