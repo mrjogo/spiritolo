@@ -72,6 +72,7 @@ def fetch_pages(
     paused_sites: set[str] = set()
     results: dict = {"blocked": 0, "errors": 0, "paused_sites": []}
     state_lock = threading.Lock()
+    shutdown = threading.Event()
 
     n_workers = workers if workers is not None else concurrency
     if workers is not None and workers > concurrency:
@@ -86,6 +87,8 @@ def fetch_pages(
         return results
 
     def process_one(row: dict) -> None:
+        if shutdown.is_set():
+            return
         page_site = row["site"]
         url = row["url"]
 
@@ -109,6 +112,9 @@ def fetch_pages(
 
         try:
             html = client.fetch(url)
+        except (QuotaExhaustedError, AuthError):
+            shutdown.set()
+            raise
         except Exception as e:
             db.mark_failed(url, str(e))
             with state_lock:
@@ -151,10 +157,22 @@ def fetch_pages(
         if delay > 0:
             time.sleep(delay)
 
-    with ThreadPoolExecutor(max_workers=n_workers) as executor:
+    executor = ThreadPoolExecutor(max_workers=n_workers)
+    try:
         futures = [executor.submit(process_one, row) for row in pending]
+        abort_message: str | None = None
         for f in as_completed(futures):
-            f.result()  # re-raise any uncaught exception
+            try:
+                f.result()
+            except (QuotaExhaustedError, AuthError) as e:
+                shutdown.set()
+                abort_message = f"ABORTED: {type(e).__name__}: {e}"
+                break
+    finally:
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    if abort_message:
+        print(abort_message)
 
     with state_lock:
         results["paused_sites"] = list(paused_sites)
