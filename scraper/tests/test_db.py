@@ -1,3 +1,5 @@
+import threading
+
 from scraper.src.db import Database
 
 
@@ -204,4 +206,30 @@ def test_get_pending_filters_by_content_type(tmp_db):
     pending = db.get_pending(content_type="likely_drink_recipe")
     assert len(pending) == 1
     assert pending[0]["url"] == "https://example.com/recipe/1"
+    db.close()
+
+
+def test_db_safe_from_multiple_threads(tmp_db):
+    """Regression: Database used to raise 'SQLite objects created in a thread
+    can only be used in that same thread' when accessed from worker threads.
+    After adding check_same_thread=False + an internal lock, this must work."""
+    from scraper.src.db import Database
+    db = Database(tmp_db)
+    errors: list[Exception] = []
+
+    def worker(i: int):
+        try:
+            db.add_url("threadsite", f"https://example.com/{i}")
+        except Exception as e:  # pragma: no cover - only hit if regression
+            errors.append(e)
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(10)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert errors == []
+    rows = db.conn.execute("SELECT COUNT(*) AS c FROM pages").fetchone()
+    assert rows["c"] == 10
     db.close()

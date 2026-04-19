@@ -1,11 +1,17 @@
 import argparse
 import hashlib
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from scraper.src.client import ScraperAPIClient
+from dotenv import load_dotenv
+
+from scraper.src.client import ScraperAPIClient, ScraperAPIError, AuthError, QuotaExhaustedError
 from scraper.src.db import Database
 from scraper.src.validate import validate, classify_drink
+
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
@@ -43,68 +49,133 @@ def fetch_pages(
     site: str | None = None,
     limit: int | None = None,
     force_site: str | None = None,
-    delay: float = 1.5,
+    content_type: str | None = "likely_drink_recipe",
+    delay: float = 0.0,
+    workers: int | None = None,
 ) -> dict:
-    pending = db.get_pending(site=site or force_site, limit=limit, content_type="likely_drink_recipe")
+    try:
+        account = client.get_account()
+    except AuthError as e:
+        print(f"ABORTED: AuthError: {e}")
+        return {"blocked": 0, "errors": 0, "paused_sites": []}
+    except ScraperAPIError as e:
+        print(f"ABORTED: {e}")
+        return {"blocked": 0, "errors": 0, "paused_sites": []}
+    remaining = account["requestLimit"] - account["requestCount"]
+    concurrency = account["concurrencyLimit"]
+    print(
+        f"account: {remaining}/{account['requestLimit']} credits remaining, "
+        f"concurrency={concurrency}"
+    )
+
+    pending = db.get_pending(site=site or force_site, limit=limit, content_type=content_type)
     paused_sites: set[str] = set()
     results: dict = {"blocked": 0, "errors": 0, "paused_sites": []}
+    state_lock = threading.Lock()
+    shutdown = threading.Event()
+
+    n_workers = workers if workers is not None else concurrency
+    if workers is not None and workers > concurrency:
+        print(
+            f"warning: --workers {workers} exceeds plan concurrency {concurrency}; "
+            "expect 429s"
+        )
 
     total = len(pending)
-    for i, row in enumerate(pending):
+    if total == 0:
+        results["paused_sites"] = []
+        return results
+
+    def process_one(row: dict) -> None:
+        if shutdown.is_set():
+            return
         page_site = row["site"]
         url = row["url"]
 
         # Circuit breaker check (skip if --force-site)
-        if page_site not in paused_sites and page_site != force_site:
+        if page_site != force_site:
+            with state_lock:
+                if page_site in paused_sites:
+                    return
             recent = db.get_recent_statuses(page_site, count=CIRCUIT_BREAKER_WINDOW)
             if check_circuit_breaker(recent):
-                print(f"[{page_site}] PAUSED — >{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% of last {CIRCUIT_BREAKER_WINDOW} pages failed validation")
-                paused_sites.add(page_site)
+                with state_lock:
+                    if page_site not in paused_sites:
+                        paused_sites.add(page_site)
+                        print(
+                            f"[{page_site}] PAUSED — >{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% "
+                            f"of last {CIRCUIT_BREAKER_WINDOW} pages failed validation"
+                        )
+                return
 
-        if page_site in paused_sites:
-            continue
-
-        print(f"[{page_site}] {i+1}/{total} — {url}")
+        print(f"[{page_site}] — {url}")
 
         try:
             html = client.fetch(url)
+        except (QuotaExhaustedError, AuthError):
+            shutdown.set()
+            raise
         except Exception as e:
             db.mark_failed(url, str(e))
-            results["errors"] += 1
+            with state_lock:
+                results["errors"] += 1
             print(f"  ERROR: {e}")
             if delay > 0:
                 time.sleep(delay)
-            continue
+            return
 
         result = validate(html)
-
         if result.status == "blocked":
             db.mark_blocked(url, result.reason or "blocked")
-            results["blocked"] += 1
+            with state_lock:
+                results["blocked"] += 1
             print(f"  BLOCKED: {result.reason}")
         else:
             filename = url_to_filename(url)
             rel_path = save_html(html_dir, page_site, filename, html)
             db.mark_content(url, result.status, result.reason or result.status, html_path=rel_path)
-            results[result.status] = results.get(result.status, 0) + 1
+            with state_lock:
+                results[result.status] = results.get(result.status, 0) + 1
             print(f"  {result.status}: {result.reason}")
 
-            # Classify drink/food from JSON-LD
             drink_result = classify_drink(html)
             if drink_result:
                 db.set_content_type(url, drink_result)
 
-        # Re-check circuit breaker after each fetch to detect mid-run failures
-        if page_site not in paused_sites and page_site != force_site:
+        # Re-check circuit breaker after each fetch
+        if page_site != force_site:
             recent = db.get_recent_statuses(page_site, count=CIRCUIT_BREAKER_WINDOW)
             if check_circuit_breaker(recent):
-                print(f"[{page_site}] PAUSED — >{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% of last {CIRCUIT_BREAKER_WINDOW} pages failed validation")
-                paused_sites.add(page_site)
+                with state_lock:
+                    if page_site not in paused_sites:
+                        paused_sites.add(page_site)
+                        print(
+                            f"[{page_site}] PAUSED — >{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% "
+                            f"of last {CIRCUIT_BREAKER_WINDOW} pages failed validation"
+                        )
 
         if delay > 0:
             time.sleep(delay)
 
-    results["paused_sites"] = list(paused_sites)
+    executor = ThreadPoolExecutor(max_workers=n_workers)
+    abort_message: str | None = None
+    try:
+        futures = [executor.submit(process_one, row) for row in pending]
+        for f in as_completed(futures):
+            try:
+                f.result()
+            except (QuotaExhaustedError, AuthError) as e:
+                shutdown.set()
+                abort_message = f"ABORTED: {type(e).__name__}: {e}"
+                break
+    finally:
+        executor.shutdown(wait=True, cancel_futures=True)
+
+    if abort_message:
+        print(abort_message)
+
+    with state_lock:
+        results["paused_sites"] = list(paused_sites)
     return results
 
 
@@ -113,13 +184,40 @@ if __name__ == "__main__":
     parser.add_argument("--site", help="Only fetch for a specific site")
     parser.add_argument("--limit", type=int, help="Max number of pages to fetch")
     parser.add_argument("--force-site", help="Resume a paused site (bypasses circuit breaker)")
+    parser.add_argument(
+        "--content-type",
+        default="likely_drink_recipe",
+        help="Filter pending pages by content_type (default: likely_drink_recipe). Pass 'any' to disable the filter.",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of concurrent fetch workers (default: concurrencyLimit from /account)",
+    )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        help="Delay in seconds between fetches per worker (default: 0.0 — ScraperAPI's concurrency limit governs rate)",
+    )
     args = parser.parse_args()
+    content_type = None if args.content_type == "any" else args.content_type
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     db = Database(DEFAULT_DB_PATH)
     client = ScraperAPIClient()
 
-    results = fetch_pages(db, client, site=args.site, limit=args.limit, force_site=args.force_site)
+    results = fetch_pages(
+        db,
+        client,
+        site=args.site,
+        limit=args.limit,
+        force_site=args.force_site,
+        content_type=content_type,
+        workers=args.workers,
+        delay=args.delay,
+    )
 
     print("\n--- Results ---")
     print(f"Blocked:    {results['blocked']}")
