@@ -189,6 +189,18 @@ if __name__ == "__main__":
         default="likely_drink_recipe",
         help="Filter pending pages by content_type (default: likely_drink_recipe). Pass 'any' to disable the filter.",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=None,
+        help="Number of concurrent fetch workers (default: concurrencyLimit from /account)",
+    )
+    parser.add_argument(
+        "--delay",
+        type=float,
+        default=0.0,
+        help="Delay in seconds between fetches per worker (default: 0.0 — ScraperAPI's concurrency limit governs rate)",
+    )
     args = parser.parse_args()
     content_type = None if args.content_type == "any" else args.content_type
 
@@ -203,6 +215,8 @@ if __name__ == "__main__":
         limit=args.limit,
         force_site=args.force_site,
         content_type=content_type,
+        workers=args.workers,
+        delay=args.delay,
     )
 
     print("\n--- Results ---")
