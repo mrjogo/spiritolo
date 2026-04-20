@@ -212,6 +212,29 @@ class Database:
             rows = self.conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
+    def sample_classifications(self, site: str, label: str, n: int = 10) -> list[dict]:
+        """Return n random (url, label, raw_response) rows for a (site, label) pair.
+
+        Returns the MOST RECENT classification per page, so re-classifications don't
+        produce duplicates in the sample.
+        """
+        with self._lock:
+            rows = self.conn.execute(
+                """
+                SELECT p.url, c.label, c.raw_response, c.created_at
+                FROM classifications c
+                JOIN pages p ON p.id = c.page_id
+                WHERE p.site = ? AND c.label = ?
+                  AND c.id = (
+                      SELECT MAX(id) FROM classifications WHERE page_id = c.page_id
+                  )
+                ORDER BY RANDOM()
+                LIMIT ?
+                """,
+                (site, label, n),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
     def get_by_content_type(self, content_type: str, site: str | None = None, limit: int | None = None) -> list[dict]:
         query = "SELECT * FROM pages WHERE content_type = ?"
         params: list = [content_type]

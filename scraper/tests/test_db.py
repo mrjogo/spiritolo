@@ -307,6 +307,37 @@ def test_get_unclassified_includes_sitemap_source_and_id(tmp_db):
     db.close()
 
 
+def test_sample_classifications_returns_joined_rows(tmp_db):
+    db = Database(tmp_db)
+    for i in range(3):
+        db.add_url("site_a", f"https://a.com/{i}")
+    page_ids = [r["id"] for r in db.conn.execute("SELECT id FROM pages ORDER BY id").fetchall()]
+    for pid in page_ids:
+        db.record_classification(pid, "likely_drink_recipe", "qwen3:14b", "v1", '{"label":"likely_drink_recipe"}', 100)
+
+    rows = db.sample_classifications(site="site_a", label="likely_drink_recipe", n=2)
+    assert len(rows) == 2
+    assert {r["url"] for r in rows} <= {"https://a.com/0", "https://a.com/1", "https://a.com/2"}
+    assert rows[0]["label"] == "likely_drink_recipe"
+    assert rows[0]["raw_response"] == '{"label":"likely_drink_recipe"}'
+    db.close()
+
+
+def test_sample_classifications_scopes_by_site_and_label(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("site_a", "https://a.com/1")
+    db.add_url("site_b", "https://b.com/1")
+    a_id = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://a.com/1",)).fetchone()["id"]
+    b_id = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://b.com/1",)).fetchone()["id"]
+    db.record_classification(a_id, "likely_drink_recipe", "qwen3:14b", "v1", "{}", 100)
+    db.record_classification(b_id, "likely_food_recipe", "qwen3:14b", "v1", "{}", 100)
+
+    rows = db.sample_classifications(site="site_a", label="likely_drink_recipe", n=10)
+    assert len(rows) == 1
+    assert rows[0]["url"] == "https://a.com/1"
+    db.close()
+
+
 def test_db_safe_from_multiple_threads(tmp_db):
     """Regression: Database used to raise 'SQLite objects created in a thread
     can only be used in that same thread' when accessed from worker threads.
