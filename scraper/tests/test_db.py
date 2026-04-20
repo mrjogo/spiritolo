@@ -266,6 +266,47 @@ def test_record_classification_allows_reclassification(tmp_db):
     db.close()
 
 
+def test_get_unclassified_returns_null_content_type(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("site_a", "https://a.com/1")
+    db.add_url("site_a", "https://a.com/2")
+    db.add_url("site_b", "https://b.com/1")
+    db.set_content_type("https://a.com/1", "likely_drink_recipe")
+
+    rows = db.get_unclassified()
+    urls = sorted(r["url"] for r in rows)
+    assert urls == ["https://a.com/2", "https://b.com/1"]
+    db.close()
+
+
+def test_get_unclassified_filters_by_site(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("site_a", "https://a.com/1")
+    db.add_url("site_b", "https://b.com/1")
+    rows = db.get_unclassified(site="site_a")
+    assert len(rows) == 1
+    assert rows[0]["site"] == "site_a"
+    db.close()
+
+
+def test_get_unclassified_respects_limit(tmp_db):
+    db = Database(tmp_db)
+    for i in range(10):
+        db.add_url("testsite", f"https://example.com/{i}")
+    rows = db.get_unclassified(limit=3)
+    assert len(rows) == 3
+    db.close()
+
+
+def test_get_unclassified_includes_sitemap_source_and_id(tmp_db):
+    db = Database(tmp_db)
+    db.add_urls_batch("testsite", ["https://example.com/1"], sitemap_source="recipes.xml")
+    rows = db.get_unclassified()
+    assert rows[0]["sitemap_source"] == "recipes.xml"
+    assert isinstance(rows[0]["id"], int)
+    db.close()
+
+
 def test_db_safe_from_multiple_threads(tmp_db):
     """Regression: Database used to raise 'SQLite objects created in a thread
     can only be used in that same thread' when accessed from worker threads.

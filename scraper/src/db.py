@@ -198,6 +198,20 @@ class Database:
             )
             self.conn.commit()
 
+    def get_unclassified(self, site: str | None = None, limit: int | None = None) -> list[dict]:
+        query = "SELECT id, site, url, sitemap_source FROM pages WHERE content_type IS NULL"
+        params: list = []
+        if site:
+            query += " AND site = ?"
+            params.append(site)
+        query += " ORDER BY id"
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+        with self._lock:
+            rows = self.conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
     def get_by_content_type(self, content_type: str, site: str | None = None, limit: int | None = None) -> list[dict]:
         query = "SELECT * FROM pages WHERE content_type = ?"
         params: list = [content_type]
