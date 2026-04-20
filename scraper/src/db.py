@@ -218,6 +218,17 @@ class Database:
             rows = self.conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
+    def count_unclassified(self, site: str | None = None) -> int:
+        """Count of rows with `content_type IS NULL`, optionally scoped to a site."""
+        query = "SELECT COUNT(*) FROM pages WHERE content_type IS NULL"
+        params: list = []
+        if site:
+            query += " AND site = ?"
+            params.append(site)
+        with self._lock:
+            row = self.conn.execute(query, params).fetchone()
+        return row[0]
+
     def sample_classifications(self, site: str, label: str, n: int = 10) -> list[dict]:
         """Return n random (url, label, raw_response) rows for a (site, label) pair.
 

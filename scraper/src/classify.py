@@ -147,6 +147,10 @@ async def run_main(args: argparse.Namespace) -> int:
     async def classify_with_shared(url, sitemap_source, model):
         return await classify_url(url, sitemap_source, model, client=shared_client)
 
+    overall_total = db.count_unclassified(site=args.site)
+    if args.limit is not None:
+        overall_total = min(overall_total, args.limit)
+
     try:
         while True:
             if remaining is not None and remaining <= 0:
@@ -157,9 +161,12 @@ async def run_main(args: argparse.Namespace) -> int:
                 break
 
             if grand_total == 0:
-                print(f"Classifying via {args.model} (concurrency={args.concurrency}, "
-                      f"batch_size={args.batch_size}, prompt={PROMPT_VERSION})")
-            print(f"Batch of {len(rows)} (processed so far: {grand_total})")
+                scope = f"site={args.site}" if args.site else "all sites"
+                print(f"Classifying {overall_total:,} URLs ({scope}) via {args.model} "
+                      f"(concurrency={args.concurrency}, batch_size={args.batch_size}, "
+                      f"prompt={PROMPT_VERSION})")
+            pct = 100 * grand_total / overall_total if overall_total else 0
+            print(f"Batch of {len(rows)} ({grand_total:,}/{overall_total:,} done, {pct:.1f}%)")
 
             successes = await run_classify_pool(
                 rows=rows,
