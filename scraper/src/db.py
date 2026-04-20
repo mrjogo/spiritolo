@@ -199,6 +199,12 @@ class Database:
             self.conn.commit()
 
     def get_unclassified(self, site: str | None = None, limit: int | None = None) -> list[dict]:
+        """Work queue for the classifier. Returns rows with `content_type IS NULL`.
+
+        Deliberately ignores `status` — the classifier reads the URL string, not
+        the page body, so blocked/failed pages are still classifiable. Orders by
+        `id` so iteration is deterministic and resumable across runs.
+        """
         query = "SELECT id, site, url, sitemap_source FROM pages WHERE content_type IS NULL"
         params: list = []
         if site:

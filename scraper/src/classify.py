@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Awaitable, Callable
 
+from ollama import AsyncClient
+
 from scraper.src.classify_prompt import PROMPT_VERSION
 from scraper.src.db import Database
 from scraper.src.ollama_client import ClassificationResult, classify_url
@@ -140,6 +142,11 @@ async def run_main(args: argparse.Namespace) -> int:
     remaining = args.limit  # None means "no limit"
     grand_total = 0
     exit_code = 0
+    shared_client = AsyncClient()
+
+    async def classify_with_shared(url, sitemap_source, model):
+        return await classify_url(url, sitemap_source, model, client=shared_client)
+
     try:
         while True:
             if remaining is not None and remaining <= 0:
@@ -156,7 +163,7 @@ async def run_main(args: argparse.Namespace) -> int:
 
             successes = await run_classify_pool(
                 rows=rows,
-                classify_fn=classify_url,
+                classify_fn=classify_with_shared,
                 db=db,
                 model=args.model,
                 prompt_version=PROMPT_VERSION,

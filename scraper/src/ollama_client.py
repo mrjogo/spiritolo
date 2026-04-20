@@ -29,14 +29,20 @@ async def classify_url(
     sitemap_source: str | None,
     model: str,
     host: str | None = None,
+    client: AsyncClient | None = None,
 ) -> ClassificationResult:
     """Ask ollama to classify one URL. Returns ClassificationResult or raises.
 
     Raises ValueError for malformed or out-of-enum responses. Transport errors
     bubble up from the ollama library unchanged so the caller can decide
     retry policy.
+
+    For a batch run, pass a shared `client` — constructing a new AsyncClient
+    per call wastes connection pools. If `client` is None, a throwaway client
+    is created (the default path for tests and one-off use).
     """
-    client = AsyncClient(host=host)
+    if client is None:
+        client = AsyncClient(host=host)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": build_user_message(url, sitemap_source)},

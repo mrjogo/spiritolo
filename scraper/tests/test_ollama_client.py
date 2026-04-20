@@ -63,6 +63,24 @@ async def test_classify_url_raises_on_invalid_label():
             await classify_url("https://example.com/x", None, "qwen3:14b")
 
 
+async def test_classify_url_uses_supplied_client_instead_of_constructing(fake_ollama_response):
+    """When `client=` is provided, classify_url must not construct a new AsyncClient."""
+    supplied = AsyncMock()
+    supplied.chat = AsyncMock(return_value=fake_ollama_response)
+
+    with patch("scraper.src.ollama_client.AsyncClient") as MockClass:
+        result = await classify_url(
+            url="https://example.com/x",
+            sitemap_source=None,
+            model="qwen3:14b",
+            client=supplied,
+        )
+
+    MockClass.assert_not_called()
+    supplied.chat.assert_awaited_once()
+    assert result.label == "likely_drink_recipe"
+
+
 async def test_classify_url_raises_on_malformed_json():
     bad = {"message": {"content": "not json"}, "done": True}
     mock_client = AsyncMock()

@@ -432,3 +432,31 @@ async def test_run_classify_pool_returns_success_count(tmp_db):
     )
     assert successes == 2
     db.close()
+
+
+async def test_run_main_uses_one_shared_ollama_client_across_batches(tmp_db, monkeypatch):
+    """run_main must build the AsyncClient once and reuse it, not once per URL."""
+    db = Database(tmp_db)
+    for i in range(5):
+        db.add_url("testsite", f"https://example.com/{i}")
+    db.close()
+
+    constructed_count = 0
+    class CountingClient:
+        def __init__(self, *args, **kwargs):
+            nonlocal constructed_count
+            constructed_count += 1
+        async def chat(self, *args, **kwargs):
+            return {"message": {"content": '{"label": "likely_drink_recipe"}'}, "done": True}
+
+    monkeypatch.setattr("scraper.src.classify.AsyncClient", CountingClient)
+    monkeypatch.setattr("scraper.src.ollama_client.AsyncClient", CountingClient)
+
+    parser = build_arg_parser()
+    args = parser.parse_args(["--db", str(tmp_db), "--batch-size", "2", "--concurrency", "2"])
+    from scraper.src.classify import run_main
+    rc = await run_main(args)
+
+    assert rc == 0
+    # Exactly one AsyncClient constructed, even across 3 batches of 5 URLs total.
+    assert constructed_count == 1
