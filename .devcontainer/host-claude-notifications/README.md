@@ -85,14 +85,15 @@ If you use VS Code Insiders, change the `-activate` bundle ID in `notify-listen.
 
 ## Remote SSH
 
-Add a reverse port forward so the remote host can reach your laptop's listener:
+Add a reverse port forward so the remote host can reach your laptop's listener, and enable agent forwarding so the remote inherits your laptop's SSH agent (and `SSH_AUTH_SOCK`):
 
 ```
 Host myremote
     RemoteForward 61009 localhost:61009
+    ForwardAgent yes
 ```
 
-VSCode Remote SSH picks this up automatically. The hook works on the remote without changes.
+VSCode Remote SSH picks this up automatically. The hook works on the remote without changes, and `SSH_AUTH_SOCK` is available for git and other tools that need your keys.
 
 ## Devcontainers
 

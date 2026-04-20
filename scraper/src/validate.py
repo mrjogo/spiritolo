@@ -2,6 +2,7 @@ import json
 import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
+from urllib.parse import urlparse
 
 
 @dataclass
@@ -99,17 +100,66 @@ def _iter_jsonld_objects(html: str):
                 yield obj
 
 
+_TYPE_PRIORITY = ("Recipe", "NewsArticle", "Article", "WebPage", "WebSite")
+
+
+def _type_rank(t: str) -> int:
+    if t in _TYPE_PRIORITY:
+        return _TYPE_PRIORITY.index(t)
+    return len(_TYPE_PRIORITY)
+
+
 def _find_jsonld_type(html: str) -> str | None:
-    """Return the first @type found across all JSON-LD blocks, or None."""
+    """Return the highest-priority @type across all JSON-LD blocks, or None.
+
+    Priority: Recipe > NewsArticle > Article > WebPage > WebSite > other. Needed
+    because sites like Tasting Table emit a wrapper Article block before the
+    Recipe block — picking "first type seen" would misclassify recipes.
+    """
+    best: str | None = None
+    best_rank = len(_TYPE_PRIORITY) + 1
     for obj in _iter_jsonld_objects(html):
         obj_type = obj.get("@type")
         if obj_type is None:
             continue
-        if isinstance(obj_type, list):
-            if obj_type:
-                return obj_type[0]
-        else:
-            return obj_type
+        candidates = obj_type if isinstance(obj_type, list) else [obj_type]
+        for t in candidates:
+            if not isinstance(t, str):
+                continue
+            rank = _type_rank(t)
+            if rank < best_rank:
+                best_rank = rank
+                best = t
+                if rank == 0:
+                    return best
+    return best
+
+
+_CANONICAL_PATTERN = re.compile(
+    r'<link[^>]+rel=["\']canonical["\'][^>]+href=["\']([^"\']+)["\']',
+    re.IGNORECASE,
+)
+
+
+def _normalized_host(url: str) -> str:
+    host = urlparse(url).netloc.lower()
+    if host.startswith("www."):
+        host = host[4:]
+    return host
+
+
+def _canonical_host_mismatch(html: str, url: str) -> str | None:
+    """If the canonical link points to a different host than the requested URL,
+    return the canonical URL. Relative canonicals and same-host canonicals return None."""
+    m = _CANONICAL_PATTERN.search(html)
+    if not m:
+        return None
+    canonical = m.group(1).strip()
+    canonical_host = _normalized_host(canonical)
+    if not canonical_host:
+        return None
+    if canonical_host != _normalized_host(url):
+        return canonical
     return None
 
 
@@ -125,13 +175,20 @@ def _check_soft_404(html: str) -> bool:
     return False
 
 
-def validate(html: str) -> ValidationResult:
-    # 1. JSON-LD — if present, the page has real structured content
+def validate(html: str, url: str | None = None) -> ValidationResult:
+    # 1. Canonical host mismatch — we were served a different page (e.g. NYT
+    # Cooking substitutes the nytimes.com homepage when access is blocked).
+    if url:
+        wrong = _canonical_host_mismatch(html, url)
+        if wrong:
+            return ValidationResult("blocked", f"canonical host mismatch: {wrong}")
+
+    # 2. JSON-LD — if present, the page has real structured content
     jsonld_type = _find_jsonld_type(html)
     if jsonld_type:
         return ValidationResult(jsonld_type, f"JSON-LD @type: {jsonld_type}")
 
-    # 2. No JSON-LD — check for blockers
+    # 3. No JSON-LD — check for blockers
     if len(html.encode("utf-8")) < MIN_PAGE_SIZE:
         return ValidationResult("blocked", "Size under 5KB — likely not a content page")
 
@@ -146,7 +203,7 @@ def validate(html: str) -> ValidationResult:
     if len(visible_text) < MIN_TEXT_LENGTH:
         return ValidationResult("blocked", "Insufficient visible text — likely empty JS shell")
 
-    # 3. Has content but no JSON-LD
+    # 4. Has content but no JSON-LD
     return ValidationResult("unverified", "No JSON-LD found")
 
 

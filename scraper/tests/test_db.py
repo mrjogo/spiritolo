@@ -209,6 +209,148 @@ def test_get_pending_filters_by_content_type(tmp_db):
     db.close()
 
 
+def test_schema_has_classifications_table(tmp_db):
+    db = Database(tmp_db)
+    rows = db.conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='classifications'"
+    ).fetchall()
+    assert len(rows) == 1
+    cols = db.conn.execute("PRAGMA table_info(classifications)").fetchall()
+    col_names = {r[1] for r in cols}
+    assert {"id", "page_id", "label", "model", "prompt_version", "raw_response", "latency_ms", "created_at"} <= col_names
+    db.close()
+
+
+def test_record_classification_writes_both_tables(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipe/1")
+    page_id = db.conn.execute("SELECT id FROM pages LIMIT 1").fetchone()["id"]
+
+    db.record_classification(
+        page_id=page_id,
+        label="likely_drink_recipe",
+        model="qwen3:14b",
+        prompt_version="v1",
+        raw_response='{"label": "likely_drink_recipe"}',
+        latency_ms=423,
+    )
+
+    page = db.conn.execute("SELECT content_type FROM pages WHERE id = ?", (page_id,)).fetchone()
+    assert page["content_type"] == "likely_drink_recipe"
+
+    clsf = db.conn.execute("SELECT * FROM classifications WHERE page_id = ?", (page_id,)).fetchone()
+    assert clsf["label"] == "likely_drink_recipe"
+    assert clsf["model"] == "qwen3:14b"
+    assert clsf["prompt_version"] == "v1"
+    assert clsf["raw_response"] == '{"label": "likely_drink_recipe"}'
+    assert clsf["latency_ms"] == 423
+    assert clsf["created_at"] is not None
+    db.close()
+
+
+def test_record_classification_allows_reclassification(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipe/1")
+    page_id = db.conn.execute("SELECT id FROM pages LIMIT 1").fetchone()["id"]
+
+    db.record_classification(page_id, "likely_drink_recipe", "qwen3:14b", "v1", "{}", 100)
+    db.record_classification(page_id, "likely_food_recipe", "qwen3:14b", "v2", "{}", 100)
+
+    rows = db.conn.execute("SELECT label, prompt_version FROM classifications WHERE page_id = ? ORDER BY id", (page_id,)).fetchall()
+    assert [(r["label"], r["prompt_version"]) for r in rows] == [
+        ("likely_drink_recipe", "v1"),
+        ("likely_food_recipe", "v2"),
+    ]
+    page = db.conn.execute("SELECT content_type FROM pages WHERE id = ?", (page_id,)).fetchone()
+    assert page["content_type"] == "likely_food_recipe"
+    db.close()
+
+
+def test_get_unclassified_returns_null_content_type(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("site_a", "https://a.com/1")
+    db.add_url("site_a", "https://a.com/2")
+    db.add_url("site_b", "https://b.com/1")
+    db.set_content_type("https://a.com/1", "likely_drink_recipe")
+
+    rows = db.get_unclassified()
+    urls = sorted(r["url"] for r in rows)
+    assert urls == ["https://a.com/2", "https://b.com/1"]
+    db.close()
+
+
+def test_get_unclassified_filters_by_site(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("site_a", "https://a.com/1")
+    db.add_url("site_b", "https://b.com/1")
+    rows = db.get_unclassified(site="site_a")
+    assert len(rows) == 1
+    assert rows[0]["site"] == "site_a"
+    db.close()
+
+
+def test_get_unclassified_respects_limit(tmp_db):
+    db = Database(tmp_db)
+    for i in range(10):
+        db.add_url("testsite", f"https://example.com/{i}")
+    rows = db.get_unclassified(limit=3)
+    assert len(rows) == 3
+    db.close()
+
+
+def test_get_unclassified_includes_sitemap_source_and_id(tmp_db):
+    db = Database(tmp_db)
+    db.add_urls_batch("testsite", ["https://example.com/1"], sitemap_source="recipes.xml")
+    rows = db.get_unclassified()
+    assert rows[0]["sitemap_source"] == "recipes.xml"
+    assert isinstance(rows[0]["id"], int)
+    db.close()
+
+
+def test_sample_classifications_returns_joined_rows(tmp_db):
+    db = Database(tmp_db)
+    for i in range(3):
+        db.add_url("site_a", f"https://a.com/{i}")
+    page_ids = [r["id"] for r in db.conn.execute("SELECT id FROM pages ORDER BY id").fetchall()]
+    for pid in page_ids:
+        db.record_classification(pid, "likely_drink_recipe", "qwen3:14b", "v1", '{"label":"likely_drink_recipe"}', 100)
+
+    rows = db.sample_classifications(site="site_a", label="likely_drink_recipe", n=2)
+    assert len(rows) == 2
+    assert {r["url"] for r in rows} <= {"https://a.com/0", "https://a.com/1", "https://a.com/2"}
+    assert rows[0]["label"] == "likely_drink_recipe"
+    assert rows[0]["raw_response"] == '{"label":"likely_drink_recipe"}'
+    db.close()
+
+
+def test_sample_classifications_scopes_by_site_and_label(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("site_a", "https://a.com/1")
+    db.add_url("site_b", "https://b.com/1")
+    a_id = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://a.com/1",)).fetchone()["id"]
+    b_id = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://b.com/1",)).fetchone()["id"]
+    db.record_classification(a_id, "likely_drink_recipe", "qwen3:14b", "v1", "{}", 100)
+    db.record_classification(b_id, "likely_food_recipe", "qwen3:14b", "v1", "{}", 100)
+
+    rows = db.sample_classifications(site="site_a", label="likely_drink_recipe", n=10)
+    assert len(rows) == 1
+    assert rows[0]["url"] == "https://a.com/1"
+    db.close()
+
+
+def test_sample_classifications_deduplicates_reclassified_pages(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("site_a", "https://a.com/1")
+    pid = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://a.com/1",)).fetchone()["id"]
+    db.record_classification(pid, "likely_drink_recipe", "qwen3:14b", "v1", "first", 100)
+    db.record_classification(pid, "likely_drink_recipe", "qwen3:14b", "v2", "second", 100)
+
+    rows = db.sample_classifications(site="site_a", label="likely_drink_recipe", n=10)
+    assert len(rows) == 1
+    assert rows[0]["raw_response"] == "second"
+    db.close()
+
+
 def test_db_safe_from_multiple_threads(tmp_db):
     """Regression: Database used to raise 'SQLite objects created in a thread
     can only be used in that same thread' when accessed from worker threads.

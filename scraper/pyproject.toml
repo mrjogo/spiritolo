@@ -8,12 +8,14 @@ dependencies = [
     "pyyaml>=6.0",
     "cssselect>=1.2",
     "python-dotenv>=1.0",
+    "ollama>=0.4",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "responses>=0.25",
+    "pytest-asyncio>=0.23",
 ]
 
 [build-system]
@@ -28,3 +30,4 @@ find = {where = ["."]}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+asyncio_mode = "auto"

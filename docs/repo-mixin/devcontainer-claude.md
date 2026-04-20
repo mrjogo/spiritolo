@@ -1,8 +1,8 @@
 # devcontainer-claude mixin
 
 Applied from: https://github.com/mrjogo/repo-mixin/tree/main/mixins/devcontainer-claude
-Applied commit: 0b97f52ad7efad619bee341ff2d83f0a24a46fc4
-Applied: 2026-04-18
+Applied commit: 7df795465f52bec8658e88919c2982d20652f881
+Applied: 2026-04-20
 
 ## What this does
 

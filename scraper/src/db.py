@@ -28,6 +28,24 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_pages_status_content_type ON pages(status, content_type);",
 ]
 
+CREATE_CLASSIFICATIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS classifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    page_id INTEGER NOT NULL REFERENCES pages(id),
+    label TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    raw_response TEXT,
+    latency_ms INTEGER,
+    created_at TEXT NOT NULL
+);
+"""
+
+CREATE_CLASSIFICATIONS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_classifications_page_id ON classifications(page_id);",
+    "CREATE INDEX IF NOT EXISTS idx_classifications_label ON classifications(label);",
+]
+
 
 class Database:
     def __init__(self, db_path: str | Path):
@@ -37,6 +55,10 @@ class Database:
         with self._lock:
             self.conn.execute(CREATE_TABLE)
             for idx in CREATE_INDEXES:
+                self.conn.execute(idx)
+            self.conn.commit()
+            self.conn.execute(CREATE_CLASSIFICATIONS_TABLE)
+            for idx in CREATE_CLASSIFICATIONS_INDEXES:
                 self.conn.execute(idx)
             self.conn.commit()
 
@@ -153,6 +175,71 @@ class Database:
                 [content_type] + ids,
             )
             self.conn.commit()
+
+    def record_classification(
+        self,
+        page_id: int,
+        label: str,
+        model: str,
+        prompt_version: str,
+        raw_response: str | None,
+        latency_ms: int | None,
+    ):
+        """Insert an audit record and update pages.content_type atomically."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO classifications (page_id, label, model, prompt_version, raw_response, latency_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (page_id, label, model, prompt_version, raw_response, latency_ms, now),
+            )
+            self.conn.execute(
+                "UPDATE pages SET content_type = ? WHERE id = ?",
+                (label, page_id),
+            )
+            self.conn.commit()
+
+    def get_unclassified(self, site: str | None = None, limit: int | None = None) -> list[dict]:
+        """Work queue for the classifier. Returns rows with `content_type IS NULL`.
+
+        Deliberately ignores `status` — the classifier reads the URL string, not
+        the page body, so blocked/failed pages are still classifiable. Orders by
+        `id` so iteration is deterministic and resumable across runs.
+        """
+        query = "SELECT id, site, url, sitemap_source FROM pages WHERE content_type IS NULL"
+        params: list = []
+        if site:
+            query += " AND site = ?"
+            params.append(site)
+        query += " ORDER BY id"
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+        with self._lock:
+            rows = self.conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def sample_classifications(self, site: str, label: str, n: int = 10) -> list[dict]:
+        """Return n random (url, label, raw_response) rows for a (site, label) pair.
+
+        Returns the MOST RECENT classification per page, so re-classifications don't
+        produce duplicates in the sample.
+        """
+        with self._lock:
+            rows = self.conn.execute(
+                """
+                SELECT p.url, c.label, c.raw_response, c.created_at
+                FROM classifications c
+                JOIN pages p ON p.id = c.page_id
+                WHERE p.site = ? AND c.label = ?
+                  AND c.id = (
+                      SELECT MAX(id) FROM classifications WHERE page_id = c.page_id
+                  )
+                ORDER BY RANDOM()
+                LIMIT ?
+                """,
+                (site, label, n),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def get_by_content_type(self, content_type: str, site: str | None = None, limit: int | None = None) -> list[dict]:
         query = "SELECT * FROM pages WHERE content_type = ?"
