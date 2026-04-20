@@ -124,7 +124,7 @@ def fetch_pages(
                 time.sleep(delay)
             return
 
-        result = validate(html)
+        result = validate(html, url=url)
         if result.status == "blocked":
             db.mark_blocked(url, result.reason or "blocked")
             with state_lock:

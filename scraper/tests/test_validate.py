@@ -71,14 +71,83 @@ def test_jsonld_itemlist_type():
 
 
 def test_jsonld_list_type():
-    """@type can be a list like ["Article", "NewsArticle"]."""
+    """@type can be a list like ["Article", "NewsArticle"] — prefer the more specific type."""
     html = """<html><body>
     <script type="application/ld+json">
     {"@type": ["Article", "NewsArticle"], "name": "Bar Review"}
     </script>
     """ + "<p>content</p>" * 500 + "</body></html>"
     result = validate(html)
-    assert result.status == "Article"
+    assert result.status == "NewsArticle"
+
+
+def test_jsonld_recipe_after_article_wrapper():
+    """Tasting Table pattern: Article block appears before Recipe block — Recipe should win."""
+    html = """<html><body>
+    <script type="application/ld+json">
+    {"@type": "Article", "name": "How to Make a Margarita"}
+    </script>
+    <script type="application/ld+json">
+    {"@type": "Recipe", "name": "Margarita", "recipeIngredient": ["tequila", "lime"]}
+    </script>
+    """ + "<p>content</p>" * 500 + "</body></html>"
+    result = validate(html)
+    assert result.status == "Recipe"
+
+
+def test_jsonld_recipe_in_graph_after_webpage():
+    """NYT-style @graph with WebPage first, Recipe later — Recipe should win."""
+    html = """<html><body>
+    <script type="application/ld+json">
+    {"@graph": [
+        {"@type": "WebPage", "name": "Page"},
+        {"@type": "Recipe", "name": "Negroni", "recipeIngredient": ["gin"]}
+    ]}
+    </script>
+    """ + "<p>content</p>" * 500 + "</body></html>"
+    result = validate(html)
+    assert result.status == "Recipe"
+
+
+def test_canonical_host_mismatch_blocks():
+    """When canonical points to a different host, we were served the wrong page."""
+    html = """<html><head>
+    <link rel="canonical" href="https://www.nytimes.com" />
+    <script type="application/ld+json">{"@type": "WebSite", "name": "NYT"}</script>
+    </head><body>""" + "<p>content</p>" * 500 + "</body></html>"
+    result = validate(html, url="https://cooking.nytimes.com/recipes/1027655-andrica-calmer-cocktail")
+    assert result.status == "blocked"
+    assert "canonical" in result.reason.lower()
+
+
+def test_canonical_same_host_allowed():
+    """Canonical on same host (www stripped) is fine."""
+    html = """<html><head>
+    <link rel="canonical" href="https://cooking.nytimes.com/recipes/foo" />
+    <script type="application/ld+json">{"@type": "Recipe", "name": "Foo", "recipeIngredient": ["gin"]}</script>
+    </head><body>""" + "<p>content</p>" * 500 + "</body></html>"
+    result = validate(html, url="https://cooking.nytimes.com/recipes/foo")
+    assert result.status == "Recipe"
+
+
+def test_canonical_relative_url_allowed():
+    """Relative canonicals have no host and should be treated as same-host."""
+    html = """<html><head>
+    <link rel="canonical" href="/recipes/foo" />
+    <script type="application/ld+json">{"@type": "Recipe", "name": "Foo", "recipeIngredient": ["gin"]}</script>
+    </head><body>""" + "<p>content</p>" * 500 + "</body></html>"
+    result = validate(html, url="https://example.com/recipes/foo")
+    assert result.status == "Recipe"
+
+
+def test_canonical_check_skipped_without_url():
+    """validate() works without URL (e.g. in tests) — no canonical check then."""
+    html = """<html><head>
+    <link rel="canonical" href="https://other.com" />
+    <script type="application/ld+json">{"@type": "Recipe", "name": "X", "recipeIngredient": ["a"]}</script>
+    </head><body>""" + "<p>content</p>" * 500 + "</body></html>"
+    result = validate(html)
+    assert result.status == "Recipe"
 
 
 def test_classify_drink_from_category(sample_drink_recipe_html):
