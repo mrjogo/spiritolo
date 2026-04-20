@@ -4,6 +4,7 @@ Main run: asyncio pool of workers pulling unclassified rows, classifying each
 via ollama, writing back to pages.content_type + classifications audit table.
 """
 
+import asyncio
 import logging
 from typing import Awaitable, Callable
 
@@ -42,3 +43,34 @@ async def classify_one(
         raw_response=result.raw_response,
         latency_ms=result.latency_ms,
     )
+
+
+async def run_classify_pool(
+    rows: list[dict],
+    classify_fn: ClassifyFn,
+    db: Database,
+    model: str,
+    prompt_version: str,
+    concurrency: int = 4,
+    on_progress: Callable[[int, int], None] | None = None,
+) -> None:
+    """Run classify_one over rows with at most `concurrency` in-flight calls.
+
+    on_progress(done, total) is invoked after each row completes, so the CLI
+    can render a progress bar without this module knowing anything about UI.
+    """
+    sem = asyncio.Semaphore(concurrency)
+    total = len(rows)
+    done = 0
+    done_lock = asyncio.Lock()
+
+    async def worker(r: dict):
+        nonlocal done
+        async with sem:
+            await classify_one(r, classify_fn, db, model, prompt_version)
+        async with done_lock:
+            done += 1
+            if on_progress:
+                on_progress(done, total)
+
+    await asyncio.gather(*(worker(r) for r in rows))

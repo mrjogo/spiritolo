@@ -1,8 +1,9 @@
+import asyncio
 from unittest.mock import AsyncMock
 
 import pytest
 
-from scraper.src.classify import classify_one
+from scraper.src.classify import classify_one, run_classify_pool
 from scraper.src.db import Database
 from scraper.src.ollama_client import ClassificationResult
 
@@ -86,4 +87,65 @@ async def test_classify_one_swallows_transport_errors(tmp_db):
     assert page["content_type"] is None
     clsf_count = db.conn.execute("SELECT COUNT(*) FROM classifications").fetchone()[0]
     assert clsf_count == 0
+    db.close()
+
+
+async def test_run_classify_pool_processes_all_rows(tmp_db):
+    db = Database(tmp_db)
+    for i in range(5):
+        db.add_url("testsite", f"https://example.com/{i}")
+    rows = db.get_unclassified()
+
+    fake_classify = AsyncMock(return_value=ClassificationResult(
+        label="likely_drink_recipe", raw_response="{}", latency_ms=10,
+    ))
+
+    await run_classify_pool(
+        rows=rows,
+        classify_fn=fake_classify,
+        db=db,
+        model="qwen3:14b",
+        prompt_version="v1",
+        concurrency=3,
+    )
+
+    count = db.conn.execute(
+        "SELECT COUNT(*) FROM pages WHERE content_type = 'likely_drink_recipe'"
+    ).fetchone()[0]
+    assert count == 5
+    assert fake_classify.await_count == 5
+    db.close()
+
+
+async def test_run_classify_pool_respects_concurrency_limit(tmp_db):
+    db = Database(tmp_db)
+    for i in range(10):
+        db.add_url("testsite", f"https://example.com/{i}")
+    rows = db.get_unclassified()
+
+    in_flight = 0
+    max_in_flight = 0
+    lock = asyncio.Lock()
+
+    async def tracking_classify(url, sitemap_source, model):
+        nonlocal in_flight, max_in_flight
+        async with lock:
+            in_flight += 1
+            max_in_flight = max(max_in_flight, in_flight)
+        await asyncio.sleep(0.01)
+        async with lock:
+            in_flight -= 1
+        return ClassificationResult(label="likely_junk", raw_response="{}", latency_ms=10)
+
+    await run_classify_pool(
+        rows=rows,
+        classify_fn=tracking_classify,
+        db=db,
+        model="m",
+        prompt_version="v",
+        concurrency=3,
+    )
+
+    assert max_in_flight <= 3
+    assert max_in_flight >= 2  # should actually parallelize
     db.close()
