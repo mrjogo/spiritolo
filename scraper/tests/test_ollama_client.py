@@ -2,6 +2,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
+from scraper.src.classify_prompt import LABELS
 from scraper.src.ollama_client import ClassificationResult, classify_url
 
 
@@ -48,6 +49,8 @@ async def test_classify_url_sends_system_and_user_messages(fake_ollama_response)
     assert messages[1]["role"] == "user"
     assert "https://example.com/x" in messages[1]["content"]
     assert kwargs["format"]["type"] == "object"
+    # The enum is the whole point of structured output — verify it.
+    assert kwargs["format"]["properties"]["label"]["enum"] == list(LABELS)
 
 
 async def test_classify_url_raises_on_invalid_label():

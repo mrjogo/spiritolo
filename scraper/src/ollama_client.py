@@ -36,7 +36,7 @@ async def classify_url(
     bubble up from the ollama library unchanged so the caller can decide
     retry policy.
     """
-    client = AsyncClient(host=host) if host else AsyncClient()
+    client = AsyncClient(host=host)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": build_user_message(url, sitemap_source)},
