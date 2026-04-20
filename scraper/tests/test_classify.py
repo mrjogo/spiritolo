@@ -326,3 +326,53 @@ def test_run_sample_prints_matching_rows(tmp_db, capsys):
     assert "negroni" in out
     assert "margarita" in out
     assert "salmon" not in out  # different site
+
+
+# ---------------------------------------------------------------------------
+# Task 13: End-to-end smoke test
+# ---------------------------------------------------------------------------
+
+from scraper.src.classify_prompt import PROMPT_VERSION
+
+
+@pytest.mark.asyncio
+async def test_end_to_end_classify_run_with_mocked_ollama(tmp_db):
+    db = Database(tmp_db)
+    # A mix of labels and a pre-classified row that must NOT be revisited.
+    db.add_url("liquor", "https://liquor.com/recipes/negroni")
+    db.add_url("liquor", "https://liquor.com/tag/gin")
+    db.add_url("liquor", "https://liquor.com/articles/home-bar-guide")
+    db.set_content_type("https://liquor.com/recipes/negroni", "likely_drink_recipe")
+
+    def fake_label_for(url):
+        if "/tag/" in url:
+            return "likely_junk"
+        if "/articles/" in url:
+            return "likely_drink_article"
+        return "likely_drink_recipe"
+
+    async def fake_classify(url, sitemap_source, model):
+        return ClassificationResult(
+            label=fake_label_for(url), raw_response="{}", latency_ms=5,
+        )
+
+    rows = db.get_unclassified()
+    assert len(rows) == 2  # pre-classified row excluded
+
+    await run_classify_pool(
+        rows=rows,
+        classify_fn=fake_classify,
+        db=db,
+        model="qwen3:14b",
+        prompt_version=PROMPT_VERSION,
+        concurrency=2,
+    )
+
+    labels = dict(db.conn.execute("SELECT url, content_type FROM pages").fetchall())
+    assert labels["https://liquor.com/recipes/negroni"] == "likely_drink_recipe"
+    assert labels["https://liquor.com/tag/gin"] == "likely_junk"
+    assert labels["https://liquor.com/articles/home-bar-guide"] == "likely_drink_article"
+
+    clsf_count = db.conn.execute("SELECT COUNT(*) FROM classifications").fetchone()[0]
+    assert clsf_count == 2  # only the two new classifications, not the pre-existing row
+    db.close()
