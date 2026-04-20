@@ -298,3 +298,31 @@ async def test_run_review_reports_pass_and_fail_counts(tmp_path, capsys):
     assert "1/2 correct" in out or "correct: 1" in out
     assert "https://b.com/1" in out  # failing row must be printed
     assert rc in (0, 1)  # 0 if all pass, 1 if any fail — implementation choice
+
+
+# ---------------------------------------------------------------------------
+# Sample mode tests (Task 12)
+# ---------------------------------------------------------------------------
+
+from scraper.src.classify import run_sample
+
+
+def test_run_sample_prints_matching_rows(tmp_db, capsys):
+    db = Database(tmp_db)
+    db.add_url("liquor", "https://liquor.com/recipes/negroni")
+    db.add_url("liquor", "https://liquor.com/recipes/margarita")
+    db.add_url("foodnetwork", "https://foodnetwork.com/recipes/salmon")
+
+    ids = {r["url"]: r["id"] for r in db.conn.execute("SELECT id, url FROM pages").fetchall()}
+    db.record_classification(ids["https://liquor.com/recipes/negroni"], "likely_drink_recipe", "qwen3:14b", "v1", "{}", 1)
+    db.record_classification(ids["https://liquor.com/recipes/margarita"], "likely_drink_recipe", "qwen3:14b", "v1", "{}", 1)
+    db.record_classification(ids["https://foodnetwork.com/recipes/salmon"], "likely_food_recipe", "qwen3:14b", "v1", "{}", 1)
+    db.close()
+
+    rc = run_sample(db_path=tmp_db, site="liquor", category="likely_drink_recipe", n=10)
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "negroni" in out
+    assert "margarita" in out
+    assert "salmon" not in out  # different site

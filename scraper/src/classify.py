@@ -216,9 +216,24 @@ async def run_review(
     return 0 if correct == total else 1
 
 
+def run_sample(db_path: str | Path, site: str, category: str, n: int = 10) -> int:
+    if not site or not category:
+        print("--sample requires both --site and --category", file=sys.stderr)
+        return 2
+    db = Database(db_path)
+    rows = db.sample_classifications(site=site, label=category, n=n)
+    db.close()
+    if not rows:
+        print(f"No classifications found for site={site} category={category}")
+        return 0
+    for r in rows:
+        print(f"{r['url']}")
+        print(f"    raw: {r['raw_response']}")
+    return 0
+
+
 def _run_sample(args: argparse.Namespace) -> int:
-    # Implemented in Task 12.
-    raise NotImplementedError("--sample is added in a later task")
+    return run_sample(db_path=args.db, site=args.site, category=args.category, n=args.n)
 
 
 async def _run_review(args: argparse.Namespace) -> int:
