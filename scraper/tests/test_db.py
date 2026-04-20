@@ -221,6 +221,51 @@ def test_schema_has_classifications_table(tmp_db):
     db.close()
 
 
+def test_record_classification_writes_both_tables(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipe/1")
+    page_id = db.conn.execute("SELECT id FROM pages LIMIT 1").fetchone()["id"]
+
+    db.record_classification(
+        page_id=page_id,
+        label="likely_drink_recipe",
+        model="qwen3:14b",
+        prompt_version="v1",
+        raw_response='{"label": "likely_drink_recipe"}',
+        latency_ms=423,
+    )
+
+    page = db.conn.execute("SELECT content_type FROM pages WHERE id = ?", (page_id,)).fetchone()
+    assert page["content_type"] == "likely_drink_recipe"
+
+    clsf = db.conn.execute("SELECT * FROM classifications WHERE page_id = ?", (page_id,)).fetchone()
+    assert clsf["label"] == "likely_drink_recipe"
+    assert clsf["model"] == "qwen3:14b"
+    assert clsf["prompt_version"] == "v1"
+    assert clsf["raw_response"] == '{"label": "likely_drink_recipe"}'
+    assert clsf["latency_ms"] == 423
+    assert clsf["created_at"] is not None
+    db.close()
+
+
+def test_record_classification_allows_reclassification(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipe/1")
+    page_id = db.conn.execute("SELECT id FROM pages LIMIT 1").fetchone()["id"]
+
+    db.record_classification(page_id, "likely_drink_recipe", "qwen3:14b", "v1", "{}", 100)
+    db.record_classification(page_id, "likely_food_recipe", "qwen3:14b", "v2", "{}", 100)
+
+    rows = db.conn.execute("SELECT label, prompt_version FROM classifications WHERE page_id = ? ORDER BY id", (page_id,)).fetchall()
+    assert [(r["label"], r["prompt_version"]) for r in rows] == [
+        ("likely_drink_recipe", "v1"),
+        ("likely_food_recipe", "v2"),
+    ]
+    page = db.conn.execute("SELECT content_type FROM pages WHERE id = ?", (page_id,)).fetchone()
+    assert page["content_type"] == "likely_food_recipe"
+    db.close()
+
+
 def test_db_safe_from_multiple_threads(tmp_db):
     """Regression: Database used to raise 'SQLite objects created in a thread
     can only be used in that same thread' when accessed from worker threads.

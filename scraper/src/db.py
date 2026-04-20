@@ -176,6 +176,28 @@ class Database:
             )
             self.conn.commit()
 
+    def record_classification(
+        self,
+        page_id: int,
+        label: str,
+        model: str,
+        prompt_version: str,
+        raw_response: str | None,
+        latency_ms: int | None,
+    ):
+        """Insert an audit record and update pages.content_type atomically."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self.conn.execute(
+                "INSERT INTO classifications (page_id, label, model, prompt_version, raw_response, latency_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (page_id, label, model, prompt_version, raw_response, latency_ms, now),
+            )
+            self.conn.execute(
+                "UPDATE pages SET content_type = ? WHERE id = ?",
+                (label, page_id),
+            )
+            self.conn.commit()
+
     def get_by_content_type(self, content_type: str, site: str | None = None, limit: int | None = None) -> list[dict]:
         query = "SELECT * FROM pages WHERE content_type = ?"
         params: list = [content_type]
