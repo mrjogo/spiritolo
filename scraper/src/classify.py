@@ -31,7 +31,7 @@ async def classify_one(
             model=model,
         )
     except Exception as e:
-        log.warning("classify failed for id=%s url=%s: %s", row["id"], row["url"], e)
+        log.warning("classify failed for id=%s url=%s: %s", row["id"], row["url"], e, exc_info=True)
         return
 
     db.record_classification(

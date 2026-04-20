@@ -69,3 +69,21 @@ async def test_classify_one_leaves_row_unclassified_on_error(tmp_db):
     clsf_count = db.conn.execute("SELECT COUNT(*) FROM classifications").fetchone()[0]
     assert clsf_count == 0
     db.close()
+
+
+async def test_classify_one_swallows_transport_errors(tmp_db):
+    """Network/transport failures (OSError) must be treated like content errors:
+    log and leave the row NULL for the next run to retry."""
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipe/1")
+    row = db.get_unclassified()[0]
+
+    fake_classify = AsyncMock(side_effect=OSError("connection refused"))
+
+    await classify_one(row=row, classify_fn=fake_classify, db=db, model="m", prompt_version="v")
+
+    page = db.conn.execute("SELECT content_type FROM pages").fetchone()
+    assert page["content_type"] is None
+    clsf_count = db.conn.execute("SELECT COUNT(*) FROM classifications").fetchone()[0]
+    assert clsf_count == 0
+    db.close()
