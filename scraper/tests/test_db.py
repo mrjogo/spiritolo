@@ -338,6 +338,19 @@ def test_sample_classifications_scopes_by_site_and_label(tmp_db):
     db.close()
 
 
+def test_sample_classifications_deduplicates_reclassified_pages(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("site_a", "https://a.com/1")
+    pid = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://a.com/1",)).fetchone()["id"]
+    db.record_classification(pid, "likely_drink_recipe", "qwen3:14b", "v1", "first", 100)
+    db.record_classification(pid, "likely_drink_recipe", "qwen3:14b", "v2", "second", 100)
+
+    rows = db.sample_classifications(site="site_a", label="likely_drink_recipe", n=10)
+    assert len(rows) == 1
+    assert rows[0]["raw_response"] == "second"
+    db.close()
+
+
 def test_db_safe_from_multiple_threads(tmp_db):
     """Regression: Database used to raise 'SQLite objects created in a thread
     can only be used in that same thread' when accessed from worker threads.
