@@ -31,9 +31,12 @@ async def classify_one(
     db: Database,
     model: str,
     prompt_version: str,
-) -> None:
+) -> bool:
     """Classify one row. Errors are logged and the row is left unclassified
-    so a future run will retry it."""
+    so a future run will retry it.
+
+    Returns True if the row was classified and written, False on any error.
+    """
     try:
         result = await classify_fn(
             url=row["url"],
@@ -42,7 +45,7 @@ async def classify_one(
         )
     except Exception as e:
         log.warning("classify failed for id=%s url=%s: %s", row["id"], row["url"], e, exc_info=True)
-        return
+        return False
 
     db.record_classification(
         page_id=row["id"],
@@ -52,6 +55,7 @@ async def classify_one(
         raw_response=result.raw_response,
         latency_ms=result.latency_ms,
     )
+    return True
 
 
 async def run_classify_pool(
@@ -62,25 +66,32 @@ async def run_classify_pool(
     prompt_version: str,
     concurrency: int = 4,
     on_progress: Callable[[int, int], None] | None = None,
-) -> None:
+) -> int:
     """Run classify_one over rows with at most `concurrency` in-flight calls.
 
     on_progress(done, total) is invoked after each row completes, so the CLI
     can render a progress bar without this module knowing anything about UI.
+
+    Returns the count of successfully classified rows (failures are swallowed
+    by classify_one; this number lets callers detect zero-progress batches).
     """
     sem = asyncio.Semaphore(concurrency)
     total = len(rows)
     done = 0
+    successes = 0
 
     async def worker(r: dict):
-        nonlocal done
+        nonlocal done, successes
         async with sem:
-            await classify_one(r, classify_fn, db, model, prompt_version)
+            ok = await classify_one(r, classify_fn, db, model, prompt_version)
+        if ok:
+            successes += 1
         done += 1
         if on_progress:
             on_progress(done, total)
 
     await asyncio.gather(*(worker(r) for r in rows))
+    return successes
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
@@ -121,44 +132,58 @@ async def run_main(args: argparse.Namespace) -> int:
     as an asyncio.Task would consume hundreds of MB of task-object memory.
     Batching keeps that bounded and is otherwise indistinguishable from a
     single big run because the work queue is just `content_type IS NULL`.
+
+    If a batch produces zero successful classifications (e.g. ollama is down),
+    we abort rather than spin forever on the same NULL rows.
     """
     db = Database(args.db)
     remaining = args.limit  # None means "no limit"
     grand_total = 0
+    exit_code = 0
+    try:
+        while True:
+            if remaining is not None and remaining <= 0:
+                break
+            batch_limit = args.batch_size if remaining is None else min(args.batch_size, remaining)
+            rows = db.get_unclassified(site=args.site, limit=batch_limit)
+            if not rows:
+                break
 
-    while True:
-        if remaining is not None and remaining <= 0:
-            break
-        batch_limit = args.batch_size if remaining is None else min(args.batch_size, remaining)
-        rows = db.get_unclassified(site=args.site, limit=batch_limit)
-        if not rows:
-            break
+            if grand_total == 0:
+                print(f"Classifying via {args.model} (concurrency={args.concurrency}, "
+                      f"batch_size={args.batch_size}, prompt={PROMPT_VERSION})")
+            print(f"Batch of {len(rows)} (processed so far: {grand_total})")
 
-        if grand_total == 0:
-            print(f"Classifying via {args.model} (concurrency={args.concurrency}, "
-                  f"batch_size={args.batch_size}, prompt={PROMPT_VERSION})")
-        print(f"Batch of {len(rows)} (processed so far: {grand_total})")
+            successes = await run_classify_pool(
+                rows=rows,
+                classify_fn=classify_url,
+                db=db,
+                model=args.model,
+                prompt_version=PROMPT_VERSION,
+                concurrency=args.concurrency,
+                on_progress=_progress,
+            )
 
-        await run_classify_pool(
-            rows=rows,
-            classify_fn=classify_url,
-            db=db,
-            model=args.model,
-            prompt_version=PROMPT_VERSION,
-            concurrency=args.concurrency,
-            on_progress=_progress,
-        )
+            if successes == 0:
+                print(
+                    f"ERROR: batch of {len(rows)} produced zero classifications. "
+                    "Is ollama running? Aborting to avoid an infinite loop.",
+                    file=sys.stderr,
+                )
+                exit_code = 1
+                break
 
-        grand_total += len(rows)
-        if remaining is not None:
-            remaining -= len(rows)
+            grand_total += len(rows)
+            if remaining is not None:
+                remaining -= len(rows)
 
-    if grand_total == 0:
-        print("No unclassified rows. Done.")
-    else:
-        print(f"Done. Classified {grand_total} rows.")
-    db.close()
-    return 0
+        if grand_total == 0 and exit_code == 0:
+            print("No unclassified rows. Done.")
+        elif exit_code == 0:
+            print(f"Done. Classified {grand_total} rows.")
+    finally:
+        db.close()
+    return exit_code
 
 
 def main(argv: list[str] | None = None) -> int:

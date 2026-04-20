@@ -376,3 +376,59 @@ async def test_end_to_end_classify_run_with_mocked_ollama(tmp_db):
     clsf_count = db.conn.execute("SELECT COUNT(*) FROM classifications").fetchone()[0]
     assert clsf_count == 2  # only the two new classifications, not the pre-existing row
     db.close()
+
+
+# ---------------------------------------------------------------------------
+# Infinite-loop guard and success-count tests
+# ---------------------------------------------------------------------------
+
+async def test_run_main_aborts_when_batch_produces_zero_successes(tmp_db, monkeypatch, capsys):
+    """If ollama is down, every classify call fails and every row stays NULL.
+    The next batch would return the same rows, so the loop must abort instead
+    of spinning forever."""
+    db = Database(tmp_db)
+    for i in range(3):
+        db.add_url("testsite", f"https://example.com/{i}")
+    db.close()
+
+    always_fails = AsyncMock(side_effect=OSError("ollama unreachable"))
+    monkeypatch.setattr("scraper.src.classify.classify_url", always_fails)
+
+    parser = build_arg_parser()
+    args = parser.parse_args(["--db", str(tmp_db), "--batch-size", "3"])
+
+    from scraper.src.classify import run_main
+    rc = await run_main(args)
+
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "zero classifications" in err
+
+    # No row should have been classified.
+    db2 = Database(tmp_db)
+    count = db2.conn.execute("SELECT COUNT(*) FROM pages WHERE content_type IS NOT NULL").fetchone()[0]
+    assert count == 0
+    db2.close()
+
+
+async def test_run_classify_pool_returns_success_count(tmp_db):
+    db = Database(tmp_db)
+    for i in range(4):
+        db.add_url("testsite", f"https://example.com/{i}")
+    rows = db.get_unclassified()
+
+    # Two succeed, two fail.
+    call_count = 0
+    async def sometimes(url, sitemap_source, model):
+        nonlocal call_count
+        call_count += 1
+        if call_count <= 2:
+            return ClassificationResult(label="likely_junk", raw_response="{}", latency_ms=1)
+        raise OSError("boom")
+
+    successes = await run_classify_pool(
+        rows=rows, classify_fn=sometimes, db=db,
+        model="m", prompt_version="v", concurrency=1,
+    )
+    assert successes == 2
+    db.close()
