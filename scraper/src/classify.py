@@ -6,6 +6,7 @@ via ollama, writing back to pages.content_type + classifications audit table.
 
 import argparse
 import asyncio
+import json
 import logging
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ from scraper.src.ollama_client import ClassificationResult, classify_url
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
+DEFAULT_EVAL_PATH = Path(__file__).resolve().parent.parent / "eval" / "classify-urls.jsonl"
 
 log = logging.getLogger(__name__)
 
@@ -170,14 +172,59 @@ def main(argv: list[str] | None = None) -> int:
     return asyncio.run(run_main(args))
 
 
+def load_eval_set(path: Path) -> list[dict]:
+    entries = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            entries.append(json.loads(line))
+    return entries
+
+
+async def run_review(
+    eval_path: Path,
+    classify_fn: ClassifyFn,
+    model: str,
+) -> int:
+    entries = load_eval_set(eval_path)
+    correct = 0
+    failures: list[tuple[dict, str]] = []
+    for e in entries:
+        try:
+            result = await classify_fn(
+                url=e["url"], sitemap_source=e.get("sitemap_source"), model=model,
+            )
+            predicted = result.label
+        except Exception as err:
+            predicted = f"ERROR: {err}"
+        expected = e["expected"]
+        if predicted == expected:
+            correct += 1
+        else:
+            failures.append((e, predicted))
+
+    total = len(entries)
+    print(f"{correct}/{total} correct ({100*correct/total:.1f}%)")
+    if failures:
+        print("\nFailures:")
+        for e, predicted in failures:
+            print(f"  {e['url']}")
+            print(f"    expected:  {e['expected']}")
+            print(f"    predicted: {predicted}")
+    return 0 if correct == total else 1
+
+
 def _run_sample(args: argparse.Namespace) -> int:
     # Implemented in Task 12.
     raise NotImplementedError("--sample is added in a later task")
 
 
 async def _run_review(args: argparse.Namespace) -> int:
-    # Implemented in Task 11.
-    raise NotImplementedError("--review is added in a later task")
+    return await run_review(
+        eval_path=DEFAULT_EVAL_PATH, classify_fn=classify_url, model=args.model,
+    )
 
 
 if __name__ == "__main__":

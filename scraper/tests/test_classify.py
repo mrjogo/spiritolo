@@ -258,3 +258,43 @@ async def test_run_classify_pool_respects_concurrency_limit(tmp_db):
     assert max_in_flight <= 3
     assert max_in_flight >= 2  # should actually parallelize
     db.close()
+
+
+# ---------------------------------------------------------------------------
+# Review mode tests (Task 11)
+# ---------------------------------------------------------------------------
+
+from scraper.src.classify import load_eval_set, run_review
+
+
+def test_load_eval_set_parses_jsonl(tmp_path):
+    p = tmp_path / "eval.jsonl"
+    p.write_text(
+        '{"url": "https://a.com/1", "sitemap_source": "s.xml", "expected": "likely_drink_recipe"}\n'
+        '{"url": "https://b.com/1", "sitemap_source": null, "expected": "likely_junk"}\n'
+    )
+    entries = load_eval_set(p)
+    assert len(entries) == 2
+    assert entries[0]["url"] == "https://a.com/1"
+    assert entries[0]["expected"] == "likely_drink_recipe"
+    assert entries[1]["sitemap_source"] is None
+
+
+async def test_run_review_reports_pass_and_fail_counts(tmp_path, capsys):
+    eval_path = tmp_path / "eval.jsonl"
+    eval_path.write_text(
+        '{"url": "https://a.com/1", "sitemap_source": null, "expected": "likely_drink_recipe"}\n'
+        '{"url": "https://b.com/1", "sitemap_source": null, "expected": "likely_junk"}\n'
+    )
+
+    async def fake_classify(url, sitemap_source, model):
+        if url == "https://a.com/1":
+            return ClassificationResult(label="likely_drink_recipe", raw_response="{}", latency_ms=1)
+        return ClassificationResult(label="likely_drink_article", raw_response="{}", latency_ms=1)
+
+    rc = await run_review(eval_path=eval_path, classify_fn=fake_classify, model="qwen3:14b")
+
+    out = capsys.readouterr().out
+    assert "1/2 correct" in out or "correct: 1" in out
+    assert "https://b.com/1" in out  # failing row must be printed
+    assert rc in (0, 1)  # 0 if all pass, 1 if any fail — implementation choice
