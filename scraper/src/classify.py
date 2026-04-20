@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import sys
+import time
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -118,12 +119,37 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _progress(done: int, total: int) -> None:
-    if done == total or done % 25 == 0:
-        pct = 100 * done / total if total else 0
-        print(f"\r  {done}/{total} ({pct:.1f}%)", end="", flush=True)
+def _format_eta(seconds: float) -> str:
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    if seconds < 3600:
+        return f"{int(seconds / 60)}m{int(seconds % 60):02d}s"
+    h = int(seconds / 3600)
+    m = int((seconds % 3600) / 60)
+    return f"{h}h{m:02d}m"
+
+
+def _make_overall_progress(
+    grand_total_offset: int, overall_total: int, start_time: float
+) -> Callable[[int, int], None]:
+    """Build an on_progress callback that reports overall progress, velocity,
+    and ETA — not just the within-batch fraction the pool sees."""
+    def progress(done: int, total: int) -> None:
+        if done != total and done % 25 != 0:
+            return
+        overall = grand_total_offset + done
+        elapsed = time.monotonic() - start_time
+        rate = overall / elapsed if elapsed > 0 else 0
+        eta_str = _format_eta((overall_total - overall) / rate) if rate > 0 else "?"
+        pct = 100 * overall / overall_total if overall_total else 0
+        print(
+            f"\r  {overall:,}/{overall_total:,} ({pct:.1f}%)  "
+            f"{rate:.1f}/s  ETA {eta_str}    ",
+            end="", flush=True,
+        )
         if done == total:
             print()
+    return progress
 
 
 async def run_main(args: argparse.Namespace) -> int:
@@ -151,6 +177,8 @@ async def run_main(args: argparse.Namespace) -> int:
     if args.limit is not None:
         overall_total = min(overall_total, args.limit)
 
+    start_time = time.monotonic()
+
     try:
         while True:
             if remaining is not None and remaining <= 0:
@@ -165,8 +193,7 @@ async def run_main(args: argparse.Namespace) -> int:
                 print(f"Classifying {overall_total:,} URLs ({scope}) via {args.model} "
                       f"(concurrency={args.concurrency}, batch_size={args.batch_size}, "
                       f"prompt={PROMPT_VERSION})")
-            pct = 100 * grand_total / overall_total if overall_total else 0
-            print(f"Batch of {len(rows)} ({grand_total:,}/{overall_total:,} done, {pct:.1f}%)")
+            print(f"Batch of {len(rows)}")
 
             successes = await run_classify_pool(
                 rows=rows,
@@ -175,7 +202,7 @@ async def run_main(args: argparse.Namespace) -> int:
                 model=args.model,
                 prompt_version=PROMPT_VERSION,
                 concurrency=args.concurrency,
-                on_progress=_progress,
+                on_progress=_make_overall_progress(grand_total, overall_total, start_time),
             )
 
             if successes == 0:
