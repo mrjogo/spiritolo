@@ -28,6 +28,24 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_pages_status_content_type ON pages(status, content_type);",
 ]
 
+CREATE_CLASSIFICATIONS_TABLE = """
+CREATE TABLE IF NOT EXISTS classifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    page_id INTEGER NOT NULL REFERENCES pages(id),
+    label TEXT NOT NULL,
+    model TEXT NOT NULL,
+    prompt_version TEXT NOT NULL,
+    raw_response TEXT,
+    latency_ms INTEGER,
+    created_at TEXT NOT NULL
+);
+"""
+
+CREATE_CLASSIFICATIONS_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_classifications_page_id ON classifications(page_id);",
+    "CREATE INDEX IF NOT EXISTS idx_classifications_label ON classifications(label);",
+]
+
 
 class Database:
     def __init__(self, db_path: str | Path):
@@ -37,6 +55,10 @@ class Database:
         with self._lock:
             self.conn.execute(CREATE_TABLE)
             for idx in CREATE_INDEXES:
+                self.conn.execute(idx)
+            self.conn.commit()
+            self.conn.execute(CREATE_CLASSIFICATIONS_TABLE)
+            for idx in CREATE_CLASSIFICATIONS_INDEXES:
                 self.conn.execute(idx)
             self.conn.commit()
 

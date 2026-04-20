@@ -209,6 +209,18 @@ def test_get_pending_filters_by_content_type(tmp_db):
     db.close()
 
 
+def test_schema_has_classifications_table(tmp_db):
+    db = Database(tmp_db)
+    rows = db.conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='classifications'"
+    ).fetchall()
+    assert len(rows) == 1
+    cols = db.conn.execute("PRAGMA table_info(classifications)").fetchall()
+    col_names = {r[1] for r in cols}
+    assert {"id", "page_id", "label", "model", "prompt_version", "raw_response", "latency_ms", "created_at"} <= col_names
+    db.close()
+
+
 def test_db_safe_from_multiple_threads(tmp_db):
     """Regression: Database used to raise 'SQLite objects created in a thread
     can only be used in that same thread' when accessed from worker threads.
