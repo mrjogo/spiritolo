@@ -8,6 +8,54 @@ from scraper.src.db import Database
 from scraper.src.ollama_client import ClassificationResult
 
 
+# ---------------------------------------------------------------------------
+# CLI arg parser tests (Task 10)
+# ---------------------------------------------------------------------------
+
+from scraper.src.classify import build_arg_parser
+
+
+def test_arg_parser_defaults():
+    parser = build_arg_parser()
+    args = parser.parse_args([])
+    assert args.site is None
+    assert args.limit is None
+    assert args.concurrency == 4
+    assert args.model == "qwen3:14b"
+    assert args.review is False
+    assert args.sample is False
+
+
+def test_arg_parser_main_run_flags():
+    parser = build_arg_parser()
+    args = parser.parse_args(["--site", "liquor", "--limit", "100", "--concurrency", "8", "--model", "qwen3:32b"])
+    assert args.site == "liquor"
+    assert args.limit == 100
+    assert args.concurrency == 8
+    assert args.model == "qwen3:32b"
+
+
+def test_arg_parser_sample_flags():
+    parser = build_arg_parser()
+    args = parser.parse_args(["--sample", "--site", "liquor", "--category", "likely_drink_recipe", "--n", "20"])
+    assert args.sample is True
+    assert args.site == "liquor"
+    assert args.category == "likely_drink_recipe"
+    assert args.n == 20
+
+
+def test_arg_parser_review_flag():
+    parser = build_arg_parser()
+    args = parser.parse_args(["--review"])
+    assert args.review is True
+
+
+def test_arg_parser_batch_size_default():
+    parser = build_arg_parser()
+    args = parser.parse_args([])
+    assert args.batch_size == 1000
+
+
 async def test_classify_one_records_successful_result(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")
@@ -115,6 +163,67 @@ async def test_run_classify_pool_processes_all_rows(tmp_db):
     assert count == 5
     assert fake_classify.await_count == 5
     db.close()
+
+
+# ---------------------------------------------------------------------------
+# Batched main loop tests (Task 10 amendment)
+# ---------------------------------------------------------------------------
+
+async def test_run_main_processes_in_batches(tmp_db, monkeypatch):
+    """run_main should call get_unclassified repeatedly with limit=batch_size,
+    not pull the whole queue at once."""
+    db = Database(tmp_db)
+    for i in range(7):
+        db.add_url("testsite", f"https://example.com/{i}")
+    db.close()
+
+    fake_classify = AsyncMock(return_value=ClassificationResult(
+        label="likely_drink_recipe", raw_response="{}", latency_ms=1,
+    ))
+    monkeypatch.setattr("scraper.src.classify.classify_url", fake_classify)
+
+    parser = build_arg_parser()
+    args = parser.parse_args([
+        "--db", str(tmp_db),
+        "--batch-size", "3",
+        "--concurrency", "2",
+    ])
+
+    from scraper.src.classify import run_main
+    rc = await run_main(args)
+    assert rc == 0
+
+    # Verify all 7 rows got classified across multiple batches.
+    db2 = Database(tmp_db)
+    count = db2.conn.execute(
+        "SELECT COUNT(*) FROM pages WHERE content_type = 'likely_drink_recipe'"
+    ).fetchone()[0]
+    assert count == 7
+    assert fake_classify.await_count == 7
+    db2.close()
+
+
+async def test_run_main_respects_overall_limit(tmp_db, monkeypatch):
+    db = Database(tmp_db)
+    for i in range(10):
+        db.add_url("testsite", f"https://example.com/{i}")
+    db.close()
+
+    fake_classify = AsyncMock(return_value=ClassificationResult(
+        label="likely_junk", raw_response="{}", latency_ms=1,
+    ))
+    monkeypatch.setattr("scraper.src.classify.classify_url", fake_classify)
+
+    parser = build_arg_parser()
+    args = parser.parse_args([
+        "--db", str(tmp_db),
+        "--batch-size", "3",
+        "--limit", "5",
+    ])
+    from scraper.src.classify import run_main
+    await run_main(args)
+
+    assert fake_classify.await_count == 5
 
 
 async def test_run_classify_pool_respects_concurrency_limit(tmp_db):
