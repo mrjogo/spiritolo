@@ -62,15 +62,13 @@ async def run_classify_pool(
     sem = asyncio.Semaphore(concurrency)
     total = len(rows)
     done = 0
-    done_lock = asyncio.Lock()
 
     async def worker(r: dict):
         nonlocal done
         async with sem:
             await classify_one(r, classify_fn, db, model, prompt_version)
-        async with done_lock:
-            done += 1
-            if on_progress:
-                on_progress(done, total)
+        done += 1
+        if on_progress:
+            on_progress(done, total)
 
     await asyncio.gather(*(worker(r) for r in rows))
