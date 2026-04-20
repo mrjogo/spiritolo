@@ -28,3 +28,5 @@
 {"url": "https://imbibemagazine.com/news/craft-distilling-trends-2025", "sitemap_source": "sitemap.xml", "expected": "likely_drink_article"}
 {"url": "https://foodandwine.com/community/recipes/123/grandmas-apple-pie", "sitemap_source": "user-generated-sitemap.xml", "expected": "likely_user_generated"}
 {"url": "https://foodandwine.com/restaurants/best-new-chefs-2025", "sitemap_source": "sitemap.xml", "expected": "likely_food_article"}
+{"url": "https://liquor.com/mezcal-cocktail-recipes-7484752", "sitemap_source": "sitemap.xml", "expected": "likely_drink_article"}
+{"url": "https://liquor.com/tequila-cocktail-recipes-7484751", "sitemap_source": "sitemap.xml", "expected": "likely_drink_article"}

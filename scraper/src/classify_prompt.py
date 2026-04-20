@@ -1,7 +1,7 @@
 """Prompt constants for the URL classifier. Kept isolated so prompt iteration
 means editing one file and bumping PROMPT_VERSION."""
 
-PROMPT_VERSION = "v1"
+PROMPT_VERSION = "v2"
 
 LABELS = (
     "likely_drink_recipe",
@@ -37,6 +37,7 @@ Rules:
 - Read the slug as a sentence. "household-uses-for-vodka" is NOT a recipe just because it contains "vodka".
 - The URL path matters: a root-level slug is usually an article or landing page even on a recipe-heavy site.
 - If a bare section index like /recipes/ is the URL, that is likely_junk (navigation hub), not a recipe.
+- Plural "recipes" in a slug (e.g. "tequila-cocktail-recipes", "summer-drink-recipes") signals a roundup/listicle, not a single recipe — that is an article. Singular "recipe" (e.g. "tequila-manhattan-cocktail-recipe") signals a single recipe.
 - Sitemap source is a hint, not a rule — a URL under a "recipes" sitemap can still be an article.
 - When genuinely torn between drink and food, lean drink. When torn between recipe and article, lean recipe.
 
@@ -52,6 +53,14 @@ Answer: likely_food_article   (health article — "drinking" is not a drink sign
 URL: https://simplyrecipes.com/best-gin-for-negroni-bartenders
 Sitemap: sitemap-articles.xml
 Answer: likely_drink_article   (buyers' roundup, not a recipe)
+
+URL: https://liquor.com/mezcal-cocktail-recipes-7484752
+Sitemap: sitemap.xml
+Answer: likely_drink_article   (plural "recipes" at root level — a roundup listicle, not a single recipe)
+
+URL: https://liquor.com/lynchburg-lemonade-cocktail-recipe-5199408
+Sitemap: sitemap.xml
+Answer: likely_drink_recipe   (singular "recipe" — one named drink)
 
 URL: https://simplyrecipes.com/coconut-poached-fish-with-ginger-and-lime-recipe
 Sitemap: sitemap-recipes.xml
