@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { normalizeRecipe } from './normalizeRecipe';
+import sample from './test/fixtures/diffordsguide-sample.json';
 
 describe('normalizeRecipe: simple fields', () => {
   it('returns the name', () => {
@@ -243,5 +244,19 @@ describe('normalizeRecipe: instructions', () => {
     expect(ins({})).toEqual([]);
     expect(ins({ recipeInstructions: [] })).toEqual([]);
     expect(ins({ recipeInstructions: '' })).toEqual([]);
+  });
+});
+
+describe('normalizeRecipe: real fixture', () => {
+  it('normalizes an end-to-end blob without throwing', () => {
+    const n = normalizeRecipe(sample as Record<string, unknown>);
+    expect(n.name).toBeTruthy();
+    expect(n.ingredients.length).toBeGreaterThan(0);
+    expect(n.instructions.length).toBeGreaterThan(0);
+    expect(Array.isArray(n.images)).toBe(true);
+  });
+
+  it('matches the expected shape snapshot', () => {
+    expect(normalizeRecipe(sample as Record<string, unknown>)).toMatchSnapshot();
   });
 });
