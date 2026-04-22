@@ -1,7 +1,7 @@
 """Prompt constants for the URL classifier. Kept isolated so prompt iteration
 means editing one file and bumping PROMPT_VERSION."""
 
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 
 LABELS = (
     "likely_drink_recipe",
@@ -30,15 +30,16 @@ Categories:
 - likely_food_recipe: an individual food recipe. A single dish, with a cooking method or food ingredients.
 - likely_drink_article: drink-related editorial that is NOT a single recipe — listicles, bar guides, "best-of" roundups, technique explainers, news, glossary entries, ingredient explainers, series landing pages.
 - likely_food_article: food-related editorial that is NOT a single recipe — tips, restaurant guides, health pieces, cooking technique explainers, reviews.
-- likely_junk: structural/meta/commercial pages with no editorial content. This includes about/FAQ/privacy/contact/terms/sitemap pages, author bios, tag/category/topic indexes, brand pages, retail/affiliate/shop pages, product reviews, advertise/subscribe pages, and bare section indexes like /recipes/.
+- likely_junk: structural/meta/commercial pages with no editorial content. This includes about/FAQ/privacy/contact/terms/sitemap pages, author bios, tag/category/topic indexes, brand landing/marketing pages, retail/affiliate/shop pages, product reviews, advertise/subscribe pages, and bare section indexes like /recipes/.
 - likely_user_generated: user-submitted content from a community or forum sitemap. Guest authors are editorial and do NOT belong here.
 
 Rules:
 - Read the slug as a sentence. "household-uses-for-vodka" is NOT a recipe just because it contains "vodka".
-- The URL path matters: a root-level slug is usually an article or landing page even on a recipe-heavy site.
+- Read the whole URL, not just the slug. Path segments between the domain and the slug (e.g. `/beer-wine-spirits/`, `/bars/`, `/forum/`, `/author/`) categorize the page and usually override food- or drink-sounding words in the slug. `/beer-wine-spirits/` specifically is a product catalog, not a recipe archive — every URL under it is a drink product (`likely_drink_article`) regardless of whether the slug reads like a dessert, a cocktail, or a single beer name. Note that some paths (e.g. diffordsguide `/producer/<id>/<brand>/<slug>`) are mixed — cocktails, brand articles, and products all live there — so fall back to the slug in those cases.
+- A root-level slug is usually an article or landing page even on a recipe-heavy site.
 - If a bare section index like /recipes/ is the URL, that is likely_junk (navigation hub), not a recipe.
 - Plural "recipes" in a slug (e.g. "tequila-cocktail-recipes", "summer-drink-recipes") signals a roundup/listicle, not a single recipe — that is an article. Singular "recipe" (e.g. "tequila-manhattan-cocktail-recipe") signals a single recipe.
-- Sitemap source is a hint, not a rule — a URL under a "recipes" sitemap can still be an article.
+- Sitemap source is usually just a hint, but when a sitemap's name clearly denotes a single category (e.g. a products sitemap containing only drink products, a "bars" sitemap, a "forum" sitemap, a "user-generated" sitemap) treat it as effectively a ground-truth label and prefer it over slug semantics.
 - When genuinely torn between drink and food, lean drink. When torn between recipe and article, lean recipe.
 
 Examples:
@@ -85,6 +86,30 @@ Answer: likely_junk   (bare section index is a navigation hub)
 URL: https://punchdrink.com/spirit-forward/
 Sitemap: sitemap.xml
 Answer: likely_drink_article   (root-level series landing page)
+
+URL: https://www.diffordsguide.com/beer-wine-spirits/6712/baileys-red-velvet-cupcake
+Sitemap: https://www.diffordsguide.com/sitemap/gb.xml
+Answer: likely_drink_article   (flavored liqueur — `/beer-wine-spirits/` path and products sitemap dominate "cupcake" in the slug)
+
+URL: https://www.diffordsguide.com/beer-wine-spirits/6614/three-legs-oatmeal-stout
+Sitemap: https://www.diffordsguide.com/sitemap/gb.xml
+Answer: likely_drink_article   (a beer product — `/beer-wine-spirits/` is a catalog, so even slugs that name a single drink resolve to drink_article, not drink_recipe)
+
+URL: https://www.diffordsguide.com/bars/w9R86z/crescent-sausage-and-pie
+Sitemap: https://www.diffordsguide.com/sitemap/bar.xml
+Answer: likely_junk   (venue page — `/bars/` path and bar sitemap override the food-sounding slug)
+
+URL: https://www.diffordsguide.com/cocktails/recipe/228/black-forest-gateau
+Sitemap: https://www.diffordsguide.com/sitemap/cocktail.xml
+Answer: likely_drink_recipe   (cocktail named after a dessert — `/cocktails/recipe/` path is definitive)
+
+URL: https://www.diffordsguide.com/producer/1178/ramsbury/estate-snapper
+Sitemap: https://www.diffordsguide.com/sitemap/gb.xml
+Answer: likely_drink_recipe   (the final slug is a single cocktail name; `/producer/<id>/<brand>/<slug>` is a mixed path, so the slug wins)
+
+URL: https://www.diffordsguide.com/producer/1100/hendricks-gin-palace-distillery/story
+Sitemap: https://www.diffordsguide.com/sitemap/gb.xml
+Answer: likely_drink_article   (brand story under a producer path — substantive editorial, not a landing page)
 
 Return JSON of the form {"label": "<one of the six labels>"}. Return only one label."""
 

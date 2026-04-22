@@ -30,3 +30,11 @@
 {"url": "https://foodandwine.com/restaurants/best-new-chefs-2025", "sitemap_source": "sitemap.xml", "expected": "likely_food_article"}
 {"url": "https://liquor.com/mezcal-cocktail-recipes-7484752", "sitemap_source": "sitemap.xml", "expected": "likely_drink_article"}
 {"url": "https://liquor.com/tequila-cocktail-recipes-7484751", "sitemap_source": "sitemap.xml", "expected": "likely_drink_article"}
+{"url": "https://www.diffordsguide.com/beer-wine-spirits/6712/baileys-red-velvet-cupcake", "sitemap_source": "https://www.diffordsguide.com/sitemap/gb.xml", "expected": "likely_drink_article"}
+{"url": "https://www.diffordsguide.com/beer-wine-spirits/5790/real-strawberry-puree", "sitemap_source": "https://www.diffordsguide.com/sitemap/gb.xml", "expected": "likely_drink_article"}
+{"url": "https://www.diffordsguide.com/beer-wine-spirits/3517/aylesbury-duck", "sitemap_source": "https://www.diffordsguide.com/sitemap/gb.xml", "expected": "likely_drink_article"}
+{"url": "https://www.diffordsguide.com/beer-wine-spirits/6614/three-legs-oatmeal-stout", "sitemap_source": "https://www.diffordsguide.com/sitemap/gb.xml", "expected": "likely_drink_article"}
+{"url": "https://www.diffordsguide.com/bars/w9R86z/crescent-sausage-and-pie", "sitemap_source": "https://www.diffordsguide.com/sitemap/bar.xml", "expected": "likely_junk"}
+{"url": "https://www.diffordsguide.com/cocktails/recipe/228/black-forest-gateau", "sitemap_source": "https://www.diffordsguide.com/sitemap/cocktail.xml", "expected": "likely_drink_recipe"}
+{"url": "https://www.diffordsguide.com/cocktails/recipe/7920/i-may-destroy-you", "sitemap_source": "https://www.diffordsguide.com/sitemap/cocktail-user-generated.xml", "expected": "likely_user_generated"}
+{"url": "https://www.diffordsguide.com/producer/1178/ramsbury/estate-snapper", "sitemap_source": "https://www.diffordsguide.com/sitemap/gb.xml", "expected": "likely_drink_recipe"}
