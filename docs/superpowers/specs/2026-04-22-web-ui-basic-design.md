@@ -19,8 +19,8 @@ Stand up the first, dead-basic version of the web frontend: a local SPA that lis
 - Vercel deployment. Local `npm run dev` only for now.
 - Styling beyond the bare minimum needed to read content. No Tailwind yet.
 - React Native / mobile. Reserved for later.
-- Testing. No test framework wired in for this iteration; the whole app is a manual-verification tool against real extracted data.
 - Loading skeletons, empty-state illustrations, styled 404 polish. Error pages exist (see below) but are plain text + a link home.
+- E2E / browser tests. Manual spot-check against real extracted data is the integration check.
 
 ## Architectural Decisions
 
@@ -34,7 +34,10 @@ Named by the user; also the most durable path toward the stated endgame (Vercel 
 There is no well-maintained npm library that normalizes Schema.org Recipe JSON-LD for display. `schema-dts` gives TypeScript types but does no runtime normalization; `jsonld.js` is a canonicalization tool, not a display helper. Every real recipe site writes a local normalizer because the variant shapes (`HowToStep` vs string, `Person` vs string, `ImageObject` vs URL array) are domain-specific. We do the same. The normalizer is a pure function, easy to port to a shared package later if we add the RN client.
 
 ### Minimum viable dependencies
-Five runtime packages: `react`, `react-dom`, `react-router-dom`, `@supabase/supabase-js`, `schema-dts`. Plus Vite + TS + the React types as dev deps. No UI kit, no data layer (TanStack Query), no styling framework. All three can be added later when they earn their keep; none of them would add value to this iteration.
+Five runtime packages: `react`, `react-dom`, `react-router-dom`, `@supabase/supabase-js`, `schema-dts`. Dev deps: Vite, TypeScript, the React types, plus the test stack below. No UI kit, no data layer (TanStack Query), no styling framework. All three can be added later when they earn their keep; none of them would add value to this iteration.
+
+### Red/green TDD, Vitest-first
+Every unit of logic is driven by red/green/refactor: write the failing test, watch it fail, write the minimum to pass, refactor. Vitest is the runner (Vite-native, zero-config). `@testing-library/react` + `@testing-library/jest-dom` + `jsdom` environment for component tests. Tests live next to the code as `*.test.ts(x)`.
 
 ### Pagination over fetch-all
 Recipe count will grow into the thousands. Even at small counts, fetching everything on mount is a bad pattern to normalize. We use Supabase JS's `.range(from, to)` with `count: 'exact'` for the total, 50 rows per page, Prev/Next navigation, page number in the URL (`?page=2`) so refresh and back-button work.
@@ -65,6 +68,9 @@ web/
       Pagination.tsx      # Prev / Next / page N of M
       ErrorPage.tsx       # shared {title, message} + link to /
     styles.css            # one stylesheet, plain CSS
+    test/
+      setup.ts            # jest-dom matchers, global test config
+      fixtures/           # real jsonld blobs captured from recipes_public
 ```
 
 All files are small. If any one component grows past ~150 lines, that's a signal it needs breaking up.
@@ -134,6 +140,32 @@ Field rules:
 
 Pure function, no I/O, no React imports. Defensive on missing or off-type fields — never throws on valid JSON. Returns a best-effort normalization; the test is that nothing in the real extracted dataset crashes the detail page.
 
+## Testing
+
+Red/green/refactor on every piece of real logic. Aim for tests that would catch a regression, not tests that mirror the implementation.
+
+**`normalizeRecipe.test.ts` — the main unit suite, driven by TDD.** One test per field-variant rule, each written before the corresponding code path exists. Coverage:
+- Instructions: plain string (multi-line split), array of strings, array of `HowToStep`, array of `HowToSection` with nested `itemListElement`, mixed/unknown shapes (fallback to string coercion or skip).
+- Ingredients: `recipeIngredient` array, legacy `ingredients` newline-split string, missing.
+- Author: string, `Person` object, array of either, missing.
+- Image: string, `ImageObject`, array of strings, array of `ImageObject`, empty.
+- Times: `PT15M` → `"15 min"`, `PT1H30M` → `"1 h 30 min"`, malformed → null.
+- Whole-blob fixtures: 3–4 real `jsonld` blobs captured from `recipes_public` (anonymized if needed), each asserting the normalized shape against a snapshot dict.
+
+**Component tests (Vitest + React Testing Library), minimal:**
+- `Pagination.test.tsx` — renders page N of M; Prev disabled on page 1; Next disabled on last page; clicks update the URL search param (router wrapped in a test harness).
+- `ErrorPage.test.tsx` — renders title, message, and a link to `/`.
+- `RecipeList.test.tsx` — three states: loading, error, loaded with rows; Supabase client mocked at the module boundary.
+- `RecipeDetail.test.tsx` — three states: loading, not-found (renders `ErrorPage`), loaded (renders normalized fields); Supabase mocked.
+
+**Not tested:** `supabase.ts` (trivial factory, failure mode is env-var absence which throws at load — covered by type-checking + manual `npm run dev`), `main.tsx` / `App.tsx` wiring, CSS.
+
+`package.json` scripts:
+```
+"test": "vitest run"
+"test:watch": "vitest"
+```
+
 ## Env and config
 
 `.env.local` (gitignored):
@@ -170,5 +202,6 @@ Vite binds to `localhost:5173`; VS Code forwards the port; the Mac browser opens
 - The list page at `http://localhost:5173/` shows 50 extracted recipes with name, site, and thumbnail; Prev/Next move through pages and update the URL; page count matches the row count in `recipes_public`.
 - Clicking a list item lands on `/recipes/:id` and renders a readable recipe: image, name, ingredients list, numbered instructions, source link, times where present.
 - `normalizeRecipe()` survives every row currently in `recipes_public` without throwing. Manual spot-check: visit 10 random recipes, verify nothing crashes and content looks right.
+- `npm test` runs clean. Every unit of real logic was built red-first (commits show failing tests landing before the implementation).
 - Error pages render for: an unknown route (e.g. `/nope`), a missing recipe id (e.g. `/recipes/99999`), and list-page fetch failure (simulated by pointing `VITE_SUPABASE_URL` at an unreachable host). Each shows a readable message and a link home.
 - Directly querying the base `recipes` table with the anon key returns nothing (RLS still enforced); `recipes_public` returns the expected columns. (Existing extractor behavior; verified by the UI succeeding while no new grants are added.)
