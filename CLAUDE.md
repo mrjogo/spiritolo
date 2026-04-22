@@ -84,7 +84,7 @@ cd scraper && uv run python -m scraper.src.extract --limit 10
 
 ## Web UI
 
-A basic Vite + React + TypeScript SPA under `web/` for verifying the extracted recipes. Reads the `recipes_public` view via the anon key — no backend.
+A basic Vite + React + TypeScript SPA under `web/` for verifying the extracted recipes. Reads the `recipes_public` view via the publishable key (`sb_publishable_...`, the post-Nov-2025 replacement for the legacy anon key) — no backend.
 
 **One-time setup:**
 
@@ -92,7 +92,7 @@ A basic Vite + React + TypeScript SPA under `web/` for verifying the extracted r
 cd web
 npm install
 cp .env.local.example .env.local
-# edit .env.local and paste in the anon key from `supabase status` on the Mac host
+# edit .env.local and paste in the publishable key from `supabase status` on the Mac host
 ```
 
 **Running:**
