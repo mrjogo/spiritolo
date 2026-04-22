@@ -51,6 +51,8 @@ a { color: #0a58ca; }
 .recipe-list__name { font-weight: 600; }
 .recipe-list__site { font-size: 0.85rem; color: #666; }
 
+.recipe-list__empty { color: #666; font-style: italic; }
+
 .pagination {
   display: flex;
   gap: 0.5rem;

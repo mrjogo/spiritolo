@@ -61,21 +61,25 @@ export function RecipeList() {
   return (
     <div className="page">
       <h1>Recipes</h1>
-      <ul className="recipe-list">
-        {state.rows.map((r) => (
-          <li key={r.id} className="recipe-list__item">
-            <Link to={`/recipes/${r.id}`}>
-              {r.image_url && (
-                <img src={r.image_url} alt="" className="recipe-list__thumb" />
-              )}
-              <div className="recipe-list__meta">
-                <div className="recipe-list__name">{r.name ?? 'Untitled'}</div>
-                <div className="recipe-list__site">{r.site}</div>
-              </div>
-            </Link>
-          </li>
-        ))}
-      </ul>
+      {state.rows.length === 0 ? (
+        <p className="recipe-list__empty">No recipes yet — extract some and they'll show up here.</p>
+      ) : (
+        <ul className="recipe-list">
+          {state.rows.map((r) => (
+            <li key={r.id} className="recipe-list__item">
+              <Link to={`/recipes/${r.id}`}>
+                {r.image_url && (
+                  <img src={r.image_url} alt="" className="recipe-list__thumb" />
+                )}
+                <div className="recipe-list__meta">
+                  <div className="recipe-list__name">{r.name ?? 'Untitled'}</div>
+                  <div className="recipe-list__site">{r.site}</div>
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
       <Pagination totalPages={totalPages} />
     </div>
   );

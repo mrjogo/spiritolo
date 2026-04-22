@@ -39,6 +39,16 @@ describe('<RecipeList>', () => {
     expect(screen.getByText(/loading/i)).toBeInTheDocument();
   });
 
+  it('shows an empty-state message when loaded with zero rows', async () => {
+    mockRangeResponse([], 0);
+    render(
+      <MemoryRouter>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText(/no recipes yet/i)).toBeInTheDocument();
+  });
+
   it('renders rows after loading', async () => {
     mockRangeResponse(
       [
