@@ -169,3 +169,79 @@ describe('normalizeRecipe: ingredients', () => {
     expect(ing({ recipeIngredient: 'not-an-array' })).toEqual([]);
   });
 });
+
+describe('normalizeRecipe: instructions', () => {
+  const ins = (r: Record<string, unknown>) => normalizeRecipe(r).instructions;
+
+  it('handles a plain string, splitting on newlines', () => {
+    expect(ins({ recipeInstructions: 'Stir.\n\nStrain.' })).toEqual([
+      { kind: 'step', text: 'Stir.' },
+      { kind: 'step', text: 'Strain.' },
+    ]);
+  });
+
+  it('handles an array of strings', () => {
+    expect(ins({ recipeInstructions: ['Stir.', 'Strain.'] })).toEqual([
+      { kind: 'step', text: 'Stir.' },
+      { kind: 'step', text: 'Strain.' },
+    ]);
+  });
+
+  it('handles an array of HowToStep objects', () => {
+    expect(
+      ins({
+        recipeInstructions: [
+          { '@type': 'HowToStep', text: 'Stir.' },
+          { '@type': 'HowToStep', text: 'Strain.' },
+        ],
+      }),
+    ).toEqual([
+      { kind: 'step', text: 'Stir.' },
+      { kind: 'step', text: 'Strain.' },
+    ]);
+  });
+
+  it('handles HowToSection with nested itemListElement', () => {
+    expect(
+      ins({
+        recipeInstructions: [
+          {
+            '@type': 'HowToSection',
+            name: 'Prep',
+            itemListElement: [
+              { '@type': 'HowToStep', text: 'Chill glass.' },
+              { '@type': 'HowToStep', text: 'Measure.' },
+            ],
+          },
+          {
+            '@type': 'HowToSection',
+            name: 'Build',
+            itemListElement: ['Combine.', 'Stir.'],
+          },
+        ],
+      }),
+    ).toEqual([
+      { kind: 'section', heading: 'Prep', steps: ['Chill glass.', 'Measure.'] },
+      { kind: 'section', heading: 'Build', steps: ['Combine.', 'Stir.'] },
+    ]);
+  });
+
+  it('skips unknown/empty entries silently', () => {
+    expect(
+      ins({
+        recipeInstructions: [
+          { '@type': 'HowToStep', text: '' },
+          null,
+          { foo: 'bar' },
+          'Stir.',
+        ],
+      }),
+    ).toEqual([{ kind: 'step', text: 'Stir.' }]);
+  });
+
+  it('returns [] when missing or empty', () => {
+    expect(ins({})).toEqual([]);
+    expect(ins({ recipeInstructions: [] })).toEqual([]);
+    expect(ins({ recipeInstructions: '' })).toEqual([]);
+  });
+});

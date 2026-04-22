@@ -1,4 +1,4 @@
-import type { NormalizedRecipe } from './types';
+import type { InstructionStep, NormalizedRecipe } from './types';
 
 type Json = Record<string, unknown>;
 
@@ -72,6 +72,45 @@ function normalizeIngredients(jsonld: Json): string[] {
   return [];
 }
 
+function extractStepText(x: unknown): string | null {
+  if (typeof x === 'string') return asString(x);
+  if (x && typeof x === 'object' && 'text' in x) return asString((x as Json).text);
+  return null;
+}
+
+function extractSectionSteps(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(extractStepText).filter((s): s is string => !!s);
+}
+
+function normalizeInstructions(raw: unknown): InstructionStep[] {
+  if (typeof raw === 'string') {
+    return raw
+      .split('\n')
+      .map((s) => s.trim())
+      .filter((s) => s !== '')
+      .map((text) => ({ kind: 'step' as const, text }));
+  }
+  if (!Array.isArray(raw)) return [];
+  const out: InstructionStep[] = [];
+  for (const entry of raw) {
+    if (
+      entry &&
+      typeof entry === 'object' &&
+      (entry as Json)['@type'] === 'HowToSection'
+    ) {
+      const e = entry as Json;
+      const heading = asString(e.name) ?? '';
+      const steps = extractSectionSteps(e.itemListElement);
+      if (steps.length > 0) out.push({ kind: 'section', heading, steps });
+      continue;
+    }
+    const text = extractStepText(entry);
+    if (text) out.push({ kind: 'step', text });
+  }
+  return out;
+}
+
 export function normalizeRecipe(jsonld: Json): NormalizedRecipe {
   return {
     name: asString(jsonld.name) ?? 'Untitled',
@@ -83,7 +122,7 @@ export function normalizeRecipe(jsonld: Json): NormalizedRecipe {
     cookTime: formatDuration(jsonld.cookTime),
     totalTime: formatDuration(jsonld.totalTime),
     ingredients: normalizeIngredients(jsonld),
-    instructions: [],
+    instructions: normalizeInstructions(jsonld.recipeInstructions),
     sourceUrl: asString(jsonld.url),
   };
 }
