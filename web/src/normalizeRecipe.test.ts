@@ -135,3 +135,37 @@ describe('normalizeRecipe: times', () => {
     expect(n.totalTime).toBeNull();
   });
 });
+
+describe('normalizeRecipe: ingredients', () => {
+  const ing = (r: Record<string, unknown>) => normalizeRecipe(r).ingredients;
+
+  it('uses recipeIngredient when present', () => {
+    expect(ing({ recipeIngredient: ['2 oz gin', '0.5 oz lemon juice'] })).toEqual([
+      '2 oz gin',
+      '0.5 oz lemon juice',
+    ]);
+  });
+
+  it('splits legacy `ingredients` string on newlines, dropping blanks', () => {
+    expect(ing({ ingredients: '2 oz gin\n\n0.5 oz lemon juice\n' })).toEqual([
+      '2 oz gin',
+      '0.5 oz lemon juice',
+    ]);
+  });
+
+  it('prefers recipeIngredient over legacy `ingredients`', () => {
+    expect(
+      ing({
+        recipeIngredient: ['new'],
+        ingredients: 'old',
+      }),
+    ).toEqual(['new']);
+  });
+
+  it('returns [] when neither is present or usable', () => {
+    expect(ing({})).toEqual([]);
+    expect(ing({ recipeIngredient: [] })).toEqual([]);
+    expect(ing({ ingredients: '' })).toEqual([]);
+    expect(ing({ recipeIngredient: 'not-an-array' })).toEqual([]);
+  });
+});

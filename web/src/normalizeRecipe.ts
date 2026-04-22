@@ -57,6 +57,21 @@ function formatDuration(raw: unknown): string | null {
   return `${mins} min`;
 }
 
+function normalizeIngredients(jsonld: Json): string[] {
+  const primary = jsonld.recipeIngredient;
+  if (Array.isArray(primary)) {
+    return primary.map((x) => asString(x)).filter((s): s is string => !!s);
+  }
+  const legacy = jsonld.ingredients;
+  if (typeof legacy === 'string') {
+    return legacy
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line !== '');
+  }
+  return [];
+}
+
 export function normalizeRecipe(jsonld: Json): NormalizedRecipe {
   return {
     name: asString(jsonld.name) ?? 'Untitled',
@@ -67,7 +82,7 @@ export function normalizeRecipe(jsonld: Json): NormalizedRecipe {
     prepTime: formatDuration(jsonld.prepTime),
     cookTime: formatDuration(jsonld.cookTime),
     totalTime: formatDuration(jsonld.totalTime),
-    ingredients: [],
+    ingredients: normalizeIngredients(jsonld),
     instructions: [],
     sourceUrl: asString(jsonld.url),
   };
