@@ -351,6 +351,60 @@ def test_sample_classifications_deduplicates_reclassified_pages(tmp_db):
     db.close()
 
 
+def test_get_unextracted_returns_only_likely_drink_recipes_with_html(tmp_db):
+    from scraper.src.db import Database
+    db = Database(tmp_db)
+    db.add_urls_batch("difs", ["https://x/a", "https://x/b", "https://x/c", "https://x/d"])
+    # a: drink recipe + fetched
+    db.set_content_type("https://x/a", "likely_drink_recipe")
+    db.mark_content("https://x/a", "valid", "ok", html_path="difs/a.html")
+    # b: drink recipe but no html_path
+    db.set_content_type("https://x/b", "likely_drink_recipe")
+    # c: fetched but not a drink recipe
+    db.set_content_type("https://x/c", "likely_food_recipe")
+    db.mark_content("https://x/c", "valid", "ok", html_path="difs/c.html")
+    # d: drink recipe, fetched, already extracted
+    db.set_content_type("https://x/d", "likely_drink_recipe")
+    db.mark_content("https://x/d", "valid", "ok", html_path="difs/d.html")
+    db.mark_extracted("https://x/d")
+
+    rows = db.get_unextracted()
+    urls = [r["url"] for r in rows]
+    assert urls == ["https://x/a"]
+    db.close()
+
+
+def test_mark_extract_error_blocks_reprocessing(tmp_db):
+    from scraper.src.db import Database
+    db = Database(tmp_db)
+    db.add_urls_batch("difs", ["https://x/a"])
+    db.set_content_type("https://x/a", "likely_drink_recipe")
+    db.mark_content("https://x/a", "valid", "ok", html_path="difs/a.html")
+
+    assert len(db.get_unextracted()) == 1
+    db.mark_extract_error("https://x/a", "no_jsonld_recipe")
+    assert db.get_unextracted() == []
+    db.close()
+
+
+def test_mark_extracted_clears_extract_error(tmp_db):
+    from scraper.src.db import Database
+    db = Database(tmp_db)
+    db.add_urls_batch("difs", ["https://x/a"])
+    db.set_content_type("https://x/a", "likely_drink_recipe")
+    db.mark_content("https://x/a", "valid", "ok", html_path="difs/a.html")
+    db.mark_extract_error("https://x/a", "no_jsonld_recipe")
+
+    db.mark_extracted("https://x/a")
+    # extract_error should be cleared on success
+    import sqlite3
+    conn = sqlite3.connect(tmp_db)
+    row = conn.execute("select extracted_at, extract_error from pages where url = ?", ("https://x/a",)).fetchone()
+    assert row[0] is not None
+    assert row[1] is None
+    db.close()
+
+
 def test_db_safe_from_multiple_threads(tmp_db):
     """Regression: Database used to raise 'SQLite objects created in a thread
     can only be used in that same thread' when accessed from worker threads.
