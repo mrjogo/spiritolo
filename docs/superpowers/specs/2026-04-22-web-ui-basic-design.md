@@ -20,7 +20,7 @@ Stand up the first, dead-basic version of the web frontend: a local SPA that lis
 - Styling beyond the bare minimum needed to read content. No Tailwind yet.
 - React Native / mobile. Reserved for later.
 - Testing. No test framework wired in for this iteration; the whole app is a manual-verification tool against real extracted data.
-- Error pages / 404 polish, loading skeletons, empty-state illustrations.
+- Loading skeletons, empty-state illustrations, styled 404 polish. Error pages exist (see below) but are plain text + a link home.
 
 ## Architectural Decisions
 
@@ -63,6 +63,7 @@ web/
       RecipeDetail.tsx    # GET one row, normalize, render
     components/
       Pagination.tsx      # Prev / Next / page N of M
+      ErrorPage.tsx       # shared {title, message} + link to /
     styles.css            # one stylesheet, plain CSS
 ```
 
@@ -88,7 +89,17 @@ All files are small. If any one component grows past ~150 lines, that's a signal
 
 ### States
 
-Each page handles three states: `loading`, `error`, `loaded`. Simple early returns, no skeletons. An error on the list page shows the error message; on the detail page it offers a link back to the list. No retry button, no Sentry, nothing fancy.
+Each page handles three states: `loading`, `error`, `loaded`. Simple early returns, no skeletons. No retry button, no Sentry, nothing fancy. Error UIs are the ones below.
+
+### Error pages
+
+One shared `<ErrorPage title message />` component. Plain text heading, one-line message, `<Link to="/">← Back to recipes</Link>`. Used in these cases:
+
+- **Unknown route** (anything outside `/` and `/recipes/:id`) — router catch-all renders `<ErrorPage title="Page not found" message="That URL doesn't match any page." />`.
+- **Detail page, row not found** (e.g. `/recipes/99999`, Supabase returns no row) — `<ErrorPage title="Recipe not found" message="No recipe with that ID." />`.
+- **Detail page, fetch failed** (network / Supabase error) — `<ErrorPage title="Couldn't load recipe" message={err.message} />`.
+- **List page, fetch failed** — inline block on the list page with the same visual treatment as `<ErrorPage>` (no link needed — user is already at root).
+- **Detail page, `normalizeRecipe()` throws** — should never happen by design, but wrap the render in a try/catch and surface `<ErrorPage title="Couldn't display recipe" message={err.message} />` so a bad row doesn't crash the app.
 
 ## `normalizeRecipe.ts`
 
@@ -159,4 +170,5 @@ Vite binds to `localhost:5173`; VS Code forwards the port; the Mac browser opens
 - The list page at `http://localhost:5173/` shows 50 extracted recipes with name, site, and thumbnail; Prev/Next move through pages and update the URL; page count matches the row count in `recipes_public`.
 - Clicking a list item lands on `/recipes/:id` and renders a readable recipe: image, name, ingredients list, numbered instructions, source link, times where present.
 - `normalizeRecipe()` survives every row currently in `recipes_public` without throwing. Manual spot-check: visit 10 random recipes, verify nothing crashes and content looks right.
+- Error pages render for: an unknown route (e.g. `/nope`), a missing recipe id (e.g. `/recipes/99999`), and list-page fetch failure (simulated by pointing `VITE_SUPABASE_URL` at an unreachable host). Each shows a readable message and a link home.
 - Directly querying the base `recipes` table with the anon key returns nothing (RLS still enforced); `recipes_public` returns the expected columns. (Existing extractor behavior; verified by the UI succeeding while no new grants are added.)
