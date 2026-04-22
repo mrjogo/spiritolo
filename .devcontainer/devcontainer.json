@@ -38,7 +38,8 @@
 
   "features": {
     // [repo-mixin:devcontainer-claude] GitHub CLI — used for PR workflows and auth forwarding
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {}
   },
 
   // Post-create lifecycle hook — runs after container is created.
