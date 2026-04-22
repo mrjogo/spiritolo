@@ -30,20 +30,6 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh
 # [/repo-mixin:devcontainer-python-uv]
 
-# Install Supabase CLI. Used for running a local Postgres + Studio stack
-# (via docker-outside-of-docker) during extractor development. The arch
-# suffix auto-detects for amd64/arm64 builds.
-RUN mkdir -p ~/.local/bin && \
-    ARCH=$(uname -m) && \
-    case "$ARCH" in \
-        x86_64) SUPABASE_ARCH=amd64 ;; \
-        aarch64) SUPABASE_ARCH=arm64 ;; \
-        *) echo "unsupported arch: $ARCH" && exit 1 ;; \
-    esac && \
-    curl -fsSL "https://github.com/supabase/cli/releases/latest/download/supabase_linux_${SUPABASE_ARCH}.tar.gz" \
-        | tar -xz -C ~/.local/bin supabase && \
-    chmod +x ~/.local/bin/supabase
-
 # [repo-mixin:devcontainer-claude] Readline config for up/down arrow history prefix search
 COPY --chown=vscode .inputrc /tmp/.inputrc
 RUN cp /tmp/.inputrc ~/

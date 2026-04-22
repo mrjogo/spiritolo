@@ -38,10 +38,7 @@
 
   "features": {
     // [repo-mixin:devcontainer-claude] GitHub CLI — used for PR workflows and auth forwarding
-    "ghcr.io/devcontainers/features/github-cli:1": {},
-    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
-      "moby": false
-    }
+    "ghcr.io/devcontainers/features/github-cli:1": {}
   },
 
   // Post-create lifecycle hook — runs after container is created.
@@ -53,13 +50,6 @@
     // Runs at repo root. If your pyproject.toml lives in a subdirectory, change to
     // "cd <subdir> && uv sync --frozen".
     "uv-sync": "cd scraper && uv sync --frozen"
-  },
-
-  // Post-start lifecycle hook — runs every time the container starts (not just on create).
-  "postStartCommand": {
-    // Forward Supabase-local ports from host.docker.internal to 127.0.0.1 so `supabase start`
-    // (running in-container under docker-outside-of-docker) can reach its own services.
-    "supabase-portforward": "bash .devcontainer/postStartCommand/supabase-port-forward.sh"
   },
 
   "customizations": {
