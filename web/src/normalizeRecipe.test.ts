@@ -58,3 +58,43 @@ describe('normalizeRecipe: author', () => {
     expect(normalizeRecipe({ author: '' }).author).toBeNull();
   });
 });
+
+describe('normalizeRecipe: images', () => {
+  const img = (r: Record<string, unknown>) => normalizeRecipe(r).images;
+
+  it('handles a single string', () => {
+    expect(img({ image: 'https://x/a.jpg' })).toEqual(['https://x/a.jpg']);
+  });
+
+  it('handles an ImageObject', () => {
+    expect(img({ image: { '@type': 'ImageObject', url: 'https://x/a.jpg' } })).toEqual([
+      'https://x/a.jpg',
+    ]);
+  });
+
+  it('handles an array of strings', () => {
+    expect(img({ image: ['https://x/a.jpg', 'https://x/b.jpg'] })).toEqual([
+      'https://x/a.jpg',
+      'https://x/b.jpg',
+    ]);
+  });
+
+  it('handles an array of ImageObjects, preserves order, dedupes', () => {
+    expect(
+      img({
+        image: [
+          { url: 'https://x/a.jpg' },
+          { url: 'https://x/b.jpg' },
+          { url: 'https://x/a.jpg' },
+        ],
+      }),
+    ).toEqual(['https://x/a.jpg', 'https://x/b.jpg']);
+  });
+
+  it('drops falsy, non-string urls, and returns [] when nothing usable', () => {
+    expect(img({})).toEqual([]);
+    expect(img({ image: null })).toEqual([]);
+    expect(img({ image: ['', null, { url: '' }] })).toEqual([]);
+    expect(img({ image: [{ foo: 'bar' }] })).toEqual([]);
+  });
+});

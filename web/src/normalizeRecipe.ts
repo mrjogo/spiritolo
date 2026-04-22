@@ -17,6 +17,27 @@ function extractName(x: unknown): string | null {
   return null;
 }
 
+function extractImageUrl(x: unknown): string | null {
+  if (typeof x === 'string') return asString(x);
+  if (x && typeof x === 'object' && 'url' in x) return asString((x as Json).url);
+  return null;
+}
+
+function normalizeImages(raw: unknown): string[] {
+  if (raw == null) return [];
+  const arr = Array.isArray(raw) ? raw : [raw];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const item of arr) {
+    const url = extractImageUrl(item);
+    if (url && !seen.has(url)) {
+      seen.add(url);
+      out.push(url);
+    }
+  }
+  return out;
+}
+
 function normalizeAuthor(raw: unknown): string | null {
   if (raw == null) return null;
   const arr = Array.isArray(raw) ? raw : [raw];
@@ -28,7 +49,7 @@ export function normalizeRecipe(jsonld: Json): NormalizedRecipe {
   return {
     name: asString(jsonld.name) ?? 'Untitled',
     author: normalizeAuthor(jsonld.author),
-    images: [],
+    images: normalizeImages(jsonld.image),
     description: asString(jsonld.description),
     yield: asString(jsonld.recipeYield),
     prepTime: null,
