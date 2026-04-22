@@ -162,7 +162,7 @@ Vite binds to `localhost:5173`; VS Code forwards the port; the Mac browser opens
 ## Repo updates outside `/web`
 
 - **Root `CLAUDE.md`**: add a short "Web UI" section documenting the commands above and pointing at `web/.env.local.example`.
-- **Root `.gitignore`**: confirm `web/node_modules/` and `web/.env.local` are ignored (likely covered by existing globs; check and add if not).
+- **`web/.gitignore`**: local to this subtree. Ignores `node_modules/`, `.env.local`, `dist/`, and Vite's `.vite/` cache. No changes to the root `.gitignore`.
 
 ## Success criteria
 
