@@ -98,3 +98,40 @@ describe('normalizeRecipe: images', () => {
     expect(img({ image: [{ foo: 'bar' }] })).toEqual([]);
   });
 });
+
+describe('normalizeRecipe: times', () => {
+  const times = (r: Record<string, unknown>) => {
+    const n = normalizeRecipe(r);
+    return { prep: n.prepTime, cook: n.cookTime, total: n.totalTime };
+  };
+
+  it('formats minutes', () => {
+    expect(times({ totalTime: 'PT15M' }).total).toBe('15 min');
+  });
+
+  it('formats hours and minutes', () => {
+    expect(times({ totalTime: 'PT1H30M' }).total).toBe('1 h 30 min');
+  });
+
+  it('formats whole hours', () => {
+    expect(times({ totalTime: 'PT2H' }).total).toBe('2 h');
+  });
+
+  it('returns null on malformed durations', () => {
+    expect(times({ totalTime: 'fifteen minutes' }).total).toBeNull();
+    expect(times({ totalTime: '' }).total).toBeNull();
+  });
+
+  it('handles prepTime and cookTime independently', () => {
+    const n = normalizeRecipe({ prepTime: 'PT5M', cookTime: 'PT10M' });
+    expect(n.prepTime).toBe('5 min');
+    expect(n.cookTime).toBe('10 min');
+  });
+
+  it('returns null when missing', () => {
+    const n = normalizeRecipe({});
+    expect(n.prepTime).toBeNull();
+    expect(n.cookTime).toBeNull();
+    expect(n.totalTime).toBeNull();
+  });
+});

@@ -45,6 +45,18 @@ function normalizeAuthor(raw: unknown): string | null {
   return names.length === 0 ? null : names.join(' & ');
 }
 
+function formatDuration(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const m = raw.match(/^PT(?:(\d+)H)?(?:(\d+)M)?$/);
+  if (!m) return null;
+  const hours = m[1] ? parseInt(m[1], 10) : 0;
+  const mins = m[2] ? parseInt(m[2], 10) : 0;
+  if (hours === 0 && mins === 0) return null;
+  if (hours > 0 && mins > 0) return `${hours} h ${mins} min`;
+  if (hours > 0) return `${hours} h`;
+  return `${mins} min`;
+}
+
 export function normalizeRecipe(jsonld: Json): NormalizedRecipe {
   return {
     name: asString(jsonld.name) ?? 'Untitled',
@@ -52,9 +64,9 @@ export function normalizeRecipe(jsonld: Json): NormalizedRecipe {
     images: normalizeImages(jsonld.image),
     description: asString(jsonld.description),
     yield: asString(jsonld.recipeYield),
-    prepTime: null,
-    cookTime: null,
-    totalTime: null,
+    prepTime: formatDuration(jsonld.prepTime),
+    cookTime: formatDuration(jsonld.cookTime),
+    totalTime: formatDuration(jsonld.totalTime),
     ingredients: [],
     instructions: [],
     sourceUrl: asString(jsonld.url),
