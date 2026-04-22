@@ -69,10 +69,10 @@ The CLI may print a misleading `tls error` at the end — the migration actually
 
 ```bash
 # Main run — extract all unprocessed drink-recipe pages for a site.
-cd scraper && uv run --extra dev python -m scraper.src.extract --site diffordsguide
+cd scraper && uv run python -m scraper.src.extract --site diffordsguide
 
 # Small smoke run.
-cd scraper && uv run --extra dev python -m scraper.src.extract --limit 10
+cd scraper && uv run python -m scraper.src.extract --limit 10
 ```
 
 **Re-extraction:** clear `extracted_at` (and optionally `extract_error`) on the rows you want to retry; UPSERT on `source_url` keeps re-runs idempotent.

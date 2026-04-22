@@ -53,10 +53,11 @@ def extract_pages(
             db.mark_extract_error(row["url"], "no_jsonld_recipe")
             no_jsonld += 1
         else:
+            raw_name = recipe.get("name")
             sb.upsert_recipe(
                 source_url=row["url"],
                 site=row["site"],
-                name=recipe.get("name") if isinstance(recipe.get("name"), str) else None,
+                name=raw_name if isinstance(raw_name, str) else None,
                 author=derive_author(recipe),
                 image_url=derive_image_url(recipe),
                 jsonld=recipe,

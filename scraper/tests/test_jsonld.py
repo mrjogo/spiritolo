@@ -70,6 +70,12 @@ def test_promoted_field_derivation_image_url():
     assert derive_image_url(r_arr) == "https://example.com/mai-tai-1.jpg"
 
 
+def test_promoted_field_derivation_image_array_of_objects():
+    from scraper.src.jsonld import parse_recipe_from_html, derive_image_url
+    r = parse_recipe_from_html(load("image_array_of_objects.html"))
+    assert derive_image_url(r) == "https://example.com/vesper-1.jpg"
+
+
 def test_promoted_field_derivation_image_missing():
     from scraper.src.jsonld import derive_image_url
     assert derive_image_url({"name": "No image"}) is None
