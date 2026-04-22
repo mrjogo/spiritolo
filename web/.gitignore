@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Un-ignore the example env file so it can be re-added after deletion
+!.env.local.example
