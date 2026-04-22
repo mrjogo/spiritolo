@@ -9,6 +9,7 @@ dependencies = [
     "cssselect>=1.2",
     "python-dotenv>=1.0",
     "ollama>=0.4",
+    "extruct>=0.18.0",
 ]
 
 [project.optional-dependencies]
@@ -31,3 +32,6 @@ find = {where = ["."]}
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+
+[dependency-groups]
+dev = []
