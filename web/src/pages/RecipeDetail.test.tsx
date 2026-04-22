@@ -82,4 +82,13 @@ describe('<RecipeDetail>', () => {
     const link = await screen.findByRole('link', { name: /view on example\.com/i });
     expect(link).toHaveAttribute('href', 'https://example.com/x');
   });
+
+  it('short-circuits to not-found for a non-numeric id without hitting Supabase', async () => {
+    const { select } = mockSingleResponse(null);
+    renderAt('abc');
+    expect(
+      await screen.findByRole('heading', { name: /recipe not found/i }),
+    ).toBeInTheDocument();
+    expect(select).not.toHaveBeenCalled();
+  });
 });

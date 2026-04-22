@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { Link, useParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { ErrorPage } from '../components/ErrorPage';
 import { normalizeRecipe } from '../normalizeRecipe';
@@ -19,10 +19,16 @@ export function RecipeDetail() {
     let cancelled = false;
     setState({ status: 'loading' });
 
+    const numericId = Number(id);
+    if (!id || !Number.isFinite(numericId) || !Number.isInteger(numericId)) {
+      setState({ status: 'notfound' });
+      return;
+    }
+
     supabase
       .from('recipes_public')
       .select('*')
-      .eq('id', id)
+      .eq('id', numericId)
       .single()
       .then(({ data, error }) => {
         if (cancelled) return;
@@ -69,7 +75,7 @@ export function RecipeDetail() {
   return (
     <div className="page recipe-detail">
       <p>
-        <a href="/">← Back to recipes</a>
+        <Link to="/">← Back to recipes</Link>
       </p>
       {normalized.images[0] && (
         <img src={normalized.images[0]} alt="" className="recipe-detail__hero" />
