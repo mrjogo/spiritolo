@@ -150,6 +150,72 @@ def test_canonical_check_skipped_without_url():
     assert result.status == "Recipe"
 
 
+def test_validate_microdata_recipe():
+    """Punchdrink-style pages use HTML microdata (itemscope/itemtype) rather than JSON-LD."""
+    html = """<!DOCTYPE html>
+<html><body>
+<section itemscope itemtype="http://schema.org/Recipe">
+    <meta itemprop="description" content="A spritz cocktail."/>
+    <h1 itemprop="name">Senorita Spritz</h1>
+</section>
+""" + "<p>content</p>" * 500 + "</body></html>"
+    result = validate(html)
+    assert result.status == "Recipe"
+
+
+def test_validate_microdata_recipe_beats_jsonld_newsarticle():
+    """Punch pattern: JSON-LD NewsArticle wrapper + microdata Recipe — Recipe should win."""
+    html = """<!DOCTYPE html>
+<html><body>
+<script type="application/ld+json">
+{"@type": "NewsArticle", "name": "Senorita Spritz"}
+</script>
+<section itemscope itemtype="http://schema.org/Recipe">
+    <h1 itemprop="name">Senorita Spritz</h1>
+</section>
+""" + "<p>content</p>" * 500 + "</body></html>"
+    result = validate(html)
+    assert result.status == "Recipe"
+
+
+def test_classify_drink_microdata_nested_author_itemscope():
+    """Real Punch pattern: Person author itemscope nested inside Recipe. Recipe-level
+    keywords should be extracted, and the nested Person's <meta itemprop="name"> must
+    not leak into the Recipe dict (otherwise 'Punch Staff' would overwrite 'Senorita Spritz')."""
+    body = "<p>A genre-bending cocktail.</p>" * 40
+    html = f"""<!DOCTYPE html>
+<html><body>
+{body}
+<section itemscope itemtype="http://schema.org/Recipe">
+    <meta itemprop="description" content="Somewhere between tiki and canonical classic sits the Senorita Spritz."/>
+    <meta itemprop="keywords" content="How to Drink French Fluently, spritz, St. Germain"/>
+    <span itemprop="author" itemscope itemtype="http://schema.org/Person">
+        <meta itemprop="name" content="Punch Staff"/>
+    </span>
+    <header>
+        <h1 class="entry-title text-center" itemprop="name">Senorita Spritz</h1>
+    </header>
+</section>
+</body></html>"""
+    result = classify_drink(html)
+    assert result == "confirmed_drink"
+
+
+def test_classify_drink_microdata_from_keywords():
+    """Punch Recipe microdata puts keywords in <meta itemprop="keywords" content="...">."""
+    body = "<p>A genre-bending cocktail.</p>" * 40
+    html = f"""<!DOCTYPE html>
+<html><body>
+{body}
+<section itemscope itemtype="http://schema.org/Recipe">
+    <meta itemprop="keywords" content="How to Drink French Fluently, spritz, St. Germain"/>
+    <h1 itemprop="name">Senorita Spritz</h1>
+</section>
+</body></html>"""
+    result = classify_drink(html)
+    assert result == "confirmed_drink"
+
+
 def test_classify_drink_from_category(sample_drink_recipe_html):
     result = classify_drink(sample_drink_recipe_html)
     assert result == "confirmed_drink"
