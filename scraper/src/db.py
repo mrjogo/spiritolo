@@ -17,7 +17,8 @@ CREATE TABLE IF NOT EXISTS pages (
     discovered_at TEXT NOT NULL,
     fetched_at TEXT,
     error TEXT,
-    html_path TEXT
+    html_path TEXT,
+    disabled_reason TEXT
 );
 """
 
@@ -61,6 +62,13 @@ class Database:
             for idx in CREATE_CLASSIFICATIONS_INDEXES:
                 self.conn.execute(idx)
             self.conn.commit()
+            self._migrate()
+
+    def _migrate(self):
+        cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(pages)")}
+        if "disabled_reason" not in cols:
+            self.conn.execute("ALTER TABLE pages ADD COLUMN disabled_reason TEXT")
+            self.conn.commit()
 
     def close(self):
         with self._lock:
@@ -90,7 +98,7 @@ class Database:
             return cursor.rowcount
 
     def get_pending(self, site: str | None = None, limit: int | None = None, content_type: str | None = None) -> list[dict]:
-        query = "SELECT * FROM pages WHERE status = 'pending'"
+        query = "SELECT * FROM pages WHERE status = 'pending' AND disabled_reason IS NULL"
         params: list = []
         if site:
             query += " AND site = ?"
