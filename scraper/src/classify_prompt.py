@@ -8,6 +8,7 @@ LABELS = (
     "likely_food_recipe",
     "likely_drink_article",
     "likely_food_article",
+    "likely_cocktail_adjacent",
     "likely_junk",
     "likely_user_generated",
 )
