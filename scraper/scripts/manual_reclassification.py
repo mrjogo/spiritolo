@@ -75,6 +75,29 @@ RECLASSIFICATIONS: dict[str, tuple[str, str]] = {
         "SELECT id, url FROM pages WHERE site='foodnetwork' AND url LIKE '%/videos/%'",
         "likely_junk",
     ),
+    # Imbibe drink-of-the-week-* — weekly single-subject features. Confirmed by
+    # spot-checking fetched HTML: every DOTW page is a product spotlight
+    # (single bottle of beer/wine/spirit, tasting set, or coffee), not a
+    # mixed-drink recipe with a method. Force the entire slug family to
+    # drink_article so the classifier stops splitting them.
+    "imbibe_dotw_drink_article": (
+        "SELECT id, url FROM pages WHERE site='imbibe' AND url LIKE '%/drink-of-the-week-%'",
+        "likely_drink_article",
+    ),
+    # Foodnetwork /recipes/articles/ — editorial/how-to/roundup section. Every
+    # fetched page (incl. recipe-sounding slugs like `easy-cauliflower-pizza-
+    # crust-recipe` and `how-to-make-pie-crust`) serves JSON-LD @type=Article,
+    # not Recipe. The classifier was splitting this subtree into _article and
+    # _recipe labels on slug vibes; force both food and drink entries to the
+    # _article label. Food and drink themes are kept separate.
+    "foodnetwork_recipes_articles_food_article": (
+        "SELECT id, url FROM pages WHERE site='foodnetwork' AND url LIKE '%/recipes/articles/%' AND content_type = 'likely_food_recipe'",
+        "likely_food_article",
+    ),
+    "foodnetwork_recipes_articles_drink_article": (
+        "SELECT id, url FROM pages WHERE site='foodnetwork' AND url LIKE '%/recipes/articles/%' AND content_type = 'likely_drink_recipe'",
+        "likely_drink_article",
+    ),
 }
 
 
