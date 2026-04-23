@@ -114,11 +114,12 @@ class Database:
             rows = self.conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
-    def mark_blocked(self, url: str, reason: str):
+    def mark_blocked(self, url: str, reason: str, html_path: str | None = None):
+        now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             self.conn.execute(
-                "UPDATE pages SET status = 'blocked', error = ? WHERE url = ?",
-                (reason, url),
+                "UPDATE pages SET status = 'blocked', error = ?, html_path = ?, fetched_at = ? WHERE url = ?",
+                (reason, html_path, now, url),
             )
             self.conn.commit()
 
