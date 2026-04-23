@@ -98,6 +98,16 @@ RECLASSIFICATIONS: dict[str, tuple[str, str]] = {
         "SELECT id, url FROM pages WHERE site='foodnetwork' AND url LIKE '%/recipes/articles/%' AND content_type = 'likely_drink_recipe'",
         "likely_drink_article",
     ),
+    # Bonappetit /story/ drink recipes — these pages DO contain real drink
+    # recipes in article body but ship NewsArticle schema rather than Recipe,
+    # so extruct/JSON-LD validation can't extract them. Mark with a dedicated
+    # label so the default fetch pipeline (which targets likely_drink_recipe)
+    # skips them, without losing the signal that the URL is a recipe page —
+    # a future unstructured extractor can target this label directly.
+    "bonappetit_story_unstructured_drink_recipe": (
+        "SELECT id, url FROM pages WHERE site='bonappetit' AND url LIKE '%/story/%' AND content_type = 'likely_drink_recipe'",
+        "likely_unstructured_drink_recipe",
+    ),
 }
 
 
