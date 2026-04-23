@@ -38,3 +38,10 @@
 {"url": "https://www.diffordsguide.com/cocktails/recipe/228/black-forest-gateau", "sitemap_source": "https://www.diffordsguide.com/sitemap/cocktail.xml", "expected": "likely_drink_recipe"}
 {"url": "https://www.diffordsguide.com/cocktails/recipe/7920/i-may-destroy-you", "sitemap_source": "https://www.diffordsguide.com/sitemap/cocktail-user-generated.xml", "expected": "likely_user_generated"}
 {"url": "https://www.diffordsguide.com/producer/1178/ramsbury/estate-snapper", "sitemap_source": "https://www.diffordsguide.com/sitemap/gb.xml", "expected": "likely_drink_recipe"}
+{"url": "https://www.foodnetwork.com/videos/negroni-jack-o-lanterns-21804282", "sitemap_source": "sitemap_food_10.xml.gz", "expected": "likely_junk"}
+{"url": "https://www.foodnetwork.com/videos/sandras-pumpkin-sangria-0193994", "sitemap_source": "sitemap_food_8.xml.gz", "expected": "likely_junk"}
+{"url": "https://www.thekitchn.com/azalea-cocktail-recipe-review-23778057", "sitemap_source": "sitemap.xml", "expected": "likely_junk"}
+{"url": "https://www.diffordsguide.com/encyclopedia/393/cocktails/jamies-italian-bar-cocktails-how-to-make", "sitemap_source": "https://www.diffordsguide.com/sitemap/gb.xml", "expected": "likely_drink_article"}
+{"url": "https://www.diffordsguide.com/encyclopedia/449/cocktails/diy-nut-and-rice-milk", "sitemap_source": "https://www.diffordsguide.com/sitemap/gb.xml", "expected": "likely_drink_article"}
+{"url": "https://imbibemagazine.com/drink-of-the-week-mountain-rose-matcha/", "sitemap_source": "sitemap.xml", "expected": "likely_drink_recipe"}
+{"url": "https://imbibemagazine.com/drink-of-the-week-bourbon-barreled-big-gin/", "sitemap_source": "sitemap.xml", "expected": "likely_drink_recipe"}

@@ -1,7 +1,7 @@
 """Prompt constants for the URL classifier. Kept isolated so prompt iteration
 means editing one file and bumping PROMPT_VERSION."""
 
-PROMPT_VERSION = "v3"
+PROMPT_VERSION = "v4"
 
 LABELS = (
     "likely_drink_recipe",
@@ -35,7 +35,9 @@ Categories:
 
 Rules:
 - Read the slug as a sentence. "household-uses-for-vodka" is NOT a recipe just because it contains "vodka".
-- Read the whole URL, not just the slug. Path segments between the domain and the slug (e.g. `/beer-wine-spirits/`, `/bars/`, `/forum/`, `/author/`) categorize the page and usually override food- or drink-sounding words in the slug. `/beer-wine-spirits/` specifically is a product catalog, not a recipe archive — every URL under it is a drink product (`likely_drink_article`) regardless of whether the slug reads like a dessert, a cocktail, or a single beer name. Note that some paths (e.g. diffordsguide `/producer/<id>/<brand>/<slug>`) are mixed — cocktails, brand articles, and products all live there — so fall back to the slug in those cases.
+- Read the whole URL, not just the slug. Path segments between the domain and the slug (e.g. `/beer-wine-spirits/`, `/bars/`, `/forum/`, `/author/`, `/videos/`, `/encyclopedia/`) categorize the page and usually override food- or drink-sounding words in the slug. `/beer-wine-spirits/` specifically is a product catalog, not a recipe archive — every URL under it is a drink product (`likely_drink_article`) regardless of whether the slug reads like a dessert, a cocktail, or a single beer name. `/videos/` is a video page — there is no text recipe to extract, so these are `likely_junk` even when the slug names a single drink or dish. `/encyclopedia/` (diffordsguide) is guide/explainer content — `likely_drink_article`, never a single recipe. Note that some paths (e.g. diffordsguide `/producer/<id>/<brand>/<slug>`) are mixed — cocktails, brand articles, and products all live there — so fall back to the slug in those cases.
+- A `-review-` token in the slug marks a product/recipe review — `likely_junk` even when "recipe" also appears in the slug (e.g. `azalea-cocktail-recipe-review-23778057`).
+- A `drink-of-the-week-*` slug prefix is a weekly named-cocktail feature with a single drink — `likely_drink_recipe`.
 - A root-level slug is usually an article or landing page even on a recipe-heavy site.
 - If a bare section index like /recipes/ is the URL, that is likely_junk (navigation hub), not a recipe.
 - Plural "recipes" in a slug (e.g. "tequila-cocktail-recipes", "summer-drink-recipes") signals a roundup/listicle, not a single recipe — that is an article. Singular "recipe" (e.g. "tequila-manhattan-cocktail-recipe") signals a single recipe.
@@ -79,6 +81,14 @@ URL: https://simplyrecipes.com/trader-joes-cocktail-shaker-review
 Sitemap: sitemap-articles.xml
 Answer: likely_junk   (product review — "cocktail" is a distractor)
 
+URL: https://www.thekitchn.com/azalea-cocktail-recipe-review-23778057
+Sitemap: sitemap.xml
+Answer: likely_junk   (`-review-` in the slug forces junk even though "recipe" is present)
+
+URL: https://imbibemagazine.com/drink-of-the-week-mountain-rose-matcha/
+Sitemap: sitemap.xml
+Answer: likely_drink_recipe   (`drink-of-the-week-*` is a weekly feature with one named drink)
+
 URL: https://punchdrink.com/recipes/
 Sitemap: sitemap.xml
 Answer: likely_junk   (bare section index is a navigation hub)
@@ -87,6 +97,10 @@ URL: https://punchdrink.com/spirit-forward/
 Sitemap: sitemap.xml
 Answer: likely_drink_article   (root-level series landing page)
 
+URL: https://www.foodnetwork.com/videos/negroni-jack-o-lanterns-21804282
+Sitemap: sitemap_food_10.xml.gz
+Answer: likely_junk   (video page — `/videos/` path overrides the cocktail-sounding slug)
+
 URL: https://www.diffordsguide.com/beer-wine-spirits/6712/baileys-red-velvet-cupcake
 Sitemap: https://www.diffordsguide.com/sitemap/gb.xml
 Answer: likely_drink_article   (flavored liqueur — `/beer-wine-spirits/` path and products sitemap dominate "cupcake" in the slug)
@@ -94,6 +108,10 @@ Answer: likely_drink_article   (flavored liqueur — `/beer-wine-spirits/` path 
 URL: https://www.diffordsguide.com/beer-wine-spirits/6614/three-legs-oatmeal-stout
 Sitemap: https://www.diffordsguide.com/sitemap/gb.xml
 Answer: likely_drink_article   (a beer product — `/beer-wine-spirits/` is a catalog, so even slugs that name a single drink resolve to drink_article, not drink_recipe)
+
+URL: https://www.diffordsguide.com/encyclopedia/393/cocktails/jamies-italian-bar-cocktails-how-to-make
+Sitemap: https://www.diffordsguide.com/sitemap/gb.xml
+Answer: likely_drink_article   (`/encyclopedia/` is a guide/explainer path — never a single recipe)
 
 URL: https://www.diffordsguide.com/bars/w9R86z/crescent-sausage-and-pie
 Sitemap: https://www.diffordsguide.com/sitemap/bar.xml
