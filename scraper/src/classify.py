@@ -9,7 +9,7 @@ import asyncio
 import json
 import logging
 import sys
-import time
+from collections import Counter
 from pathlib import Path
 from typing import Awaitable, Callable
 
@@ -18,6 +18,8 @@ from ollama import AsyncClient
 from scraper.src.classify_prompt import PROMPT_VERSION
 from scraper.src.db import Database
 from scraper.src.ollama_client import ClassificationResult, classify_url
+from scraper.src.progress import make_progress
+from scraper.src.summary import print_summary
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
@@ -123,39 +125,6 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _format_eta(seconds: float) -> str:
-    if seconds < 60:
-        return f"{int(seconds)}s"
-    if seconds < 3600:
-        return f"{int(seconds / 60)}m{int(seconds % 60):02d}s"
-    h = int(seconds / 3600)
-    m = int((seconds % 3600) / 60)
-    return f"{h}h{m:02d}m"
-
-
-def _make_overall_progress(
-    grand_total_offset: int, overall_total: int, start_time: float
-) -> Callable[[int, int], None]:
-    """Build an on_progress callback that reports overall progress, velocity,
-    and ETA — not just the within-batch fraction the pool sees."""
-    def progress(done: int, total: int) -> None:
-        if done != total and done % 25 != 0:
-            return
-        overall = grand_total_offset + done
-        elapsed = time.monotonic() - start_time
-        rate = overall / elapsed if elapsed > 0 else 0
-        eta_str = _format_eta((overall_total - overall) / rate) if rate > 0 else "?"
-        pct = 100 * overall / overall_total if overall_total else 0
-        print(
-            f"\r  {overall:,}/{overall_total:,} ({pct:.1f}%)  "
-            f"{rate:.1f}/s  ETA {eta_str}    ",
-            end="", flush=True,
-        )
-        if done == total:
-            print()
-    return progress
-
-
 async def run_main(args: argparse.Namespace) -> int:
     """Main classify run, batched.
 
@@ -181,7 +150,14 @@ async def run_main(args: argparse.Namespace) -> int:
     if args.limit is not None:
         overall_total = min(overall_total, args.limit)
 
-    start_time = time.monotonic()
+    progress = make_progress(total=overall_total)
+    changes: dict[str, Counter] = {}
+
+    def adapter(batch_done: int, _batch_total: int) -> None:
+        # The pool reports within-batch progress; translate to cumulative so
+        # the shared progress callback's ETA is based on total work, not
+        # per-batch fractions.
+        progress(grand_total + batch_done)
 
     try:
         while True:
@@ -194,11 +170,16 @@ async def run_main(args: argparse.Namespace) -> int:
 
             if grand_total == 0:
                 scope = f"site={args.site}" if args.site else "all sites"
-                print(f"Classifying {overall_total:,} URLs ({scope}) via {args.model} "
-                      f"(concurrency={args.concurrency}, batch_size={args.batch_size}, "
-                      f"prompt={PROMPT_VERSION})")
-            print(f"Batch of {len(rows)}")
+                log.info(
+                    "classifying %s URLs (%s) via %s (concurrency=%d, batch_size=%d, prompt=%s)",
+                    f"{overall_total:,}", scope, args.model,
+                    args.concurrency, args.batch_size, PROMPT_VERSION,
+                )
 
+            # Accumulate per-site / per-label counts by reading back what was
+            # written this batch. Cheap because we already paid the round-trip
+            # to write them.
+            batch_urls = [r["url"] for r in rows]
             successes = await run_classify_pool(
                 rows=rows,
                 classify_fn=classify_with_shared,
@@ -206,8 +187,9 @@ async def run_main(args: argparse.Namespace) -> int:
                 model=args.model,
                 prompt_version=PROMPT_VERSION,
                 concurrency=args.concurrency,
-                on_progress=_make_overall_progress(grand_total, overall_total, start_time),
+                on_progress=adapter,
             )
+            _accumulate_changes(db, batch_urls, changes)
 
             if successes == 0:
                 print(
@@ -222,13 +204,28 @@ async def run_main(args: argparse.Namespace) -> int:
             if remaining is not None:
                 remaining -= len(rows)
 
-        if grand_total == 0 and exit_code == 0:
-            print("No unclassified rows. Done.")
-        elif exit_code == 0:
-            print(f"Done. Classified {grand_total} rows.")
+        print_summary("Classify", changes)
     finally:
         db.close()
     return exit_code
+
+
+def _accumulate_changes(
+    db: Database, urls: list[str], changes: dict[str, Counter]
+) -> None:
+    """Read the post-batch content_type for the URLs just processed and fold
+    them into the per-site Counter. URLs that are still NULL (errors) are
+    counted under 'classify_error'."""
+    if not urls:
+        return
+    placeholders = ",".join("?" for _ in urls)
+    rows = db.conn.execute(
+        f"SELECT site, content_type FROM pages WHERE url IN ({placeholders})",
+        urls,
+    ).fetchall()
+    for row in rows:
+        label = row["content_type"] or "classify_error"
+        changes.setdefault(row["site"], Counter())[label] += 1
 
 
 def main(argv: list[str] | None = None) -> int:

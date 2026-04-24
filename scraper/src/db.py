@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS pages (
     html_path TEXT,
     extracted_at TEXT,
     extract_error TEXT,
-    disabled_reason TEXT
+    disabled_reason TEXT,
+    validated_at TEXT
 );
 """
 
@@ -77,6 +78,9 @@ class Database:
         cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(pages)")}
         if "disabled_reason" not in cols:
             self.conn.execute("ALTER TABLE pages ADD COLUMN disabled_reason TEXT")
+            self.conn.commit()
+        if "validated_at" not in cols:
+            self.conn.execute("ALTER TABLE pages ADD COLUMN validated_at TEXT")
             self.conn.commit()
 
     def close(self):
@@ -302,6 +306,43 @@ class Database:
             cursor = self.conn.execute(query, params)
             self.conn.commit()
             return cursor.rowcount
+
+    def mark_validated(self, url: str):
+        """Stamp validated_at = now() so the validate CLI's work queue
+        (`validated_at IS NULL`) skips this row on future runs."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self.conn.execute(
+                "UPDATE pages SET validated_at = ? WHERE url = ?",
+                (now, url),
+            )
+            self.conn.commit()
+
+    def clear_validated_at(self, site: str | None = None) -> int:
+        """Clear validated_at for html-cached rows so the validate CLI
+        re-processes them. Optionally scoped to a site. Returns row count."""
+        query = "UPDATE pages SET validated_at = NULL WHERE html_path IS NOT NULL"
+        params: list = []
+        if site:
+            query += " AND site = ?"
+            params.append(site)
+        with self._lock:
+            cursor = self.conn.execute(query, params)
+            self.conn.commit()
+            return cursor.rowcount
+
+    def count_pending_validation(self, site: str | None = None) -> int:
+        """Rows with cached HTML that haven't been validated yet."""
+        query = (
+            "SELECT COUNT(*) FROM pages "
+            "WHERE html_path IS NOT NULL AND validated_at IS NULL"
+        )
+        params: list = []
+        if site:
+            query += " AND site = ?"
+            params.append(site)
+        with self._lock:
+            return self.conn.execute(query, params).fetchone()[0]
 
     def count_unclassified(self, site: str | None = None) -> int:
         """Count of rows with `content_type IS NULL`, optionally scoped to a site."""

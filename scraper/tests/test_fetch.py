@@ -68,6 +68,59 @@ def test_fetch_pages_marks_recipe(tmp_db, tmp_path, sample_recipe_html):
     db.close()
 
 
+def test_fetch_pages_stamps_validated_at(tmp_db, tmp_path, sample_recipe_html):
+    """Successful fetch runs validate+classify_drink synchronously, so it
+    should also stamp validated_at — otherwise every freshly-fetched row
+    would show up in the validate CLI's work queue for no reason."""
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
+
+    mock_client = MagicMock()
+    mock_client.get_account.return_value = {
+        "concurrencyLimit": 1, "concurrentRequests": 0,
+        "requestCount": 0, "requestLimit": 5000,
+        "burst": 0, "failedRequestCount": 0,
+    }
+    mock_client.fetch.return_value = sample_recipe_html
+
+    fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+
+    row = db.conn.execute(
+        "SELECT validated_at FROM pages WHERE url = ?",
+        ("https://example.com/recipes/margarita",),
+    ).fetchone()
+    assert row["validated_at"] is not None
+    db.close()
+
+
+def test_fetch_pages_stamps_validated_at_on_blocked(tmp_db, tmp_path, sample_blocked_html):
+    """Blocked pages never reach classify_drink, but validate still ran on
+    the HTML and produced a verdict. Stamping validated_at keeps the
+    work-queue invariant simple: every row we've seen through validate is
+    stamped, regardless of outcome."""
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipes/blocked")
+    db.set_content_type("https://example.com/recipes/blocked", "likely_drink_recipe")
+
+    mock_client = MagicMock()
+    mock_client.get_account.return_value = {
+        "concurrencyLimit": 1, "concurrentRequests": 0,
+        "requestCount": 0, "requestLimit": 5000,
+        "burst": 0, "failedRequestCount": 0,
+    }
+    mock_client.fetch.return_value = sample_blocked_html
+
+    fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+
+    row = db.conn.execute(
+        "SELECT validated_at FROM pages WHERE url = ?",
+        ("https://example.com/recipes/blocked",),
+    ).fetchone()
+    assert row["validated_at"] is not None
+    db.close()
+
+
 def test_fetch_pages_marks_blocked(tmp_db, tmp_path, sample_blocked_html):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipes/margarita")

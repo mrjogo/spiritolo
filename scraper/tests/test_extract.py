@@ -50,16 +50,17 @@ def seeded_scraper_db(tmp_db, tmp_path):
 def test_extract_writes_recipe_and_marks_rows(seeded_scraper_db, isolated_supabase):
     from scraper.src.extract import extract_pages
     db, html_dir = seeded_scraper_db
-    stats = extract_pages(db=db, sb=isolated_supabase, html_dir=html_dir)
+    changes = extract_pages(db=db, sb=isolated_supabase, html_dir=html_dir)
 
-    assert stats["extracted"] == 1
-    assert stats["no_recipe"] == 1
-    assert stats["missing"] == 0
+    assert changes["difs"]["extracted"] == 1
+    assert changes["difs"]["no_recipe"] == 1
+    assert changes["difs"].get("missing", 0) == 0
     assert isolated_supabase.count_recipes() == 1
 
-    # Re-running should be a no-op (both rows are now either extracted or errored).
-    stats2 = extract_pages(db=db, sb=isolated_supabase, html_dir=html_dir)
-    assert stats2 == {"extracted": 0, "no_recipe": 0, "missing": 0}
+    # Re-running is a no-op: both rows are either extracted or errored, so
+    # the work queue is empty and changes comes back as {}.
+    second = extract_pages(db=db, sb=isolated_supabase, html_dir=html_dir)
+    assert second == {}
     assert isolated_supabase.count_recipes() == 1
 
 
@@ -76,6 +77,6 @@ def test_extract_upsert_is_idempotent(seeded_scraper_db, isolated_supabase):
     conn.commit()
     conn.close()
 
-    stats = extract_pages(db=db, sb=isolated_supabase, html_dir=html_dir)
-    assert stats["extracted"] == 1
+    changes = extract_pages(db=db, sb=isolated_supabase, html_dir=html_dir)
+    assert changes["difs"]["extracted"] == 1
     assert isolated_supabase.count_recipes() == 1  # still one, UPSERT on source_url

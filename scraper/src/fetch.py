@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 
 from scraper.src.client import ScraperAPIClient, ScraperAPIError, AuthError, QuotaExhaustedError
 from scraper.src.db import Database
-from scraper.src.validate import validate, classify_drink
+from scraper.src.validation import validate, classify_drink
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
@@ -141,6 +141,13 @@ def fetch_pages(
             drink_result = classify_drink(html)
             if drink_result:
                 db.set_content_type(url, drink_result)
+
+        # Stamp validated_at so the validate CLI's work queue doesn't pick
+        # this row up again (fetch ran the same validate + classify_drink
+        # logic synchronously). Covers both the Recipe/content path above
+        # and the blocked branch — validated_at tracks "we've seen this row
+        # through validate," not "we wrote content_type."
+        db.mark_validated(url)
 
         # Re-check circuit breaker after each fetch
         if page_site != force_site:

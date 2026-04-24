@@ -12,6 +12,89 @@ def test_init_creates_table(tmp_db):
     db.close()
 
 
+def test_pages_has_validated_at_column(tmp_db):
+    db = Database(tmp_db)
+    cols = {row["name"] for row in db.conn.execute("PRAGMA table_info(pages)")}
+    assert "validated_at" in cols
+    db.close()
+
+
+def test_mark_validated_sets_timestamp(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("s", "https://e.com/x")
+    db.mark_validated("https://e.com/x")
+    row = db.conn.execute(
+        "SELECT validated_at FROM pages WHERE url = ?", ("https://e.com/x",)
+    ).fetchone()
+    assert row["validated_at"] is not None
+    db.close()
+
+
+def _seed_fetched(db, site, url, html_path):
+    """Mark a URL as fetched with cached HTML — required before validated_at
+    is meaningful (validate only runs on html_path IS NOT NULL rows)."""
+    db.add_url(site, url)
+    db.mark_content(url, "Recipe", "ok", html_path=html_path)
+
+
+def test_clear_validated_at_respects_site_scope(tmp_db):
+    db = Database(tmp_db)
+    _seed_fetched(db, "imbibe", "https://imbibe.com/a", "imbibe/a.html")
+    _seed_fetched(db, "punch", "https://punch.com/b", "punch/b.html")
+    db.mark_validated("https://imbibe.com/a")
+    db.mark_validated("https://punch.com/b")
+
+    cleared = db.clear_validated_at(site="imbibe")
+    assert cleared == 1
+
+    rows = {row["url"]: row["validated_at"] for row in db.conn.execute(
+        "SELECT url, validated_at FROM pages"
+    )}
+    assert rows["https://imbibe.com/a"] is None
+    assert rows["https://punch.com/b"] is not None
+    db.close()
+
+
+def test_clear_validated_at_without_site_clears_all(tmp_db):
+    db = Database(tmp_db)
+    _seed_fetched(db, "imbibe", "https://imbibe.com/a", "imbibe/a.html")
+    _seed_fetched(db, "punch", "https://punch.com/b", "punch/b.html")
+    db.mark_validated("https://imbibe.com/a")
+    db.mark_validated("https://punch.com/b")
+
+    assert db.clear_validated_at() == 2
+
+    for row in db.conn.execute("SELECT validated_at FROM pages"):
+        assert row["validated_at"] is None
+    db.close()
+
+
+def test_clear_validated_at_skips_rows_without_html_path(tmp_db):
+    """Rows that were never fetched shouldn't be touched — their validated_at
+    is always NULL, but the reset should report zero and not count them."""
+    db = Database(tmp_db)
+    db.add_url("imbibe", "https://imbibe.com/pending")  # no html_path
+    assert db.clear_validated_at() == 0
+    db.close()
+
+
+def test_count_pending_validation(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("imbibe", "https://imbibe.com/a")
+    db.add_url("imbibe", "https://imbibe.com/b")
+    db.add_url("punch", "https://punch.com/c")
+    # Simulate fetched pages with html_path set.
+    db.mark_content("https://imbibe.com/a", "Recipe", "ok", html_path="imbibe/a.html")
+    db.mark_content("https://imbibe.com/b", "Recipe", "ok", html_path="imbibe/b.html")
+    db.mark_content("https://punch.com/c", "Recipe", "ok", html_path="punch/c.html")
+    db.mark_validated("https://imbibe.com/a")
+
+    assert db.count_pending_validation() == 2
+    assert db.count_pending_validation(site="imbibe") == 1
+    assert db.count_pending_validation(site="punch") == 1
+    db.close()
+
+
 def test_add_url_inserts_pending(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")

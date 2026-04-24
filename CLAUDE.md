@@ -78,9 +78,30 @@ cd scraper && uv run python -m scraper.src.extract --site diffordsguide
 cd scraper && uv run python -m scraper.src.extract --limit 10
 ```
 
-**Re-extraction:** clear `extracted_at` (and optionally `extract_error`) on the rows you want to retry; UPSERT on `source_url` keeps re-runs idempotent.
+**Re-extraction:** clear `extracted_at` (and optionally `extract_error`) on the rows you want to retry (either via SQL or `--reset`); UPSERT on `source_url` keeps re-runs idempotent.
 
 **Local Supabase Studio:** http://localhost:54323 (on the Mac host).
+
+## Validate CLI
+
+`scraper/src/validate.py` re-runs `validate()` + `classify_drink()` over every cached HTML whose `validated_at IS NULL`. Fetch already stamps `validated_at` on successful fetch, so this CLI only has work when rules change and you clear the column (via SQL or `--reset`) to force re-processing. Work-queue based → runs are resumable, restart picks up where it left off.
+
+```bash
+# Re-process every row that hasn't been validated yet (typical after a classifier change + SQL UPDATE).
+cd scraper && uv run python -m scraper.src.validate
+
+# Dry-run preview, scoped to one site.
+cd scraper && uv run python -m scraper.src.validate --site imbibe --dry-run
+
+# Force a full re-sweep of imbibe, prompting for confirmation.
+cd scraper && uv run python -m scraper.src.validate --site imbibe --reset
+
+# Selective re-sweep via SQL instead of --reset:
+#   sqlite> UPDATE pages SET validated_at = NULL WHERE site = 'punch' AND content_type = 'confirmed_food';
+# Then run `validate` normally.
+```
+
+All pipeline scripts (`fetch`, `classify`, `extract`, `validate`) share the same `--site` / `--limit` / `--dry-run` / `--reset --yes` conventions where applicable, the same progress line (`X/Y (Z%) rows/s ETA 1h3m34s`), and the same per-site / per-category summary.
 
 ## Web UI
 
