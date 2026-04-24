@@ -56,11 +56,10 @@ export function RecipeList() {
     );
   }
 
-  const totalPages = Math.max(1, Math.ceil(state.total / PAGE_SIZE));
-
   return (
     <div className="page">
       <h1>Recipes</h1>
+      <Pagination total={state.total} pageSize={PAGE_SIZE} />
       {state.rows.length === 0 ? (
         <p className="recipe-list__empty">No recipes yet — extract some and they'll show up here.</p>
       ) : (
@@ -80,7 +79,7 @@ export function RecipeList() {
           ))}
         </ul>
       )}
-      <Pagination totalPages={totalPages} />
+      <Pagination total={state.total} pageSize={PAGE_SIZE} />
     </div>
   );
 }

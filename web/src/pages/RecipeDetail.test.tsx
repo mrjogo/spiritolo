@@ -68,7 +68,7 @@ describe('<RecipeDetail>', () => {
     expect(screen.getByText(/boom/i)).toBeInTheDocument();
   });
 
-  it('links to the source URL', async () => {
+  it('links to the source URL with full URL as link text', async () => {
     mockSingleResponse({
       id: 1,
       source_url: 'https://example.com/x',
@@ -79,8 +79,66 @@ describe('<RecipeDetail>', () => {
       jsonld: { name: 'X' },
     });
     renderAt('1');
-    const link = await screen.findByRole('link', { name: /view on example\.com/i });
+    const link = await screen.findByRole('link', {
+      name: /view at https:\/\/example\.com\/x/i,
+    });
     expect(link).toHaveAttribute('href', 'https://example.com/x');
+  });
+
+  it('shows the source host (not site name) in the byline', async () => {
+    mockSingleResponse({
+      id: 1,
+      source_url: 'https://www.epicurious.com/recipes/food/views/new-york-sour',
+      site: 'epicurious',
+      name: 'New York Sour',
+      author: null,
+      image_url: null,
+      jsonld: { name: 'New York Sour', author: 'Mary Frances Heck' },
+    });
+    renderAt('1');
+    await screen.findByRole('heading', { name: /new york sour/i });
+    expect(screen.getByText(/mary frances heck/i)).toHaveTextContent(
+      /www\.epicurious\.com/i,
+    );
+    expect(screen.queryByText(/· epicurious$/)).not.toBeInTheDocument();
+  });
+
+  it('renders multiple instruction steps as an <ol>', async () => {
+    mockSingleResponse({
+      id: 1,
+      source_url: 'https://x/y',
+      site: 's',
+      name: 'X',
+      author: null,
+      image_url: null,
+      jsonld: {
+        name: 'X',
+        recipeInstructions: ['Stir.', 'Strain.'],
+      },
+    });
+    const { container } = renderAt('1');
+    await screen.findByRole('heading', { name: 'X' });
+    const ol = container.querySelector('.recipe-detail__steps');
+    expect(ol?.tagName).toBe('OL');
+    expect(ol?.querySelectorAll('li')).toHaveLength(2);
+  });
+
+  it('renders a single instruction step as a paragraph (not <ol>)', async () => {
+    mockSingleResponse({
+      id: 1,
+      source_url: 'https://x/y',
+      site: 's',
+      name: 'X',
+      author: null,
+      image_url: null,
+      jsonld: {
+        name: 'X',
+        recipeInstructions: 'Combine everything in a shaker and strain.',
+      },
+    });
+    const { container } = renderAt('1');
+    await screen.findByText(/combine everything/i);
+    expect(container.querySelector('.recipe-detail__steps')).toBeNull();
   });
 
   it('short-circuits to not-found for a non-numeric id without hitting Supabase', async () => {

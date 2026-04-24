@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { ErrorPage } from '../components/ErrorPage';
 import { normalizeRecipe } from '../normalizeRecipe';
-import type { RecipeRow } from '../types';
+import type { InstructionStep, RecipeRow } from '../types';
 
 type State =
   | { status: 'loading' }
@@ -81,10 +81,10 @@ export function RecipeDetail() {
         <img src={normalized.images[0]} alt="" className="recipe-detail__hero" />
       )}
       <h1>{normalized.name}</h1>
-      {(normalized.author || state.row.site) && (
+      {(normalized.author || host) && (
         <p className="recipe-detail__byline">
           {normalized.author && <>By {normalized.author} · </>}
-          {state.row.site}
+          {host}
         </p>
       )}
       {normalized.description && <p>{normalized.description}</p>}
@@ -109,25 +109,12 @@ export function RecipeDetail() {
       {normalized.instructions.length > 0 && (
         <>
           <h2>Instructions</h2>
-          {normalized.instructions.map((step, i) =>
-            step.kind === 'step' ? (
-              <p key={i}>{step.text}</p>
-            ) : (
-              <section key={i}>
-                {step.heading && <h3>{step.heading}</h3>}
-                <ol>
-                  {step.steps.map((s, j) => (
-                    <li key={j}>{s}</li>
-                  ))}
-                </ol>
-              </section>
-            ),
-          )}
+          {renderInstructions(normalized.instructions)}
         </>
       )}
       <p>
         <a href={state.row.source_url} target="_blank" rel="noreferrer">
-          View on {host}
+          View at {state.row.source_url}
         </a>
       </p>
     </div>
@@ -140,4 +127,42 @@ function safeHost(url: string): string {
   } catch {
     return 'source';
   }
+}
+
+function renderInstructions(steps: InstructionStep[]) {
+  const groups: Array<
+    | { kind: 'steps'; steps: string[] }
+    | { kind: 'section'; heading: string; steps: string[] }
+  > = [];
+  for (const step of steps) {
+    if (step.kind === 'step') {
+      const last = groups[groups.length - 1];
+      if (last && last.kind === 'steps') last.steps.push(step.text);
+      else groups.push({ kind: 'steps', steps: [step.text] });
+    } else {
+      groups.push({ kind: 'section', heading: step.heading, steps: step.steps });
+    }
+  }
+  return groups.map((g, i) => {
+    if (g.kind === 'steps') {
+      if (g.steps.length === 1) return <p key={i}>{g.steps[0]}</p>;
+      return (
+        <ol key={i} className="recipe-detail__steps">
+          {g.steps.map((s, j) => (
+            <li key={j}>{s}</li>
+          ))}
+        </ol>
+      );
+    }
+    return (
+      <Fragment key={i}>
+        {g.heading && <h3>{g.heading}</h3>}
+        <ol className="recipe-detail__steps">
+          {g.steps.map((s, j) => (
+            <li key={j}>{s}</li>
+          ))}
+        </ol>
+      </Fragment>
+    );
+  });
 }

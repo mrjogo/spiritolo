@@ -109,4 +109,24 @@ describe('<RecipeList>', () => {
     );
     await waitFor(() => expect(range).toHaveBeenCalledWith(100, 149));
   });
+
+  it('renders pagination at both the top and bottom when there is more than one page', async () => {
+    mockRangeResponse(
+      Array.from({ length: 50 }, (_, i) => ({
+        id: i + 1,
+        site: 's',
+        name: `R${i + 1}`,
+        image_url: null,
+      })),
+      127,
+    );
+    const { container } = render(
+      <MemoryRouter>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    await screen.findByText('R1');
+    expect(container.querySelectorAll('.pagination')).toHaveLength(2);
+    expect(screen.getAllByText('1–50 of 127')).toHaveLength(2);
+  });
 });
