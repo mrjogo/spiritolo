@@ -390,18 +390,23 @@ class Database:
     EXTRACT_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink")
 
     def get_unextracted(self, site: str | None = None, limit: int | None = None) -> list[dict]:
-        """Work queue for the extractor: drink-recipe pages with cached HTML
-        that have no extract_runs row yet.
+        """Candidate rows for the extractor: drink-recipe pages with cached
+        HTML, excluding those with a known failure (`extract_runs.outcome !=
+        'extracted'`).
+
+        NOTE: this does NOT exclude pages that already succeeded — that check
+        requires asking Supabase (the source of truth for "extracted"), and
+        the DB layer deliberately stays Supabase-agnostic. `extract.py`
+        layers the Supabase filter on top of these candidates.
 
         Covers both `likely_drink_recipe` (LLM-classified) and
         `confirmed_drink` (validate confirmed Schema.org Recipe + drink
-        terms). To retry errored rows, DELETE their extract_runs row first
-        (or use --reset).
+        terms).
         """
         placeholders = ",".join("?" for _ in self.EXTRACT_CONTENT_TYPES)
         query = (
             "SELECT p.id, p.site, p.url, p.html_path, p.fetched_at FROM pages p "
-            "LEFT JOIN extract_runs e ON e.page_id = p.id "
+            "LEFT JOIN extract_runs e ON e.page_id = p.id AND e.outcome != 'extracted' "
             f"WHERE p.content_type IN ({placeholders}) "
             "AND p.html_path IS NOT NULL "
             "AND e.page_id IS NULL"

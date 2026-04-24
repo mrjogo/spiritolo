@@ -405,10 +405,17 @@ def _record_extract(db, url, outcome="extracted", error=None):
 
 
 def test_get_unextracted_returns_drink_recipe_buckets_with_html(tmp_db):
-    """Extractor queue covers both `likely_drink_recipe` (LLM-classified) and
-    `confirmed_drink` (validate-confirmed Schema.org Recipe + drink terms).
-    Filters out rows without html_path, rows with an existing extract_runs
-    row, and food/other buckets."""
+    """Extractor candidates cover both `likely_drink_recipe` (LLM-classified)
+    and `confirmed_drink` (validate-confirmed Schema.org Recipe + drink
+    terms), and exclude:
+      - rows without html_path
+      - rows with a known failure (extract_runs.outcome != 'extracted')
+      - food/other content types
+
+    Crucially this does NOT exclude rows with `outcome='extracted'` — the
+    "already extracted" check is against Supabase (the source of truth),
+    not the local audit table, because Supabase can be wiped independently.
+    """
     from scraper.src.db import Database
     db = Database(tmp_db)
     db.add_urls_batch(
@@ -426,24 +433,25 @@ def test_get_unextracted_returns_drink_recipe_buckets_with_html(tmp_db):
     # c: fetched but not a drink recipe
     db.set_content_type("https://x/c", "likely_food_recipe")
     db.mark_content("https://x/c", "valid", html_path="difs/c.html")
-    # d: likely_drink_recipe, fetched, already extracted → excluded
+    # d: likely_drink_recipe, extract_runs says 'extracted' → STILL a
+    # candidate (Supabase check happens in extract.py).
     db.set_content_type("https://x/d", "likely_drink_recipe")
     db.mark_content("https://x/d", "valid", html_path="difs/d.html")
-    _record_extract(db, "https://x/d")
+    _record_extract(db, "https://x/d", outcome="extracted")
     # e: confirmed_drink + fetched → queued
     db.set_content_type("https://x/e", "confirmed_drink")
     db.mark_content("https://x/e", "Recipe", html_path="difs/e.html")
-    # f: confirmed_drink, already extracted → excluded
+    # f: confirmed_drink, known failure → excluded (no_recipe is cached)
     db.set_content_type("https://x/f", "confirmed_drink")
     db.mark_content("https://x/f", "Recipe", html_path="difs/f.html")
-    _record_extract(db, "https://x/f")
+    _record_extract(db, "https://x/f", outcome="no_recipe")
     # g: confirmed_food → excluded regardless of extract_runs state
     db.set_content_type("https://x/g", "confirmed_food")
     db.mark_content("https://x/g", "Recipe", html_path="difs/g.html")
 
     rows = db.get_unextracted()
     urls = sorted(r["url"] for r in rows)
-    assert urls == ["https://x/a", "https://x/e"]
+    assert urls == ["https://x/a", "https://x/d", "https://x/e"]
     db.close()
 
 
@@ -525,9 +533,12 @@ def test_clear_extract_runs_scoped_by_site(tmp_db):
     db.close()
 
 
-def test_record_extract_blocks_reprocessing(tmp_db):
-    """Any extract_runs row (extracted, errored, or missing) removes the
-    page from the extract work queue until the row is deleted."""
+def test_record_extract_no_recipe_removes_from_candidates(tmp_db):
+    """A known-failure extract_runs row (outcome != 'extracted') takes the
+    page out of the candidate list until the row is deleted — no point
+    re-testing HTML that the extractor already determined has no Recipe.
+    Successful-extraction rows do NOT gate the candidate list; that's what
+    Supabase is for."""
     from scraper.src.db import Database
     db = Database(tmp_db)
     db.add_urls_batch("difs", ["https://x/a"])

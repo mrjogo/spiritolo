@@ -78,16 +78,29 @@ def extract_pages(
     outcome ('extracted' / 'no_recipe' / 'html_missing') — same shape as the
     validate CLI, so scraper.src.summary.print_summary renders both uniformly.
 
+    Supabase is the source of truth for 'has this page been extracted' —
+    its `recipes` table can be wiped independently of scraper.db, and when
+    that happens we MUST re-extract. Local `extract_runs` remains useful as
+    the source of truth for known failures (`outcome != 'extracted'`) and
+    as audit metadata, but it never overrides Supabase for successes.
+
     Opens one pipeline_runs row (stage='extract') per invocation, writes an
     extract_runs row per processed page (UPSERT, latest-only), closes the
     run on return."""
-    rows = db.get_unextracted(site=site, limit=limit)
+    candidates = db.get_unextracted(site=site)
+    already_extracted = sb.get_extracted_source_urls(site=site)
+    rows = [r for r in candidates if r["url"] not in already_extracted]
+    if limit is not None:
+        rows = rows[:limit]
     total = len(rows)
     if total == 0:
         log.info("nothing to extract")
         return {}
 
-    log.info("extracting %d pages", total)
+    log.info(
+        "extracting %d pages (%d candidates; %d already in Supabase)",
+        total, len(candidates), len(candidates) - len(rows),
+    )
     run_id = db.start_run(
         stage="extract", site=site,
         args={"limit": limit, "extractor_version": EXTRACTOR_VERSION},
