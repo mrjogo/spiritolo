@@ -81,3 +81,32 @@ cd scraper && uv run python -m scraper.src.extract --limit 10
 **Re-extraction:** clear `extracted_at` (and optionally `extract_error`) on the rows you want to retry; UPSERT on `source_url` keeps re-runs idempotent.
 
 **Local Supabase Studio:** http://localhost:54323 (on the Mac host).
+
+## Web UI
+
+A basic Vite + React + TypeScript SPA under `web/` for verifying the extracted recipes. Reads the `recipes_public` view via the publishable key (`sb_publishable_...`, the post-Nov-2025 replacement for the legacy anon key) — no backend.
+
+**One-time setup:**
+
+```bash
+cd web
+npm install
+cp .env.local.example .env.local
+# edit .env.local and paste in the publishable key from `supabase status` on the Mac host
+```
+
+**Running:**
+
+```bash
+cd web && npm run dev
+```
+
+Vite binds to `localhost:5173`; VS Code auto-forwards the port to the Mac host. Supabase must be running locally on the Mac host (see the JSON-LD Extractor section above).
+
+**Tests:**
+
+```bash
+cd web && npm test
+```
+
+Every unit of logic is built red-first (Vitest + `@testing-library/react`). The main suite is `normalizeRecipe.test.ts`, which covers the messy Schema.org Recipe variants.

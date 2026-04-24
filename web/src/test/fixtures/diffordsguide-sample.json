@@ -1,0 +1,20 @@
+{
+  "@context": "https://schema.org/",
+  "@type": "Recipe",
+  "name": "Gin Martini",
+  "description": "A classic.",
+  "url": "https://example.com/gin-martini",
+  "image": [
+    { "@type": "ImageObject", "url": "https://example.com/martini.jpg" }
+  ],
+  "author": { "@type": "Person", "name": "Jerry Thomas" },
+  "recipeYield": "1 drink",
+  "prepTime": "PT2M",
+  "totalTime": "PT2M",
+  "recipeIngredient": ["2 oz gin", "1 oz dry vermouth", "Lemon twist"],
+  "recipeInstructions": [
+    { "@type": "HowToStep", "text": "Stir with ice." },
+    { "@type": "HowToStep", "text": "Strain into a chilled glass." },
+    { "@type": "HowToStep", "text": "Garnish with lemon twist." }
+  ]
+}

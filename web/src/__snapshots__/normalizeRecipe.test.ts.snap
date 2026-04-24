@@ -1,0 +1,36 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`normalizeRecipe: real fixture > matches the expected shape snapshot 1`] = `
+{
+  "author": "Jerry Thomas",
+  "cookTime": null,
+  "description": "A classic.",
+  "images": [
+    "https://example.com/martini.jpg",
+  ],
+  "ingredients": [
+    "2 oz gin",
+    "1 oz dry vermouth",
+    "Lemon twist",
+  ],
+  "instructions": [
+    {
+      "kind": "step",
+      "text": "Stir with ice.",
+    },
+    {
+      "kind": "step",
+      "text": "Strain into a chilled glass.",
+    },
+    {
+      "kind": "step",
+      "text": "Garnish with lemon twist.",
+    },
+  ],
+  "name": "Gin Martini",
+  "prepTime": "2 min",
+  "sourceUrl": "https://example.com/gin-martini",
+  "totalTime": "2 min",
+  "yield": "1 drink",
+}
+`;

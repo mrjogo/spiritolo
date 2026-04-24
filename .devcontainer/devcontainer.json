@@ -38,7 +38,9 @@
 
   "features": {
     // [repo-mixin:devcontainer-claude] GitHub CLI — used for PR workflows and auth forwarding
-    "ghcr.io/devcontainers/features/github-cli:1": {}
+    "ghcr.io/devcontainers/features/github-cli:1": {},
+    // Node.js + npm for the web/ SPA (Vite + React + TS).
+    "ghcr.io/devcontainers/features/node:1": { "version": "lts" }
   },
 
   // Post-create lifecycle hook — runs after container is created.
@@ -49,7 +51,9 @@
     // [repo-mixin:devcontainer-python-uv] Sync uv environment from lockfile on container create.
     // Runs at repo root. If your pyproject.toml lives in a subdirectory, change to
     // "cd <subdir> && uv sync --frozen".
-    "uv-sync": "cd scraper && uv sync --frozen"
+    "uv-sync": "cd scraper && uv sync --frozen",
+    // Install npm deps for the web SPA.
+    "web-install": "cd web && npm ci"
   },
 
   "customizations": {
