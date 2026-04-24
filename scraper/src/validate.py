@@ -1,8 +1,17 @@
 """Validate CLI: re-run validate() + classify_drink() on cached HTML.
 
-Work queue is `html_path IS NOT NULL AND validated_at IS NULL`, so runs are
-resumable (restart picks up where it left off) and arbitrary subsets can be
-re-processed by clearing validated_at via SQL or --reset.
+Work queue is "pages with html_path set that have no validate_html_runs row"
+so runs are resumable (restart picks up where it left off) and arbitrary
+subsets can be re-processed by clearing the relevant rows via SQL or --reset.
+
+Each invocation:
+  1. Opens a pipeline_runs row with stage='validate_html'.
+  2. For each page in the queue, writes one validate_html_runs row and one
+     classify_drink_runs row (UPSERT on page_id — latest-only). Each row
+     carries the run_id, evaluator version, and a snapshot of the pages.*
+     field the stage mutates, captured RIGHT BEFORE this evaluation ran.
+  3. Writes new pages.status / pages.content_type for the denormalized cache.
+  4. Closes the pipeline_runs row with the summary Counter we already print.
 
 The validate-status flow and the classify_drink content_type flow are
 independent: a row whose validate status stays at "Recipe" can still have
@@ -20,10 +29,11 @@ from collections import Counter
 from pathlib import Path
 
 from scraper.src.cli_common import confirm_reset
+from scraper.src.classify_drink import SCORER_VERSION, classify_drink_scored
 from scraper.src.db import Database
 from scraper.src.progress import make_progress
 from scraper.src.summary import print_summary
-from scraper.src.validation import classify_drink, validate
+from scraper.src.validation import VALIDATOR_VERSION, validate
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
@@ -44,22 +54,7 @@ def revalidate(
     Returns per-site Counter of transition descriptions, for rendering via
     scraper.src.summary.print_summary.
     """
-    query = (
-        "SELECT url, site, status, content_type, html_path "
-        "FROM pages WHERE html_path IS NOT NULL AND validated_at IS NULL"
-    )
-    params: list = []
-    if site:
-        query += " AND site = ?"
-        params.append(site)
-    query += " ORDER BY site, id"
-    if limit is not None:
-        query += " LIMIT ?"
-        params.append(limit)
-
-    with db._lock:
-        rows = db.conn.execute(query, params).fetchall()
-
+    rows = db.get_pending_validate_html(site=site, limit=limit)
     total = len(rows)
     if total == 0:
         log.info("no pending rows — nothing to validate")
@@ -67,6 +62,15 @@ def revalidate(
 
     scope = f" (site={site})" if site else ""
     log.info("validating %d pages%s", total, scope)
+
+    run_id: int | None = None
+    if not dry_run:
+        run_id = db.start_run(
+            stage="validate_html",
+            site=site,
+            args={"limit": limit, "dry_run": dry_run},
+        )
+
     changes: dict[str, Counter] = {}
     missing = 0
     progress = make_progress(total=total)
@@ -79,9 +83,12 @@ def revalidate(
             continue
         html = html_file.read_text(encoding="utf-8")
 
+        page_id = row["id"]
+        old_status = row["status"]
+        old_ct = row["content_type"]
+
         # --- validate flow (status) ---
         result = validate(html, url=row["url"])
-        old_status = row["status"]
         new_status = result.status
         if new_status != old_status:
             changes.setdefault(row["site"], Counter())[
@@ -98,24 +105,44 @@ def revalidate(
                         html_path=row["html_path"],
                     )
 
+        if not dry_run:
+            db.record_validate_html(
+                page_id=page_id,
+                run_id=run_id,
+                status=new_status,
+                reason=result.reason,
+                validator_version=VALIDATOR_VERSION,
+                pages_status_before=old_status,
+            )
+
         # --- classify_drink flow (content_type) ---
+        # Run the scored classifier even on 'blocked' pages so we always have
+        # provenance; the score will be 0 (no recipe) and the label None.
+        classification = classify_drink_scored(html)
         if new_status != "blocked":
-            predicted = classify_drink(html)
-            old_ct = row["content_type"]
-            if predicted is not None and predicted != old_ct:
+            if classification.label is not None and classification.label != old_ct:
                 changes.setdefault(row["site"], Counter())[
-                    f"{old_ct or 'NULL'} -> {predicted}"
+                    f"{old_ct or 'NULL'} -> {classification.label}"
                 ] += 1
                 if not dry_run:
-                    db.set_content_type(row["url"], predicted)
+                    db.set_content_type(row["url"], classification.label)
 
-        # Stamp validated_at unless this is a dry run. Dry runs must not
-        # mutate the work queue — otherwise a preview would silently hide
-        # rows from the subsequent real run.
         if not dry_run:
-            db.mark_validated(row["url"])
+            db.record_classify_drink(
+                page_id=page_id,
+                run_id=run_id,
+                label=classification.label,
+                score=classification.score,
+                score_detail={"rules": classification.rules},
+                scorer_version=SCORER_VERSION,
+                pages_content_type_before=old_ct,
+            )
 
         progress(idx)
+
+    if not dry_run and run_id is not None:
+        summary_dict = {site_key: dict(counter) for site_key, counter in changes.items()}
+        db.finish_run(run_id, summary={"transitions": summary_dict, "missing": missing})
 
     if missing:
         log.warning("%d rows had html_path set but file was missing", missing)
@@ -127,23 +154,22 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="validate",
         description=(
             "Re-run validate + classify_drink on cached HTML. Work queue is "
-            "`html_path IS NOT NULL AND validated_at IS NULL`, so runs are "
-            "resumable — kill it any time and re-invoke to pick up where it "
-            "left off."
+            "pages with cached HTML that have no validate_html_runs row — "
+            "runs are resumable; kill it any time and re-invoke to pick up "
+            "where it left off."
         ),
     )
     parser.add_argument("--site", help="Only process a specific site.")
     parser.add_argument("--limit", type=int, help="Process at most N rows.")
     parser.add_argument(
         "--dry-run", action="store_true",
-        help="Report transitions without writing to the DB or stamping "
-             "validated_at.",
+        help="Report transitions without writing to the DB or recording eval rows.",
     )
     parser.add_argument(
         "--reset", action="store_true",
-        help="Clear validated_at for in-scope rows before running, forcing "
-             "re-processing. Combine with --site for partial re-sweeps; use "
-             "raw SQL for anything more exotic.",
+        help="Delete validate_html_runs + classify_drink_runs for in-scope "
+             "rows before running, forcing re-evaluation. Combine with --site "
+             "for partial re-sweeps; use raw SQL for anything more exotic.",
     )
     parser.add_argument(
         "--yes", action="store_true",
@@ -161,14 +187,17 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.reset:
             scope = f"site={args.site}" if args.site else "all sites"
-            row_count = db.count_pending_validation(site=args.site)
-            # count of rows already validated — those are what --reset clears.
+            # Count rows that would be deleted (validate_html_runs is the
+            # authoritative "has been validated" signal now).
+            q = (
+                "SELECT COUNT(*) c FROM validate_html_runs v "
+                "JOIN pages p ON p.id = v.page_id"
+            )
+            params: list = []
+            if args.site:
+                q += " WHERE p.site = ?"
+                params.append(args.site)
             with db._lock:
-                q = "SELECT COUNT(*) c FROM pages WHERE html_path IS NOT NULL AND validated_at IS NOT NULL"
-                params: list = []
-                if args.site:
-                    q += " AND site = ?"
-                    params.append(args.site)
                 already = db.conn.execute(q, params).fetchone()["c"]
             if not confirm_reset(
                 row_count=already,
@@ -178,8 +207,9 @@ def main(argv: list[str] | None = None) -> int:
                 log.error("reset aborted")
                 return 1
             if already:
-                cleared = db.clear_validated_at(site=args.site)
-                log.info("cleared validated_at on %d rows", cleared)
+                v = db.clear_validate_html_runs(site=args.site)
+                d = db.clear_classify_drink_runs(site=args.site)
+                log.info("cleared %d validate_html_runs + %d classify_drink_runs rows", v, d)
 
         changes = revalidate(
             db, site=args.site, dry_run=args.dry_run, limit=args.limit,

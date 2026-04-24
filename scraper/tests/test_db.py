@@ -627,6 +627,398 @@ def test_migrate_adds_disabled_reason_to_existing_db(tmp_db):
     db.close()
 
 
+# ---------------------------------------------------------------------------
+# Pipeline runs + per-stage eval tables
+#
+# Each evaluator (classify_url, validate_html, classify_drink, extract) gets
+# its own `*_runs` table keyed by page_id PK. Latest-only: re-running an
+# evaluator UPSERTs, overwriting the previous row for that page. The design
+# note: dropping any `*_runs` table is a safe operation — pages still works,
+# the stage just needs to re-evaluate on the next run.
+# ---------------------------------------------------------------------------
+
+
+def test_pipeline_runs_table_exists(tmp_db):
+    db = Database(tmp_db)
+    cols = {row[1] for row in db.conn.execute("PRAGMA table_info(pipeline_runs)")}
+    assert cols == {"id", "stage", "started_at", "finished_at", "site", "args", "summary"}
+    db.close()
+
+
+def test_classify_url_runs_table_exists(tmp_db):
+    db = Database(tmp_db)
+    cols = {row[1] for row in db.conn.execute("PRAGMA table_info(classify_url_runs)")}
+    assert cols == {
+        "page_id", "run_id", "label", "model", "prompt_version",
+        "raw_response", "latency_ms", "evaluated_at", "pages_content_type_before",
+    }
+    # page_id is the PK, enforcing one row per page (latest-only).
+    pk_cols = [r[1] for r in db.conn.execute("PRAGMA table_info(classify_url_runs)") if r[5]]
+    assert pk_cols == ["page_id"]
+    db.close()
+
+
+def test_validate_html_runs_table_exists(tmp_db):
+    db = Database(tmp_db)
+    cols = {row[1] for row in db.conn.execute("PRAGMA table_info(validate_html_runs)")}
+    assert cols == {
+        "page_id", "run_id", "status", "reason",
+        "validator_version", "evaluated_at", "pages_status_before",
+    }
+    pk_cols = [r[1] for r in db.conn.execute("PRAGMA table_info(validate_html_runs)") if r[5]]
+    assert pk_cols == ["page_id"]
+    db.close()
+
+
+def test_classify_drink_runs_table_exists(tmp_db):
+    db = Database(tmp_db)
+    cols = {row[1] for row in db.conn.execute("PRAGMA table_info(classify_drink_runs)")}
+    assert cols == {
+        "page_id", "run_id", "label", "score", "score_detail",
+        "scorer_version", "evaluated_at", "pages_content_type_before",
+    }
+    pk_cols = [r[1] for r in db.conn.execute("PRAGMA table_info(classify_drink_runs)") if r[5]]
+    assert pk_cols == ["page_id"]
+    db.close()
+
+
+def test_extract_runs_table_exists(tmp_db):
+    db = Database(tmp_db)
+    cols = {row[1] for row in db.conn.execute("PRAGMA table_info(extract_runs)")}
+    assert cols == {
+        "page_id", "run_id", "outcome", "error",
+        "extractor_version", "evaluated_at",
+    }
+    pk_cols = [r[1] for r in db.conn.execute("PRAGMA table_info(extract_runs)") if r[5]]
+    assert pk_cols == ["page_id"]
+    db.close()
+
+
+def test_backfill_classify_url_runs_from_legacy_classifications(tmp_db):
+    """Opening a DB that has legacy `classifications` rows but an empty
+    `classify_url_runs` table should backfill one row per page using the
+    most-recent classification for that page. Older rows are dropped (we keep
+    latest-only). Subsequent re-opens are idempotent."""
+    # Seed via a first open, then inject legacy rows directly so we can replay
+    # the "existing-DB upgrade" path on the second open.
+    db = Database(tmp_db)
+    db.add_url("imbibe", "https://imbibe.com/a")
+    db.add_url("imbibe", "https://imbibe.com/b")
+    page_a = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://imbibe.com/a",)).fetchone()["id"]
+    page_b = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://imbibe.com/b",)).fetchone()["id"]
+    db.conn.executemany(
+        "INSERT INTO classifications (page_id, label, model, prompt_version, raw_response, latency_ms, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [
+            (page_a, "likely_food_recipe", "qwen3:14b", "v1", "raw-old", 100, "2026-01-01T00:00:00+00:00"),
+            (page_a, "likely_drink_recipe", "qwen3:14b", "v2", "raw-new", 120, "2026-02-01T00:00:00+00:00"),
+            (page_b, "likely_junk", "qwen3:14b", "v2", None, 80, "2026-02-01T00:00:00+00:00"),
+        ],
+    )
+    # Wipe out the backfill that the first open already did, simulating a
+    # pre-migration DB.
+    db.conn.execute("DELETE FROM classify_url_runs")
+    db.conn.commit()
+    db.close()
+
+    # Second open triggers the migration.
+    db = Database(tmp_db)
+    rows = {r["page_id"]: dict(r) for r in db.conn.execute(
+        "SELECT page_id, label, model, prompt_version, raw_response, latency_ms, evaluated_at "
+        "FROM classify_url_runs"
+    )}
+    assert set(rows) == {page_a, page_b}
+    # Latest-per-page: page_a should have the v2 row, not v1.
+    assert rows[page_a]["label"] == "likely_drink_recipe"
+    assert rows[page_a]["prompt_version"] == "v2"
+    assert rows[page_a]["raw_response"] == "raw-new"
+    assert rows[page_a]["latency_ms"] == 120
+    assert rows[page_a]["evaluated_at"] == "2026-02-01T00:00:00+00:00"
+    assert rows[page_b]["label"] == "likely_junk"
+
+    # Opening again is idempotent — no duplicate rows, no overwrite.
+    db.close()
+    db = Database(tmp_db)
+    count = db.conn.execute("SELECT COUNT(*) c FROM classify_url_runs").fetchone()["c"]
+    assert count == 2
+    db.close()
+
+
+def test_backfill_skips_when_classify_url_runs_already_has_rows(tmp_db):
+    """If classify_url_runs already has data, the migration must not re-copy
+    from classifications — user may have already pruned old classifications,
+    and we shouldn't resurrect them."""
+    db = Database(tmp_db)
+    db.add_url("imbibe", "https://imbibe.com/a")
+    page_id = db.conn.execute("SELECT id FROM pages").fetchone()["id"]
+    db.conn.execute(
+        "INSERT INTO classify_url_runs "
+        "(page_id, label, model, prompt_version, raw_response, latency_ms, evaluated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (page_id, "likely_drink_recipe", "qwen3:14b", "v3", None, 100, "2026-03-01T00:00:00+00:00"),
+    )
+    # Legacy row that should NOT be copied (because the runs table already has data).
+    db.conn.execute(
+        "INSERT INTO classifications (page_id, label, model, prompt_version, raw_response, latency_ms, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (page_id, "likely_food_recipe", "qwen3:14b", "v1", None, 80, "2026-01-01T00:00:00+00:00"),
+    )
+    db.conn.commit()
+    db.close()
+
+    db = Database(tmp_db)
+    row = db.conn.execute("SELECT label, prompt_version FROM classify_url_runs").fetchone()
+    assert row["label"] == "likely_drink_recipe"
+    assert row["prompt_version"] == "v3"
+    db.close()
+
+
+# ---------------------------------------------------------------------------
+# Database API: pipeline_runs + validate-stage eval writes
+# ---------------------------------------------------------------------------
+
+
+def test_start_run_returns_id_and_persists_row(tmp_db):
+    db = Database(tmp_db)
+    run_id = db.start_run(stage="validate_html", site="imbibe", args={"limit": 10})
+    row = db.conn.execute(
+        "SELECT stage, site, args, started_at, finished_at, summary FROM pipeline_runs WHERE id = ?",
+        (run_id,),
+    ).fetchone()
+    assert row["stage"] == "validate_html"
+    assert row["site"] == "imbibe"
+    # args is stored as JSON text so queries aren't tied to the Python repr.
+    import json
+    assert json.loads(row["args"]) == {"limit": 10}
+    assert row["started_at"] is not None
+    assert row["finished_at"] is None
+    assert row["summary"] is None
+    db.close()
+
+
+def test_finish_run_stamps_finished_at_and_summary(tmp_db):
+    db = Database(tmp_db)
+    run_id = db.start_run(stage="validate_html")
+    db.finish_run(run_id, summary={"transitions": 3})
+    row = db.conn.execute(
+        "SELECT finished_at, summary FROM pipeline_runs WHERE id = ?", (run_id,)
+    ).fetchone()
+    assert row["finished_at"] is not None
+    import json
+    assert json.loads(row["summary"]) == {"transitions": 3}
+    db.close()
+
+
+def test_record_validate_html_inserts_one_row(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("imbibe", "https://imbibe.com/a")
+    page_id = db.conn.execute("SELECT id FROM pages").fetchone()["id"]
+    run_id = db.start_run(stage="validate_html")
+
+    db.record_validate_html(
+        page_id=page_id,
+        run_id=run_id,
+        status="Recipe",
+        reason="JSON-LD @type: Recipe",
+        validator_version="v1",
+        pages_status_before="fetched",
+    )
+    row = db.conn.execute("SELECT * FROM validate_html_runs").fetchone()
+    assert row["page_id"] == page_id
+    assert row["run_id"] == run_id
+    assert row["status"] == "Recipe"
+    assert row["reason"] == "JSON-LD @type: Recipe"
+    assert row["validator_version"] == "v1"
+    assert row["pages_status_before"] == "fetched"
+    assert row["evaluated_at"] is not None
+    db.close()
+
+
+def test_record_validate_html_is_upsert_on_page_id(tmp_db):
+    """Re-running the validator for the same page overwrites the prior row
+    (latest-only). The before-snapshot updates to reflect what pages.status
+    was RIGHT BEFORE the new evaluation — not the original value. That's by
+    design: we only answer 'what flipped on the last run'."""
+    db = Database(tmp_db)
+    db.add_url("imbibe", "https://imbibe.com/a")
+    page_id = db.conn.execute("SELECT id FROM pages").fetchone()["id"]
+    run1 = db.start_run(stage="validate_html")
+    db.record_validate_html(
+        page_id=page_id, run_id=run1, status="Recipe", reason=None,
+        validator_version="v1", pages_status_before="fetched",
+    )
+    run2 = db.start_run(stage="validate_html")
+    db.record_validate_html(
+        page_id=page_id, run_id=run2, status="unverified", reason="lost structured data",
+        validator_version="v2", pages_status_before="Recipe",
+    )
+    rows = db.conn.execute("SELECT * FROM validate_html_runs").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["run_id"] == run2
+    assert rows[0]["status"] == "unverified"
+    assert rows[0]["validator_version"] == "v2"
+    assert rows[0]["pages_status_before"] == "Recipe"
+    db.close()
+
+
+def test_record_classify_drink_inserts_one_row(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("imbibe", "https://imbibe.com/a")
+    page_id = db.conn.execute("SELECT id FROM pages").fetchone()["id"]
+    run_id = db.start_run(stage="classify_drink")
+
+    db.record_classify_drink(
+        page_id=page_id,
+        run_id=run_id,
+        label="confirmed_drink",
+        score=7,
+        score_detail={"rules": [["name_cocktail_family", 3], ["instructions_shake_ice", 3]]},
+        scorer_version="v1",
+        pages_content_type_before="confirmed_food",
+    )
+    row = db.conn.execute("SELECT * FROM classify_drink_runs").fetchone()
+    assert row["label"] == "confirmed_drink"
+    assert row["score"] == 7
+    import json
+    assert json.loads(row["score_detail"])["rules"][0] == ["name_cocktail_family", 3]
+    assert row["pages_content_type_before"] == "confirmed_food"
+    db.close()
+
+
+def test_record_classify_drink_accepts_null_label_for_abstain(tmp_db):
+    """Abstain is the common case (score between -2 and 2) — the row still
+    gets written so we know the evaluator ran, just with label=NULL."""
+    db = Database(tmp_db)
+    db.add_url("imbibe", "https://imbibe.com/a")
+    page_id = db.conn.execute("SELECT id FROM pages").fetchone()["id"]
+    run_id = db.start_run(stage="classify_drink")
+
+    db.record_classify_drink(
+        page_id=page_id, run_id=run_id, label=None, score=0,
+        score_detail={"rules": []}, scorer_version="v1",
+        pages_content_type_before="likely_drink_recipe",
+    )
+    row = db.conn.execute("SELECT label FROM classify_drink_runs").fetchone()
+    assert row["label"] is None
+    db.close()
+
+
+def test_get_pending_validate_html_returns_rows_without_eval(tmp_db):
+    """Work queue: pages with cached HTML that don't have a validate_html_runs
+    row yet. Replaces the old `validated_at IS NULL` work queue."""
+    db = Database(tmp_db)
+    _seed_fetched(db, "imbibe", "https://imbibe.com/a", "imbibe/a.html")
+    _seed_fetched(db, "imbibe", "https://imbibe.com/b", "imbibe/b.html")
+    _seed_fetched(db, "punch", "https://punch.com/c", "punch/c.html")
+    # Seed one validate_html_runs row for /a — it should be skipped.
+    page_a = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://imbibe.com/a",)).fetchone()["id"]
+    run_id = db.start_run(stage="validate_html")
+    db.record_validate_html(
+        page_id=page_a, run_id=run_id, status="Recipe", reason=None,
+        validator_version="v1", pages_status_before="Recipe",
+    )
+
+    pending = db.get_pending_validate_html()
+    urls = {row["url"] for row in pending}
+    assert urls == {"https://imbibe.com/b", "https://punch.com/c"}
+    db.close()
+
+
+def test_get_pending_validate_html_site_filter(tmp_db):
+    db = Database(tmp_db)
+    _seed_fetched(db, "imbibe", "https://imbibe.com/a", "imbibe/a.html")
+    _seed_fetched(db, "punch", "https://punch.com/b", "punch/b.html")
+    pending = db.get_pending_validate_html(site="imbibe")
+    assert [row["url"] for row in pending] == ["https://imbibe.com/a"]
+    db.close()
+
+
+def test_get_pending_validate_html_skips_rows_without_html(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("imbibe", "https://imbibe.com/never-fetched")
+    assert db.get_pending_validate_html() == []
+    db.close()
+
+
+def test_clear_validate_html_runs_all(tmp_db):
+    """Prune all validate_html_runs rows → everything is back in the work queue."""
+    db = Database(tmp_db)
+    _seed_fetched(db, "imbibe", "https://imbibe.com/a", "imbibe/a.html")
+    _seed_fetched(db, "punch", "https://punch.com/b", "punch/b.html")
+    run_id = db.start_run(stage="validate_html")
+    for url in ("https://imbibe.com/a", "https://punch.com/b"):
+        page_id = db.conn.execute("SELECT id FROM pages WHERE url = ?", (url,)).fetchone()["id"]
+        db.record_validate_html(
+            page_id=page_id, run_id=run_id, status="Recipe", reason=None,
+            validator_version="v1", pages_status_before="Recipe",
+        )
+
+    assert db.clear_validate_html_runs() == 2
+    assert db.conn.execute("SELECT COUNT(*) c FROM validate_html_runs").fetchone()["c"] == 0
+    # Classify_drink_runs is a separate table, untouched.
+    db.close()
+
+
+def test_clear_validate_html_runs_site_scoped(tmp_db):
+    db = Database(tmp_db)
+    _seed_fetched(db, "imbibe", "https://imbibe.com/a", "imbibe/a.html")
+    _seed_fetched(db, "punch", "https://punch.com/b", "punch/b.html")
+    run_id = db.start_run(stage="validate_html")
+    for url in ("https://imbibe.com/a", "https://punch.com/b"):
+        page_id = db.conn.execute("SELECT id FROM pages WHERE url = ?", (url,)).fetchone()["id"]
+        db.record_validate_html(
+            page_id=page_id, run_id=run_id, status="Recipe", reason=None,
+            validator_version="v1", pages_status_before="Recipe",
+        )
+
+    assert db.clear_validate_html_runs(site="imbibe") == 1
+    remaining = db.conn.execute(
+        "SELECT p.url FROM validate_html_runs v JOIN pages p ON p.id = v.page_id"
+    ).fetchall()
+    assert [r["url"] for r in remaining] == ["https://punch.com/b"]
+    db.close()
+
+
+def test_clear_classify_drink_runs_site_scoped(tmp_db):
+    db = Database(tmp_db)
+    _seed_fetched(db, "imbibe", "https://imbibe.com/a", "imbibe/a.html")
+    _seed_fetched(db, "punch", "https://punch.com/b", "punch/b.html")
+    run_id = db.start_run(stage="classify_drink")
+    for url in ("https://imbibe.com/a", "https://punch.com/b"):
+        page_id = db.conn.execute("SELECT id FROM pages WHERE url = ?", (url,)).fetchone()["id"]
+        db.record_classify_drink(
+            page_id=page_id, run_id=run_id, label="confirmed_drink", score=3,
+            score_detail={}, scorer_version="v1",
+            pages_content_type_before="likely_drink_recipe",
+        )
+
+    assert db.clear_classify_drink_runs(site="punch") == 1
+    remaining = db.conn.execute(
+        "SELECT p.url FROM classify_drink_runs d JOIN pages p ON p.id = d.page_id"
+    ).fetchall()
+    assert [r["url"] for r in remaining] == ["https://imbibe.com/a"]
+    db.close()
+
+
+def test_count_pending_validate_html(tmp_db):
+    db = Database(tmp_db)
+    _seed_fetched(db, "imbibe", "https://imbibe.com/a", "imbibe/a.html")
+    _seed_fetched(db, "imbibe", "https://imbibe.com/b", "imbibe/b.html")
+    _seed_fetched(db, "punch", "https://punch.com/c", "punch/c.html")
+    assert db.count_pending_validate_html() == 3
+    assert db.count_pending_validate_html(site="imbibe") == 2
+
+    # Record one and re-check.
+    page_a = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://imbibe.com/a",)).fetchone()["id"]
+    run_id = db.start_run(stage="validate_html")
+    db.record_validate_html(
+        page_id=page_a, run_id=run_id, status="Recipe", reason=None,
+        validator_version="v1", pages_status_before="Recipe",
+    )
+    assert db.count_pending_validate_html() == 2
+    db.close()
+
+
 def test_db_safe_from_multiple_threads(tmp_db):
     """Regression: Database used to raise 'SQLite objects created in a thread
     can only be used in that same thread' when accessed from worker threads.

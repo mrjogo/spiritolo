@@ -28,6 +28,12 @@ DEFAULT_EVAL_PATH = (
 )
 
 
+SCORER_VERSION = "v1"
+"""Bumped when the scoring rules or thresholds change. Recorded on every
+classify_drink_runs row so `DELETE FROM classify_drink_runs WHERE
+scorer_version != 'v1'` targets stale evaluations for re-running."""
+
+
 GLASSWARE_WORDS = {
     "coupe", "highball", "collins", "julep", "snifter",
     "flute", "tumbler", "rocks", "coupette", "nick",
@@ -513,3 +519,25 @@ def classify_drink(html: str) -> str | None:
     """
     label, _, _ = _predicted_label(html)
     return None if label == _ABSTAIN_LABEL else label
+
+
+@dataclass
+class DrinkClassification:
+    """Result of scoring a page for drink-vs-food. `label` is None on abstain."""
+    label: str | None
+    score: int
+    rules: list[tuple[str, int]]
+
+
+def classify_drink_scored(html: str) -> DrinkClassification:
+    """Like classify_drink but also exposes the score and per-rule attribution.
+
+    Used by validate.py to populate classify_drink_runs with enough detail
+    that score-based queries ('show me all pages scored exactly 2') and rule
+    attribution ('which rule fired on this page') work without re-parsing."""
+    label, score, rules = _predicted_label(html)
+    return DrinkClassification(
+        label=None if label == _ABSTAIN_LABEL else label,
+        score=score,
+        rules=rules,
+    )

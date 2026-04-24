@@ -36,6 +36,11 @@ MIN_PAGE_SIZE = 5000  # bytes
 MIN_TEXT_LENGTH = 500  # visible characters after stripping tags
 
 
+VALIDATOR_VERSION = "v1"
+"""Bumped when validate() rules change (new blocker fingerprints, different
+@type priority, etc.). Recorded on every validate_html_runs row."""
+
+
 
 class TextExtractor(HTMLParser):
     """Extract visible text from HTML, skipping script/style tags."""

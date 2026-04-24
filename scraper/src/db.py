@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import threading
 from datetime import datetime, timezone
@@ -51,6 +52,88 @@ CREATE_CLASSIFICATIONS_INDEXES = [
 ]
 
 
+# Pipeline runs + per-stage eval tables.
+#
+# Each evaluator owns a `*_runs` table keyed by page_id PK (latest-only: a re-run
+# UPSERTs and overwrites). Every eval row carries a `run_id` FK to pipeline_runs,
+# its evaluator version, and — for stages that mutate a `pages` field — a
+# snapshot of that field's value right before this evaluation ran. That snapshot
+# is how we answer "what flipped on the last run" without keeping history.
+#
+# These tables are intentionally prunable. Dropping them (or deleting rows) does
+# not break `pages`; it just means the affected stage will re-evaluate next run.
+
+CREATE_PIPELINE_RUNS_TABLE = """
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    stage       TEXT NOT NULL,
+    started_at  TEXT NOT NULL,
+    finished_at TEXT,
+    site        TEXT,
+    args        TEXT,
+    summary     TEXT
+);
+"""
+
+CREATE_CLASSIFY_URL_RUNS_TABLE = """
+CREATE TABLE IF NOT EXISTS classify_url_runs (
+    page_id                    INTEGER PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+    run_id                     INTEGER REFERENCES pipeline_runs(id) ON DELETE SET NULL,
+    label                      TEXT NOT NULL,
+    model                      TEXT NOT NULL,
+    prompt_version             TEXT NOT NULL,
+    raw_response               TEXT,
+    latency_ms                 INTEGER,
+    evaluated_at               TEXT NOT NULL,
+    pages_content_type_before  TEXT
+);
+"""
+
+CREATE_VALIDATE_HTML_RUNS_TABLE = """
+CREATE TABLE IF NOT EXISTS validate_html_runs (
+    page_id              INTEGER PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+    run_id               INTEGER REFERENCES pipeline_runs(id) ON DELETE SET NULL,
+    status               TEXT NOT NULL,
+    reason               TEXT,
+    validator_version    TEXT NOT NULL,
+    evaluated_at         TEXT NOT NULL,
+    pages_status_before  TEXT
+);
+"""
+
+CREATE_CLASSIFY_DRINK_RUNS_TABLE = """
+CREATE TABLE IF NOT EXISTS classify_drink_runs (
+    page_id                    INTEGER PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+    run_id                     INTEGER REFERENCES pipeline_runs(id) ON DELETE SET NULL,
+    label                      TEXT,
+    score                      REAL,
+    score_detail               TEXT,
+    scorer_version             TEXT NOT NULL,
+    evaluated_at               TEXT NOT NULL,
+    pages_content_type_before  TEXT
+);
+"""
+
+CREATE_EXTRACT_RUNS_TABLE = """
+CREATE TABLE IF NOT EXISTS extract_runs (
+    page_id            INTEGER PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
+    run_id             INTEGER REFERENCES pipeline_runs(id) ON DELETE SET NULL,
+    outcome            TEXT NOT NULL,
+    error              TEXT,
+    extractor_version  TEXT NOT NULL,
+    evaluated_at       TEXT NOT NULL
+);
+"""
+
+CREATE_EVAL_RUN_INDEXES = [
+    "CREATE INDEX IF NOT EXISTS idx_classify_url_runs_run_id ON classify_url_runs(run_id);",
+    "CREATE INDEX IF NOT EXISTS idx_validate_html_runs_run_id ON validate_html_runs(run_id);",
+    "CREATE INDEX IF NOT EXISTS idx_classify_drink_runs_run_id ON classify_drink_runs(run_id);",
+    "CREATE INDEX IF NOT EXISTS idx_extract_runs_run_id ON extract_runs(run_id);",
+    "CREATE INDEX IF NOT EXISTS idx_pipeline_runs_stage ON pipeline_runs(stage);",
+]
+
+
 class Database:
     def __init__(self, db_path: str | Path):
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
@@ -72,6 +155,14 @@ class Database:
             for idx in CREATE_CLASSIFICATIONS_INDEXES:
                 self.conn.execute(idx)
             self.conn.commit()
+            self.conn.execute(CREATE_PIPELINE_RUNS_TABLE)
+            self.conn.execute(CREATE_CLASSIFY_URL_RUNS_TABLE)
+            self.conn.execute(CREATE_VALIDATE_HTML_RUNS_TABLE)
+            self.conn.execute(CREATE_CLASSIFY_DRINK_RUNS_TABLE)
+            self.conn.execute(CREATE_EXTRACT_RUNS_TABLE)
+            for idx in CREATE_EVAL_RUN_INDEXES:
+                self.conn.execute(idx)
+            self.conn.commit()
             self._migrate()
 
     def _migrate(self):
@@ -82,6 +173,32 @@ class Database:
         if "validated_at" not in cols:
             self.conn.execute("ALTER TABLE pages ADD COLUMN validated_at TEXT")
             self.conn.commit()
+        self._backfill_classify_url_runs()
+
+    def _backfill_classify_url_runs(self):
+        """One-shot copy of the most-recent classification per page into
+        `classify_url_runs`, to land latest-only semantics on existing DBs
+        without discarding prior LLM classifications. Skipped if the runs
+        table is already populated — we don't want to resurrect rows the user
+        may have intentionally pruned."""
+        existing = self.conn.execute("SELECT 1 FROM classify_url_runs LIMIT 1").fetchone()
+        if existing is not None:
+            return
+        has_legacy = self.conn.execute("SELECT 1 FROM classifications LIMIT 1").fetchone()
+        if has_legacy is None:
+            return
+        self.conn.execute(
+            """
+            INSERT INTO classify_url_runs
+                (page_id, run_id, label, model, prompt_version,
+                 raw_response, latency_ms, evaluated_at, pages_content_type_before)
+            SELECT page_id, NULL, label, model, prompt_version,
+                   raw_response, latency_ms, created_at, NULL
+            FROM classifications c
+            WHERE c.id = (SELECT MAX(id) FROM classifications WHERE page_id = c.page_id)
+            """
+        )
+        self.conn.commit()
 
     def close(self):
         with self._lock:
@@ -421,3 +538,157 @@ class Database:
         with self._lock:
             rows = self.conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Pipeline runs + per-stage eval writes
+    # ------------------------------------------------------------------
+
+    def start_run(
+        self,
+        *,
+        stage: str,
+        site: str | None = None,
+        args: dict | None = None,
+    ) -> int:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            cursor = self.conn.execute(
+                "INSERT INTO pipeline_runs (stage, started_at, site, args) VALUES (?, ?, ?, ?)",
+                (stage, now, site, json.dumps(args) if args is not None else None),
+            )
+            self.conn.commit()
+            return cursor.lastrowid
+
+    def finish_run(self, run_id: int, summary: dict | None = None) -> None:
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self.conn.execute(
+                "UPDATE pipeline_runs SET finished_at = ?, summary = ? WHERE id = ?",
+                (now, json.dumps(summary) if summary is not None else None, run_id),
+            )
+            self.conn.commit()
+
+    def record_validate_html(
+        self,
+        *,
+        page_id: int,
+        run_id: int,
+        status: str,
+        reason: str | None,
+        validator_version: str,
+        pages_status_before: str | None,
+    ) -> None:
+        """UPSERT one row per page. Latest-only; re-runs overwrite."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO validate_html_runs
+                    (page_id, run_id, status, reason, validator_version,
+                     evaluated_at, pages_status_before)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(page_id) DO UPDATE SET
+                    run_id = excluded.run_id,
+                    status = excluded.status,
+                    reason = excluded.reason,
+                    validator_version = excluded.validator_version,
+                    evaluated_at = excluded.evaluated_at,
+                    pages_status_before = excluded.pages_status_before
+                """,
+                (page_id, run_id, status, reason, validator_version, now, pages_status_before),
+            )
+            self.conn.commit()
+
+    def record_classify_drink(
+        self,
+        *,
+        page_id: int,
+        run_id: int,
+        label: str | None,
+        score: float | int,
+        score_detail: dict,
+        scorer_version: str,
+        pages_content_type_before: str | None,
+    ) -> None:
+        """UPSERT one row per page. `label` may be NULL for abstain."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self.conn.execute(
+                """
+                INSERT INTO classify_drink_runs
+                    (page_id, run_id, label, score, score_detail, scorer_version,
+                     evaluated_at, pages_content_type_before)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(page_id) DO UPDATE SET
+                    run_id = excluded.run_id,
+                    label = excluded.label,
+                    score = excluded.score,
+                    score_detail = excluded.score_detail,
+                    scorer_version = excluded.scorer_version,
+                    evaluated_at = excluded.evaluated_at,
+                    pages_content_type_before = excluded.pages_content_type_before
+                """,
+                (
+                    page_id, run_id, label, score, json.dumps(score_detail),
+                    scorer_version, now, pages_content_type_before,
+                ),
+            )
+            self.conn.commit()
+
+    def get_pending_validate_html(
+        self, site: str | None = None, limit: int | None = None,
+    ) -> list[dict]:
+        """Work queue: pages with cached HTML that have no validate_html_runs
+        row. Replaces the old `validated_at IS NULL` query — a missing eval
+        row is the signal to re-run, and nothing else."""
+        query = [
+            "SELECT p.id, p.site, p.url, p.status, p.content_type, p.html_path",
+            "FROM pages p",
+            "LEFT JOIN validate_html_runs v ON v.page_id = p.id",
+            "WHERE p.html_path IS NOT NULL AND v.page_id IS NULL",
+        ]
+        params: list = []
+        if site:
+            query.append("AND p.site = ?")
+            params.append(site)
+        query.append("ORDER BY p.site, p.id")
+        if limit is not None:
+            query.append("LIMIT ?")
+            params.append(limit)
+        with self._lock:
+            rows = self.conn.execute(" ".join(query), params).fetchall()
+        return [dict(r) for r in rows]
+
+    def count_pending_validate_html(self, site: str | None = None) -> int:
+        query = [
+            "SELECT COUNT(*) c FROM pages p",
+            "LEFT JOIN validate_html_runs v ON v.page_id = p.id",
+            "WHERE p.html_path IS NOT NULL AND v.page_id IS NULL",
+        ]
+        params: list = []
+        if site:
+            query.append("AND p.site = ?")
+            params.append(site)
+        with self._lock:
+            return self.conn.execute(" ".join(query), params).fetchone()["c"]
+
+    def clear_validate_html_runs(self, site: str | None = None) -> int:
+        """Delete rows from validate_html_runs, optionally scoped to a site
+        (joined via pages). Returns deleted row count."""
+        return self._clear_eval_table("validate_html_runs", site)
+
+    def clear_classify_drink_runs(self, site: str | None = None) -> int:
+        return self._clear_eval_table("classify_drink_runs", site)
+
+    def _clear_eval_table(self, table: str, site: str | None) -> int:
+        with self._lock:
+            if site is None:
+                cursor = self.conn.execute(f"DELETE FROM {table}")
+            else:
+                cursor = self.conn.execute(
+                    f"DELETE FROM {table} WHERE page_id IN "
+                    "(SELECT id FROM pages WHERE site = ?)",
+                    (site,),
+                )
+            self.conn.commit()
+            return cursor.rowcount

@@ -84,24 +84,48 @@ cd scraper && uv run python -m scraper.src.extract --limit 10
 
 ## Validate CLI
 
-`scraper/src/validate.py` re-runs `validate()` + `classify_drink()` over every cached HTML whose `validated_at IS NULL`. Fetch already stamps `validated_at` on successful fetch, so this CLI only has work when rules change and you clear the column (via SQL or `--reset`) to force re-processing. Work-queue based → runs are resumable, restart picks up where it left off.
+`scraper/src/validate.py` re-runs `validate()` + `classify_drink()` over cached HTML that hasn't been evaluated by the current schema yet. Work queue is "pages with `html_path` set that have no row in `validate_html_runs`" — runs are resumable, restart picks up where it left off.
+
+Each invocation opens a `pipeline_runs` row (stage=`validate_html`), writes one `validate_html_runs` and one `classify_drink_runs` row per processed page (UPSERT on `page_id` — latest-only), and snapshots the pre-run `pages.status` / `pages.content_type` onto those eval rows so "what flipped on the last run" is a trivial SELECT:
+
+```sql
+SELECT p.url, d.pages_content_type_before AS was, d.label AS now
+FROM classify_drink_runs d JOIN pages p ON p.id = d.page_id
+WHERE d.label IS NOT NULL AND d.label != d.pages_content_type_before
+  AND d.run_id = (SELECT MAX(id) FROM pipeline_runs WHERE stage='classify_drink');
+```
 
 ```bash
-# Re-process every row that hasn't been validated yet (typical after a classifier change + SQL UPDATE).
+# Re-process everything that hasn't been evaluated yet.
 cd scraper && uv run python -m scraper.src.validate
 
-# Dry-run preview, scoped to one site.
+# Dry-run preview, scoped to one site. Doesn't write eval rows or pages updates.
 cd scraper && uv run python -m scraper.src.validate --site imbibe --dry-run
 
-# Force a full re-sweep of imbibe, prompting for confirmation.
+# Force re-evaluation of imbibe: deletes its validate_html_runs + classify_drink_runs
+# rows first, so everything lands back on the work queue.
 cd scraper && uv run python -m scraper.src.validate --site imbibe --reset
 
-# Selective re-sweep via SQL instead of --reset:
-#   sqlite> UPDATE pages SET validated_at = NULL WHERE site = 'punch' AND content_type = 'confirmed_food';
+# Selective re-evaluation via the prune CLI (see below) — e.g. drop rows from
+# an older scorer version so only those get re-scored:
+#   cd scraper && uv run python -m scraper.src.prune --stage classify_drink --except-version v2
 # Then run `validate` normally.
 ```
 
 All pipeline scripts (`fetch`, `classify`, `extract`, `validate`) share the same `--site` / `--limit` / `--dry-run` / `--reset --yes` conventions where applicable, the same progress line (`X/Y (Z%) rows/s ETA 1h3m34s`), and the same per-site / per-category summary.
+
+## Prune CLI
+
+`scraper/src/prune.py` deletes rows from the per-stage eval tables (`classify_url_runs`, `validate_html_runs`, `classify_drink_runs`, `extract_runs`) to manage DB disk usage. Eval tables are latest-only and regeneratable — pruning just puts pages back on the corresponding stage's work queue. `pages` and `pipeline_runs` are never touched.
+
+```bash
+cd scraper && uv run python -m scraper.src.prune --stage classify_drink --older-than 2026-01-01T00:00:00+00:00
+cd scraper && uv run python -m scraper.src.prune --stage validate_html --except-version v1
+cd scraper && uv run python -m scraper.src.prune --stage classify_url --site imbibe
+cd scraper && uv run python -m scraper.src.prune --all --yes     # wipe every eval table
+```
+
+Filters AND together. Without any filter, `--stage X` empties X's whole table.
 
 ## Web UI
 
