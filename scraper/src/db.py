@@ -33,25 +33,6 @@ CREATE_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_pages_status_content_type ON pages(status, content_type);",
 ]
 
-CREATE_CLASSIFICATIONS_TABLE = """
-CREATE TABLE IF NOT EXISTS classifications (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    page_id INTEGER NOT NULL REFERENCES pages(id),
-    label TEXT NOT NULL,
-    model TEXT NOT NULL,
-    prompt_version TEXT NOT NULL,
-    raw_response TEXT,
-    latency_ms INTEGER,
-    created_at TEXT NOT NULL
-);
-"""
-
-CREATE_CLASSIFICATIONS_INDEXES = [
-    "CREATE INDEX IF NOT EXISTS idx_classifications_page_id ON classifications(page_id);",
-    "CREATE INDEX IF NOT EXISTS idx_classifications_label ON classifications(label);",
-]
-
-
 # Pipeline runs + per-stage eval tables.
 #
 # Each evaluator owns a `*_runs` table keyed by page_id PK (latest-only: a re-run
@@ -151,10 +132,6 @@ class Database:
             if "extract_error" not in existing_cols:
                 self.conn.execute("ALTER TABLE pages ADD COLUMN extract_error TEXT")
             self.conn.commit()
-            self.conn.execute(CREATE_CLASSIFICATIONS_TABLE)
-            for idx in CREATE_CLASSIFICATIONS_INDEXES:
-                self.conn.execute(idx)
-            self.conn.commit()
             self.conn.execute(CREATE_PIPELINE_RUNS_TABLE)
             self.conn.execute(CREATE_CLASSIFY_URL_RUNS_TABLE)
             self.conn.execute(CREATE_VALIDATE_HTML_RUNS_TABLE)
@@ -173,31 +150,10 @@ class Database:
         if "validated_at" not in cols:
             self.conn.execute("ALTER TABLE pages ADD COLUMN validated_at TEXT")
             self.conn.commit()
-        self._backfill_classify_url_runs()
-
-    def _backfill_classify_url_runs(self):
-        """One-shot copy of the most-recent classification per page into
-        `classify_url_runs`, to land latest-only semantics on existing DBs
-        without discarding prior LLM classifications. Skipped if the runs
-        table is already populated — we don't want to resurrect rows the user
-        may have intentionally pruned."""
-        existing = self.conn.execute("SELECT 1 FROM classify_url_runs LIMIT 1").fetchone()
-        if existing is not None:
-            return
-        has_legacy = self.conn.execute("SELECT 1 FROM classifications LIMIT 1").fetchone()
-        if has_legacy is None:
-            return
-        self.conn.execute(
-            """
-            INSERT INTO classify_url_runs
-                (page_id, run_id, label, model, prompt_version,
-                 raw_response, latency_ms, evaluated_at, pages_content_type_before)
-            SELECT page_id, NULL, label, model, prompt_version,
-                   raw_response, latency_ms, created_at, NULL
-            FROM classifications c
-            WHERE c.id = (SELECT MAX(id) FROM classifications WHERE page_id = c.page_id)
-            """
-        )
+        # Legacy `classifications` table was superseded by `classify_url_runs`.
+        # Drop on sight; all prior data was one-shot migrated into the new
+        # table in a previous commit.
+        self.conn.execute("DROP TABLE IF EXISTS classifications")
         self.conn.commit()
 
     def close(self):
@@ -315,21 +271,42 @@ class Database:
             )
             self.conn.commit()
 
-    def record_classification(
+    def record_classify_url(
         self,
+        *,
         page_id: int,
+        run_id: int | None,
         label: str,
         model: str,
         prompt_version: str,
         raw_response: str | None,
         latency_ms: int | None,
-    ):
-        """Insert an audit record and update pages.content_type atomically."""
+        pages_content_type_before: str | None,
+    ) -> None:
+        """UPSERT the classify_url_runs row for this page and update
+        pages.content_type atomically. Latest-only — re-running overwrites
+        the prior row for this page_id."""
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             self.conn.execute(
-                "INSERT INTO classifications (page_id, label, model, prompt_version, raw_response, latency_ms, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (page_id, label, model, prompt_version, raw_response, latency_ms, now),
+                """
+                INSERT INTO classify_url_runs
+                    (page_id, run_id, label, model, prompt_version,
+                     raw_response, latency_ms, evaluated_at,
+                     pages_content_type_before)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(page_id) DO UPDATE SET
+                    run_id = excluded.run_id,
+                    label = excluded.label,
+                    model = excluded.model,
+                    prompt_version = excluded.prompt_version,
+                    raw_response = excluded.raw_response,
+                    latency_ms = excluded.latency_ms,
+                    evaluated_at = excluded.evaluated_at,
+                    pages_content_type_before = excluded.pages_content_type_before
+                """,
+                (page_id, run_id, label, model, prompt_version, raw_response,
+                 latency_ms, now, pages_content_type_before),
             )
             self.conn.execute(
                 "UPDATE pages SET content_type = ? WHERE id = ?",
@@ -338,7 +315,8 @@ class Database:
             self.conn.commit()
 
     def get_unclassified(self, site: str | None = None, limit: int | None = None) -> list[dict]:
-        """Work queue for the classifier. Returns rows with `content_type IS NULL`.
+        """Work queue for the URL classifier. Returns rows with
+        `content_type IS NULL`.
 
         Deliberately ignores `status` — the classifier reads the URL string, not
         the page body, so blocked/failed pages are still classifiable. Orders by
@@ -472,36 +450,38 @@ class Database:
             row = self.conn.execute(query, params).fetchone()
         return row[0]
 
-    def sample_classifications(
+    def sample_classify_url(
         self, site: str | None = None, label: str | None = None, n: int = 10
     ) -> list[dict]:
-        """Return n random (site, url, label, raw_response) rows, optionally filtered
-        by site and/or label.
+        """Return n random (site, url, label, raw_response, evaluated_at) rows
+        from classify_url_runs, optionally filtered by site and/or label.
 
-        Returns the MOST RECENT classification per page, so re-classifications don't
-        produce duplicates in the sample.
+        classify_url_runs is already latest-only per page, so the sample is
+        naturally de-duplicated across re-classifications.
         """
         query = [
-            "SELECT p.site, p.url, c.label, c.raw_response, c.created_at",
-            "FROM classifications c JOIN pages p ON p.id = c.page_id",
-            "WHERE c.id = (SELECT MAX(id) FROM classifications WHERE page_id = c.page_id)",
+            "SELECT p.site, p.url, c.label, c.raw_response, c.evaluated_at",
+            "FROM classify_url_runs c JOIN pages p ON p.id = c.page_id",
         ]
         params: list = []
+        wheres: list[str] = []
         if site:
-            query.append("AND p.site = ?")
+            wheres.append("p.site = ?")
             params.append(site)
         if label:
-            query.append("AND c.label = ?")
+            wheres.append("c.label = ?")
             params.append(label)
+        if wheres:
+            query.append("WHERE " + " AND ".join(wheres))
         query.append("ORDER BY RANDOM() LIMIT ?")
         params.append(n)
         with self._lock:
             rows = self.conn.execute(" ".join(query), params).fetchall()
         return [dict(r) for r in rows]
 
-    def get_classifications_for_urls(self, urls: list[str]) -> list[dict]:
-        """Look up the most-recent classification for each URL. URLs not present
-        in the DB (or present but never classified) are returned with label=None
+    def get_classify_url_for_urls(self, urls: list[str]) -> list[dict]:
+        """Look up the classify_url_runs row for each URL. URLs not present in
+        the DB (or present but never classified) are returned with label=None
         so callers can report 'not found' distinctly from 'has a label'."""
         if not urls:
             return []
@@ -509,11 +489,9 @@ class Database:
         with self._lock:
             rows = self.conn.execute(
                 f"""
-                SELECT p.site, p.url, c.label, c.raw_response, c.created_at
+                SELECT p.site, p.url, c.label, c.raw_response, c.evaluated_at
                 FROM pages p
-                LEFT JOIN classifications c
-                  ON c.page_id = p.id
-                 AND c.id = (SELECT MAX(id) FROM classifications WHERE page_id = p.id)
+                LEFT JOIN classify_url_runs c ON c.page_id = p.id
                 WHERE p.url IN ({placeholders})
                 """,
                 urls,
@@ -521,7 +499,7 @@ class Database:
         found = {r["url"]: dict(r) for r in rows}
         # Preserve input order; synthesize rows for URLs not in DB at all.
         return [
-            found.get(u, {"site": None, "url": u, "label": None, "raw_response": None, "created_at": None})
+            found.get(u, {"site": None, "url": u, "label": None, "raw_response": None, "evaluated_at": None})
             for u in urls
         ]
 
@@ -679,6 +657,9 @@ class Database:
 
     def clear_classify_drink_runs(self, site: str | None = None) -> int:
         return self._clear_eval_table("classify_drink_runs", site)
+
+    def clear_classify_url_runs(self, site: str | None = None) -> int:
+        return self._clear_eval_table("classify_url_runs", site)
 
     def _clear_eval_table(self, table: str, site: str | None) -> int:
         with self._lock:

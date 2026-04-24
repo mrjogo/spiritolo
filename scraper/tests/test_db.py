@@ -292,58 +292,63 @@ def test_get_pending_filters_by_content_type(tmp_db):
     db.close()
 
 
-def test_schema_has_classifications_table(tmp_db):
-    db = Database(tmp_db)
-    rows = db.conn.execute(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name='classifications'"
-    ).fetchall()
-    assert len(rows) == 1
-    cols = db.conn.execute("PRAGMA table_info(classifications)").fetchall()
-    col_names = {r[1] for r in cols}
-    assert {"id", "page_id", "label", "model", "prompt_version", "raw_response", "latency_ms", "created_at"} <= col_names
-    db.close()
-
-
-def test_record_classification_writes_both_tables(tmp_db):
+def test_record_classify_url_writes_both_tables(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")
     page_id = db.conn.execute("SELECT id FROM pages LIMIT 1").fetchone()["id"]
+    run_id = db.start_run(stage="classify_url")
 
-    db.record_classification(
-        page_id=page_id,
-        label="likely_drink_recipe",
-        model="qwen3:14b",
-        prompt_version="v1",
-        raw_response='{"label": "likely_drink_recipe"}',
-        latency_ms=423,
+    db.record_classify_url(
+        page_id=page_id, run_id=run_id,
+        label="likely_drink_recipe", model="qwen3:14b", prompt_version="v1",
+        raw_response='{"label": "likely_drink_recipe"}', latency_ms=423,
+        pages_content_type_before=None,
     )
 
     page = db.conn.execute("SELECT content_type FROM pages WHERE id = ?", (page_id,)).fetchone()
     assert page["content_type"] == "likely_drink_recipe"
 
-    clsf = db.conn.execute("SELECT * FROM classifications WHERE page_id = ?", (page_id,)).fetchone()
+    clsf = db.conn.execute(
+        "SELECT * FROM classify_url_runs WHERE page_id = ?", (page_id,),
+    ).fetchone()
     assert clsf["label"] == "likely_drink_recipe"
     assert clsf["model"] == "qwen3:14b"
     assert clsf["prompt_version"] == "v1"
     assert clsf["raw_response"] == '{"label": "likely_drink_recipe"}'
     assert clsf["latency_ms"] == 423
-    assert clsf["created_at"] is not None
+    assert clsf["run_id"] == run_id
+    assert clsf["evaluated_at"] is not None
+    assert clsf["pages_content_type_before"] is None
     db.close()
 
 
-def test_record_classification_allows_reclassification(tmp_db):
+def test_record_classify_url_is_upsert_latest_only(tmp_db):
+    """Re-classifying the same page overwrites the prior row — classify_url_runs
+    is latest-only per page. The snapshot captures what content_type was
+    RIGHT BEFORE the new evaluation, not the original first-ever value."""
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")
     page_id = db.conn.execute("SELECT id FROM pages LIMIT 1").fetchone()["id"]
 
-    db.record_classification(page_id, "likely_drink_recipe", "qwen3:14b", "v1", "{}", 100)
-    db.record_classification(page_id, "likely_food_recipe", "qwen3:14b", "v2", "{}", 100)
+    db.record_classify_url(
+        page_id=page_id, run_id=None, label="likely_drink_recipe",
+        model="qwen3:14b", prompt_version="v1", raw_response="{}", latency_ms=100,
+        pages_content_type_before=None,
+    )
+    db.record_classify_url(
+        page_id=page_id, run_id=None, label="likely_food_recipe",
+        model="qwen3:14b", prompt_version="v2", raw_response="{}", latency_ms=100,
+        pages_content_type_before="likely_drink_recipe",
+    )
 
-    rows = db.conn.execute("SELECT label, prompt_version FROM classifications WHERE page_id = ? ORDER BY id", (page_id,)).fetchall()
-    assert [(r["label"], r["prompt_version"]) for r in rows] == [
-        ("likely_drink_recipe", "v1"),
-        ("likely_food_recipe", "v2"),
-    ]
+    rows = db.conn.execute(
+        "SELECT label, prompt_version, pages_content_type_before FROM classify_url_runs "
+        "WHERE page_id = ?", (page_id,),
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0]["label"] == "likely_food_recipe"
+    assert rows[0]["prompt_version"] == "v2"
+    assert rows[0]["pages_content_type_before"] == "likely_drink_recipe"
     page = db.conn.execute("SELECT content_type FROM pages WHERE id = ?", (page_id,)).fetchone()
     assert page["content_type"] == "likely_food_recipe"
     db.close()
@@ -390,15 +395,20 @@ def test_get_unclassified_includes_sitemap_source_and_id(tmp_db):
     db.close()
 
 
-def test_sample_classifications_returns_joined_rows(tmp_db):
+def test_sample_classify_url_returns_joined_rows(tmp_db):
     db = Database(tmp_db)
     for i in range(3):
         db.add_url("site_a", f"https://a.com/{i}")
     page_ids = [r["id"] for r in db.conn.execute("SELECT id FROM pages ORDER BY id").fetchall()]
     for pid in page_ids:
-        db.record_classification(pid, "likely_drink_recipe", "qwen3:14b", "v1", '{"label":"likely_drink_recipe"}', 100)
+        db.record_classify_url(
+            page_id=pid, run_id=None, label="likely_drink_recipe",
+            model="qwen3:14b", prompt_version="v1",
+            raw_response='{"label":"likely_drink_recipe"}', latency_ms=100,
+            pages_content_type_before=None,
+        )
 
-    rows = db.sample_classifications(site="site_a", label="likely_drink_recipe", n=2)
+    rows = db.sample_classify_url(site="site_a", label="likely_drink_recipe", n=2)
     assert len(rows) == 2
     assert {r["url"] for r in rows} <= {"https://a.com/0", "https://a.com/1", "https://a.com/2"}
     assert rows[0]["label"] == "likely_drink_recipe"
@@ -406,31 +416,48 @@ def test_sample_classifications_returns_joined_rows(tmp_db):
     db.close()
 
 
-def test_sample_classifications_scopes_by_site_and_label(tmp_db):
+def test_sample_classify_url_scopes_by_site_and_label(tmp_db):
     db = Database(tmp_db)
     db.add_url("site_a", "https://a.com/1")
     db.add_url("site_b", "https://b.com/1")
     a_id = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://a.com/1",)).fetchone()["id"]
     b_id = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://b.com/1",)).fetchone()["id"]
-    db.record_classification(a_id, "likely_drink_recipe", "qwen3:14b", "v1", "{}", 100)
-    db.record_classification(b_id, "likely_food_recipe", "qwen3:14b", "v1", "{}", 100)
+    db.record_classify_url(
+        page_id=a_id, run_id=None, label="likely_drink_recipe",
+        model="qwen3:14b", prompt_version="v1", raw_response="{}", latency_ms=100,
+        pages_content_type_before=None,
+    )
+    db.record_classify_url(
+        page_id=b_id, run_id=None, label="likely_food_recipe",
+        model="qwen3:14b", prompt_version="v1", raw_response="{}", latency_ms=100,
+        pages_content_type_before=None,
+    )
 
-    rows = db.sample_classifications(site="site_a", label="likely_drink_recipe", n=10)
+    rows = db.sample_classify_url(site="site_a", label="likely_drink_recipe", n=10)
     assert len(rows) == 1
     assert rows[0]["url"] == "https://a.com/1"
     db.close()
 
 
-def test_sample_classifications_deduplicates_reclassified_pages(tmp_db):
+def test_get_classify_url_for_urls_returns_label_or_none(tmp_db):
     db = Database(tmp_db)
     db.add_url("site_a", "https://a.com/1")
-    pid = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://a.com/1",)).fetchone()["id"]
-    db.record_classification(pid, "likely_drink_recipe", "qwen3:14b", "v1", "first", 100)
-    db.record_classification(pid, "likely_drink_recipe", "qwen3:14b", "v2", "second", 100)
+    db.add_url("site_b", "https://b.com/1")  # classified
+    b_id = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://b.com/1",)).fetchone()["id"]
+    db.record_classify_url(
+        page_id=b_id, run_id=None, label="likely_drink_recipe",
+        model="qwen3:14b", prompt_version="v1", raw_response="raw", latency_ms=100,
+        pages_content_type_before=None,
+    )
 
-    rows = db.sample_classifications(site="site_a", label="likely_drink_recipe", n=10)
-    assert len(rows) == 1
-    assert rows[0]["raw_response"] == "second"
+    rows = db.get_classify_url_for_urls([
+        "https://a.com/1", "https://b.com/1", "https://never-seen.com/x",
+    ])
+    by_url = {r["url"]: r for r in rows}
+    assert by_url["https://a.com/1"]["label"] is None  # in DB, unclassified
+    assert by_url["https://b.com/1"]["label"] == "likely_drink_recipe"
+    assert by_url["https://b.com/1"]["raw_response"] == "raw"
+    assert by_url["https://never-seen.com/x"]["label"] is None  # not in DB
     db.close()
 
 
@@ -694,82 +721,25 @@ def test_extract_runs_table_exists(tmp_db):
     db.close()
 
 
-def test_backfill_classify_url_runs_from_legacy_classifications(tmp_db):
-    """Opening a DB that has legacy `classifications` rows but an empty
-    `classify_url_runs` table should backfill one row per page using the
-    most-recent classification for that page. Older rows are dropped (we keep
-    latest-only). Subsequent re-opens are idempotent."""
-    # Seed via a first open, then inject legacy rows directly so we can replay
-    # the "existing-DB upgrade" path on the second open.
+def test_legacy_classifications_table_is_dropped_on_open(tmp_db):
+    """Pre-existing `classifications` tables from the previous schema are
+    dropped on first open. `classify_url_runs` is the only classification
+    storage the codebase knows about now."""
     db = Database(tmp_db)
-    db.add_url("imbibe", "https://imbibe.com/a")
-    db.add_url("imbibe", "https://imbibe.com/b")
-    page_a = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://imbibe.com/a",)).fetchone()["id"]
-    page_b = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://imbibe.com/b",)).fetchone()["id"]
-    db.conn.executemany(
-        "INSERT INTO classifications (page_id, label, model, prompt_version, raw_response, latency_ms, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        [
-            (page_a, "likely_food_recipe", "qwen3:14b", "v1", "raw-old", 100, "2026-01-01T00:00:00+00:00"),
-            (page_a, "likely_drink_recipe", "qwen3:14b", "v2", "raw-new", 120, "2026-02-01T00:00:00+00:00"),
-            (page_b, "likely_junk", "qwen3:14b", "v2", None, 80, "2026-02-01T00:00:00+00:00"),
-        ],
-    )
-    # Wipe out the backfill that the first open already did, simulating a
-    # pre-migration DB.
-    db.conn.execute("DELETE FROM classify_url_runs")
-    db.conn.commit()
-    db.close()
-
-    # Second open triggers the migration.
-    db = Database(tmp_db)
-    rows = {r["page_id"]: dict(r) for r in db.conn.execute(
-        "SELECT page_id, label, model, prompt_version, raw_response, latency_ms, evaluated_at "
-        "FROM classify_url_runs"
-    )}
-    assert set(rows) == {page_a, page_b}
-    # Latest-per-page: page_a should have the v2 row, not v1.
-    assert rows[page_a]["label"] == "likely_drink_recipe"
-    assert rows[page_a]["prompt_version"] == "v2"
-    assert rows[page_a]["raw_response"] == "raw-new"
-    assert rows[page_a]["latency_ms"] == 120
-    assert rows[page_a]["evaluated_at"] == "2026-02-01T00:00:00+00:00"
-    assert rows[page_b]["label"] == "likely_junk"
-
-    # Opening again is idempotent — no duplicate rows, no overwrite.
-    db.close()
-    db = Database(tmp_db)
-    count = db.conn.execute("SELECT COUNT(*) c FROM classify_url_runs").fetchone()["c"]
-    assert count == 2
-    db.close()
-
-
-def test_backfill_skips_when_classify_url_runs_already_has_rows(tmp_db):
-    """If classify_url_runs already has data, the migration must not re-copy
-    from classifications — user may have already pruned old classifications,
-    and we shouldn't resurrect them."""
-    db = Database(tmp_db)
-    db.add_url("imbibe", "https://imbibe.com/a")
-    page_id = db.conn.execute("SELECT id FROM pages").fetchone()["id"]
+    # Simulate a legacy DB by creating the old table ourselves.
     db.conn.execute(
-        "INSERT INTO classify_url_runs "
-        "(page_id, label, model, prompt_version, raw_response, latency_ms, evaluated_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (page_id, "likely_drink_recipe", "qwen3:14b", "v3", None, 100, "2026-03-01T00:00:00+00:00"),
-    )
-    # Legacy row that should NOT be copied (because the runs table already has data).
-    db.conn.execute(
-        "INSERT INTO classifications (page_id, label, model, prompt_version, raw_response, latency_ms, created_at) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-        (page_id, "likely_food_recipe", "qwen3:14b", "v1", None, 80, "2026-01-01T00:00:00+00:00"),
+        "CREATE TABLE classifications (id INTEGER PRIMARY KEY, page_id INTEGER, "
+        "label TEXT, model TEXT, prompt_version TEXT, raw_response TEXT, "
+        "latency_ms INTEGER, created_at TEXT)"
     )
     db.conn.commit()
     db.close()
 
     db = Database(tmp_db)
-    row = db.conn.execute("SELECT label, prompt_version FROM classify_url_runs").fetchone()
-    assert row["label"] == "likely_drink_recipe"
-    assert row["prompt_version"] == "v3"
+    exists = db.conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='classifications'"
+    ).fetchone()
+    assert exists is None
     db.close()
 
 

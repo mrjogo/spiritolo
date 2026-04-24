@@ -1,7 +1,9 @@
 """URL classifier: main runner, review mode, and sample subcommand.
 
-Main run: asyncio pool of workers pulling unclassified rows, classifying each
-via ollama, writing back to pages.content_type + classifications audit table.
+Main run: opens a pipeline_runs row, asyncio pool of workers pull
+unclassified rows, classify each via ollama, UPSERT classify_url_runs
+(latest-only per page) with the label + prompt_version + snapshot of the
+prior pages.content_type, then update pages.content_type.
 """
 
 import argparse
@@ -36,6 +38,7 @@ async def classify_one(
     db: Database,
     model: str,
     prompt_version: str,
+    run_id: int | None = None,
 ) -> bool:
     """Classify one row. Errors are logged and the row is left unclassified
     so a future run will retry it.
@@ -52,13 +55,15 @@ async def classify_one(
         log.warning("classify failed for id=%s url=%s: %s", row["id"], row["url"], e, exc_info=True)
         return False
 
-    db.record_classification(
+    db.record_classify_url(
         page_id=row["id"],
+        run_id=run_id,
         label=result.label,
         model=model,
         prompt_version=prompt_version,
         raw_response=result.raw_response,
         latency_ms=result.latency_ms,
+        pages_content_type_before=row.get("content_type"),
     )
     return True
 
@@ -71,6 +76,7 @@ async def run_classify_pool(
     prompt_version: str,
     concurrency: int = 4,
     on_progress: Callable[[int, int], None] | None = None,
+    run_id: int | None = None,
 ) -> int:
     """Run classify_one over rows with at most `concurrency` in-flight calls.
 
@@ -88,7 +94,7 @@ async def run_classify_pool(
     async def worker(r: dict):
         nonlocal done, successes
         async with sem:
-            ok = await classify_one(r, classify_fn, db, model, prompt_version)
+            ok = await classify_one(r, classify_fn, db, model, prompt_version, run_id=run_id)
         if ok:
             successes += 1
         done += 1
@@ -159,6 +165,16 @@ async def run_main(args: argparse.Namespace) -> int:
         # per-batch fractions.
         progress(grand_total + batch_done)
 
+    run_id = db.start_run(
+        stage="classify_url",
+        site=args.site,
+        args={
+            "limit": args.limit, "batch_size": args.batch_size,
+            "model": args.model, "concurrency": args.concurrency,
+            "prompt_version": PROMPT_VERSION,
+        },
+    )
+
     try:
         while True:
             if remaining is not None and remaining <= 0:
@@ -188,6 +204,7 @@ async def run_main(args: argparse.Namespace) -> int:
                 prompt_version=PROMPT_VERSION,
                 concurrency=args.concurrency,
                 on_progress=adapter,
+                run_id=run_id,
             )
             _accumulate_changes(db, batch_urls, changes)
 
@@ -205,6 +222,10 @@ async def run_main(args: argparse.Namespace) -> int:
                 remaining -= len(rows)
 
         print_summary("Classify", changes)
+        summary_dict = {site_key: dict(counter) for site_key, counter in changes.items()}
+        db.finish_run(run_id, summary={
+            "per_site": summary_dict, "total": grand_total, "exit_code": exit_code,
+        })
     finally:
         db.close()
     return exit_code
@@ -295,9 +316,9 @@ def run_sample(
     db = Database(db_path)
     try:
         if urls:
-            rows = db.get_classifications_for_urls(urls)
+            rows = db.get_classify_url_for_urls(urls)
         else:
-            rows = db.sample_classifications(site=site, label=category, n=n)
+            rows = db.sample_classify_url(site=site, label=category, n=n)
     finally:
         db.close()
     if not rows:
