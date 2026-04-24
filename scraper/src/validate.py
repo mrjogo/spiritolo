@@ -3,7 +3,13 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from urllib.parse import urlparse
 
-import extruct
+from scraper.src.structured import (
+    extract_structured,
+    iter_jsonld_objects,
+    iter_microdata_items,
+    iter_recipes,
+    type_names,
+)
 
 
 @dataclass
@@ -73,48 +79,6 @@ def _extract_visible_text(html: str) -> str:
     return extractor.get_text()
 
 
-_SCHEMA_ORG_PREFIX = re.compile(r"^https?://schema\.org/")
-
-
-def _extract_structured(html: str) -> dict:
-    """Parse JSON-LD and microdata out of HTML with extruct. Never raises."""
-    try:
-        return extruct.extract(html, syntaxes=["json-ld", "microdata"], errors="ignore")
-    except Exception:
-        return {"json-ld": [], "microdata": []}
-
-
-def _iter_jsonld_objects(structured: dict):
-    """Yield top-level JSON-LD objects, unfolding @graph wrappers."""
-    for obj in structured.get("json-ld", []):
-        if not isinstance(obj, dict):
-            continue
-        if "@graph" in obj and isinstance(obj["@graph"], list):
-            for inner in obj["@graph"]:
-                if isinstance(inner, dict):
-                    yield inner
-        else:
-            yield obj
-
-
-def _iter_microdata_items(structured: dict):
-    """Yield microdata items as returned by extruct (with `type` and `properties`)."""
-    for item in structured.get("microdata", []):
-        if isinstance(item, dict):
-            yield item
-
-
-def _microdata_type_names(item: dict):
-    """Yield bare schema.org type names (e.g. 'Recipe') from a microdata item's `type`."""
-    raw = item.get("type")
-    if raw is None:
-        return
-    types = raw if isinstance(raw, list) else [raw]
-    for t in types:
-        if isinstance(t, str):
-            yield _SCHEMA_ORG_PREFIX.sub("", t)
-
-
 _TYPE_PRIORITY = ("Recipe", "NewsArticle", "Article", "WebPage", "WebSite")
 
 
@@ -133,7 +97,7 @@ def _find_jsonld_type(structured: dict) -> str | None:
     """
     best: str | None = None
     best_rank = len(_TYPE_PRIORITY) + 1
-    for obj in _iter_jsonld_objects(structured):
+    for obj in iter_jsonld_objects(structured):
         obj_type = obj.get("@type")
         if obj_type is None:
             continue
@@ -154,8 +118,8 @@ def _find_microdata_type(structured: dict) -> str | None:
     """Return the highest-priority schema.org type found in microdata, or None."""
     best: str | None = None
     best_rank = len(_TYPE_PRIORITY) + 1
-    for item in _iter_microdata_items(structured):
-        for t in _microdata_type_names(item):
+    for item in iter_microdata_items(structured):
+        for t in type_names(item):
             rank = _type_rank(t)
             if rank < best_rank:
                 best_rank = rank
@@ -163,29 +127,6 @@ def _find_microdata_type(structured: dict) -> str | None:
                 if rank == 0:
                     return best
     return best
-
-
-def _microdata_recipe_to_jsonld(item: dict) -> dict:
-    """Flatten an extruct microdata Recipe item into a JSON-LD-shaped dict so the
-    same classify_drink logic works for both sources."""
-    props = item.get("properties", {})
-    if not isinstance(props, dict):
-        props = {}
-    out: dict = {"@type": "Recipe"}
-    out.update(props)
-    return out
-
-
-def _iter_recipes(structured: dict):
-    """Yield Recipe-typed objects from both JSON-LD and microdata as flat dicts."""
-    for obj in _iter_jsonld_objects(structured):
-        obj_type = obj.get("@type", "")
-        type_str = " ".join(obj_type) if isinstance(obj_type, list) else obj_type
-        if isinstance(type_str, str) and "Recipe" in type_str:
-            yield obj
-    for item in _iter_microdata_items(structured):
-        if any(t == "Recipe" for t in _microdata_type_names(item)):
-            yield _microdata_recipe_to_jsonld(item)
 
 
 _CANONICAL_PATTERN = re.compile(
@@ -240,7 +181,7 @@ def validate(html: str, url: str | None = None) -> ValidationResult:
     # Punch uses microdata Recipe instead of JSON-LD; sometimes a JSON-LD wrapper
     # block (e.g. NewsArticle) coexists, so take the highest-priority type across
     # both sources.
-    structured = _extract_structured(html)
+    structured = extract_structured(html)
     jsonld_type = _find_jsonld_type(structured)
     microdata_type = _find_microdata_type(structured)
     sources: list[tuple[str, str]] = []
@@ -308,8 +249,8 @@ def classify_drink(html: str) -> str | None:
     Checks recipeCategory, breadcrumb, and keywords against DRINK_TERMS across
     both JSON-LD and microdata Recipe sources. Returns None if no Recipe is found.
     """
-    structured = _extract_structured(html)
-    recipes = list(_iter_recipes(structured))
+    structured = extract_structured(html)
+    recipes = list(iter_recipes(structured))
 
     if not recipes:
         return None

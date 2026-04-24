@@ -6,7 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from scraper.src.db import Database
-from scraper.src.jsonld import derive_author, derive_image_url, parse_recipe_from_html
+from scraper.src.structured import find_recipe
 from scraper.src.supabase_client import SupabaseClient
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
@@ -18,6 +18,47 @@ DEFAULT_HTML_DIR = DATA_DIR / "html"
 log = logging.getLogger("extract")
 
 
+def derive_name(recipe: dict) -> str | None:
+    name = recipe.get("name")
+    if isinstance(name, str):
+        return name or None
+    if isinstance(name, list):
+        for n in name:
+            if isinstance(n, str) and n:
+                return n
+    return None
+
+
+def derive_author(recipe: dict) -> str | None:
+    author = recipe.get("author")
+    if isinstance(author, str):
+        return author or None
+    if isinstance(author, dict):
+        name = author.get("name")
+        return name if isinstance(name, str) and name else None
+    if isinstance(author, list):
+        for a in author:
+            derived = derive_author({"author": a})
+            if derived:
+                return derived
+    return None
+
+
+def derive_image_url(recipe: dict) -> str | None:
+    image = recipe.get("image")
+    if isinstance(image, str):
+        return image or None
+    if isinstance(image, dict):
+        url = image.get("url")
+        return url if isinstance(url, str) and url else None
+    if isinstance(image, list) and image:
+        for item in image:
+            derived = derive_image_url({"image": item})
+            if derived:
+                return derived
+    return None
+
+
 def extract_pages(
     *,
     db: Database,
@@ -26,16 +67,16 @@ def extract_pages(
     site: str | None = None,
     limit: int | None = None,
 ) -> dict:
-    """Process the extractor work queue. Returns {'extracted': N, 'no_jsonld': M, 'missing': K}."""
+    """Process the extractor work queue. Returns {'extracted': N, 'no_recipe': M, 'missing': K}."""
     rows = db.get_unextracted(site=site, limit=limit)
     total = len(rows)
     if total == 0:
         log.info("nothing to extract")
-        return {"extracted": 0, "no_jsonld": 0, "missing": 0}
+        return {"extracted": 0, "no_recipe": 0, "missing": 0}
 
     log.info("extracting %d pages", total)
     extracted = 0
-    no_jsonld = 0
+    no_recipe = 0
     missing = 0
     started = time.monotonic()
 
@@ -48,16 +89,15 @@ def extract_pages(
             missing += 1
             continue
 
-        recipe = parse_recipe_from_html(html)
+        recipe = find_recipe(html)
         if recipe is None:
-            db.mark_extract_error(row["url"], "no_jsonld_recipe")
-            no_jsonld += 1
+            db.mark_extract_error(row["url"], "no_recipe")
+            no_recipe += 1
         else:
-            raw_name = recipe.get("name")
             sb.upsert_recipe(
                 source_url=row["url"],
                 site=row["site"],
-                name=raw_name if isinstance(raw_name, str) else None,
+                name=derive_name(recipe),
                 author=derive_author(recipe),
                 image_url=derive_image_url(recipe),
                 jsonld=recipe,
@@ -73,7 +113,7 @@ def extract_pages(
             eta = remaining / rate if rate > 0 else 0.0
             log.info("progress %d/%d (%.1f rows/sec, ETA %.0fs)", idx, total, rate, eta)
 
-    return {"extracted": extracted, "no_jsonld": no_jsonld, "missing": missing}
+    return {"extracted": extracted, "no_recipe": no_recipe, "missing": missing}
 
 
 def main():

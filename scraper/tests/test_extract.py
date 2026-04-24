@@ -53,13 +53,13 @@ def test_extract_writes_recipe_and_marks_rows(seeded_scraper_db, isolated_supaba
     stats = extract_pages(db=db, sb=isolated_supabase, html_dir=html_dir)
 
     assert stats["extracted"] == 1
-    assert stats["no_jsonld"] == 1
+    assert stats["no_recipe"] == 1
     assert stats["missing"] == 0
     assert isolated_supabase.count_recipes() == 1
 
     # Re-running should be a no-op (both rows are now either extracted or errored).
     stats2 = extract_pages(db=db, sb=isolated_supabase, html_dir=html_dir)
-    assert stats2 == {"extracted": 0, "no_jsonld": 0, "missing": 0}
+    assert stats2 == {"extracted": 0, "no_recipe": 0, "missing": 0}
     assert isolated_supabase.count_recipes() == 1
 
 
