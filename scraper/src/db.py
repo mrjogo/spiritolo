@@ -236,19 +236,25 @@ class Database:
             rows = self.conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
+    EXTRACT_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink")
+
     def get_unextracted(self, site: str | None = None, limit: int | None = None) -> list[dict]:
         """Work queue for the extractor: drink-recipe pages that have fetched HTML but haven't been extracted or errored.
 
-        Ordered by id so iteration is deterministic and resumable across runs.
+        Covers both `likely_drink_recipe` (LLM-classified from URL, JSON-LD not
+        yet verified) and `confirmed_drink` (validate.py confirmed Schema.org
+        Recipe + drink terms at fetch time). Ordered by id so iteration is
+        deterministic and resumable across runs.
         """
+        placeholders = ",".join("?" for _ in self.EXTRACT_CONTENT_TYPES)
         query = (
             "SELECT id, site, url, html_path, fetched_at FROM pages "
-            "WHERE content_type = 'likely_drink_recipe' "
+            f"WHERE content_type IN ({placeholders}) "
             "AND html_path IS NOT NULL "
             "AND extracted_at IS NULL "
             "AND extract_error IS NULL"
         )
-        params: list = []
+        params: list = list(self.EXTRACT_CONTENT_TYPES)
         if site:
             query += " AND site = ?"
             params.append(site)
@@ -280,12 +286,15 @@ class Database:
             self.conn.commit()
 
     def reset_extract_state(self, site: str | None = None) -> int:
-        """Clear extracted_at and extract_error on all drink-recipe rows, optionally scoped to a site. Returns row count."""
+        """Clear extracted_at and extract_error on all drink-recipe rows,
+        optionally scoped to a site. Covers the same content_type set as
+        get_unextracted. Returns row count."""
+        placeholders = ",".join("?" for _ in self.EXTRACT_CONTENT_TYPES)
         query = (
             "UPDATE pages SET extracted_at = NULL, extract_error = NULL "
-            "WHERE content_type = 'likely_drink_recipe'"
+            f"WHERE content_type IN ({placeholders})"
         )
-        params: list = []
+        params: list = list(self.EXTRACT_CONTENT_TYPES)
         if site:
             query += " AND site = ?"
             params.append(site)
