@@ -279,6 +279,21 @@ class Database:
             )
             self.conn.commit()
 
+    def reset_extract_state(self, site: str | None = None) -> int:
+        """Clear extracted_at and extract_error on all drink-recipe rows, optionally scoped to a site. Returns row count."""
+        query = (
+            "UPDATE pages SET extracted_at = NULL, extract_error = NULL "
+            "WHERE content_type = 'likely_drink_recipe'"
+        )
+        params: list = []
+        if site:
+            query += " AND site = ?"
+            params.append(site)
+        with self._lock:
+            cursor = self.conn.execute(query, params)
+            self.conn.commit()
+            return cursor.rowcount
+
     def count_unclassified(self, site: str | None = None) -> int:
         """Count of rows with `content_type IS NULL`, optionally scoped to a site."""
         query = "SELECT COUNT(*) FROM pages WHERE content_type IS NULL"

@@ -126,11 +126,19 @@ def main():
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--html-dir", default=str(DEFAULT_HTML_DIR))
+    parser.add_argument(
+        "--reset",
+        action="store_true",
+        help="Clear extracted_at and extract_error on drink-recipe rows before extracting (scoped by --site if given). Use after a local Supabase db reset.",
+    )
     args = parser.parse_args()
 
     db = Database(args.db)
     sb = SupabaseClient()
     try:
+        if args.reset:
+            n = db.reset_extract_state(site=args.site)
+            log.info("reset extract state on %d rows%s", n, f" for site={args.site}" if args.site else "")
         stats = extract_pages(
             db=db,
             sb=sb,
