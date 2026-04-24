@@ -39,9 +39,9 @@ def seeded_scraper_db(tmp_db, tmp_path):
     db = Database(tmp_db)
     db.add_urls_batch("difs", ["https://example.com/negroni", "https://example.com/noop"])
     db.set_content_type("https://example.com/negroni", "likely_drink_recipe")
-    db.mark_content("https://example.com/negroni", "valid", "ok", html_path="difs/negroni.html")
+    db.mark_content("https://example.com/negroni", "valid", html_path="difs/negroni.html")
     db.set_content_type("https://example.com/noop", "likely_drink_recipe")
-    db.mark_content("https://example.com/noop", "valid", "ok", html_path="difs/nojsonld.html")
+    db.mark_content("https://example.com/noop", "valid", html_path="difs/nojsonld.html")
     yield db, html_dir
     db.close()
 

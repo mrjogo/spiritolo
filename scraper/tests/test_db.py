@@ -12,86 +12,21 @@ def test_init_creates_table(tmp_db):
     db.close()
 
 
-def test_pages_has_validated_at_column(tmp_db):
+def _seed_fetched(db, site, url, html_path):
+    """Mark a URL as fetched with cached HTML. Used as a minimal "this row
+    has been through fetch" setup before other eval-table tests."""
+    db.add_url(site, url)
+    db.mark_content(url, "Recipe", html_path=html_path)
+
+
+def test_pages_no_longer_has_validated_at(tmp_db):
+    """Schema cleanup: validated_at was replaced by the validate_html_runs
+    table. New DBs never have it."""
     db = Database(tmp_db)
     cols = {row["name"] for row in db.conn.execute("PRAGMA table_info(pages)")}
-    assert "validated_at" in cols
-    db.close()
-
-
-def test_mark_validated_sets_timestamp(tmp_db):
-    db = Database(tmp_db)
-    db.add_url("s", "https://e.com/x")
-    db.mark_validated("https://e.com/x")
-    row = db.conn.execute(
-        "SELECT validated_at FROM pages WHERE url = ?", ("https://e.com/x",)
-    ).fetchone()
-    assert row["validated_at"] is not None
-    db.close()
-
-
-def _seed_fetched(db, site, url, html_path):
-    """Mark a URL as fetched with cached HTML — required before validated_at
-    is meaningful (validate only runs on html_path IS NOT NULL rows)."""
-    db.add_url(site, url)
-    db.mark_content(url, "Recipe", "ok", html_path=html_path)
-
-
-def test_clear_validated_at_respects_site_scope(tmp_db):
-    db = Database(tmp_db)
-    _seed_fetched(db, "imbibe", "https://imbibe.com/a", "imbibe/a.html")
-    _seed_fetched(db, "punch", "https://punch.com/b", "punch/b.html")
-    db.mark_validated("https://imbibe.com/a")
-    db.mark_validated("https://punch.com/b")
-
-    cleared = db.clear_validated_at(site="imbibe")
-    assert cleared == 1
-
-    rows = {row["url"]: row["validated_at"] for row in db.conn.execute(
-        "SELECT url, validated_at FROM pages"
-    )}
-    assert rows["https://imbibe.com/a"] is None
-    assert rows["https://punch.com/b"] is not None
-    db.close()
-
-
-def test_clear_validated_at_without_site_clears_all(tmp_db):
-    db = Database(tmp_db)
-    _seed_fetched(db, "imbibe", "https://imbibe.com/a", "imbibe/a.html")
-    _seed_fetched(db, "punch", "https://punch.com/b", "punch/b.html")
-    db.mark_validated("https://imbibe.com/a")
-    db.mark_validated("https://punch.com/b")
-
-    assert db.clear_validated_at() == 2
-
-    for row in db.conn.execute("SELECT validated_at FROM pages"):
-        assert row["validated_at"] is None
-    db.close()
-
-
-def test_clear_validated_at_skips_rows_without_html_path(tmp_db):
-    """Rows that were never fetched shouldn't be touched — their validated_at
-    is always NULL, but the reset should report zero and not count them."""
-    db = Database(tmp_db)
-    db.add_url("imbibe", "https://imbibe.com/pending")  # no html_path
-    assert db.clear_validated_at() == 0
-    db.close()
-
-
-def test_count_pending_validation(tmp_db):
-    db = Database(tmp_db)
-    db.add_url("imbibe", "https://imbibe.com/a")
-    db.add_url("imbibe", "https://imbibe.com/b")
-    db.add_url("punch", "https://punch.com/c")
-    # Simulate fetched pages with html_path set.
-    db.mark_content("https://imbibe.com/a", "Recipe", "ok", html_path="imbibe/a.html")
-    db.mark_content("https://imbibe.com/b", "Recipe", "ok", html_path="imbibe/b.html")
-    db.mark_content("https://punch.com/c", "Recipe", "ok", html_path="punch/c.html")
-    db.mark_validated("https://imbibe.com/a")
-
-    assert db.count_pending_validation() == 2
-    assert db.count_pending_validation(site="imbibe") == 1
-    assert db.count_pending_validation(site="punch") == 1
+    assert "validated_at" not in cols
+    assert "error" not in cols  # renamed to fetch_error
+    assert "fetch_error" in cols
     db.close()
 
 
@@ -118,7 +53,7 @@ def test_get_pending_returns_pending_only(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")
     db.add_url("testsite", "https://example.com/recipe/2")
-    db.mark_content("https://example.com/recipe/1", "Recipe", "JSON-LD @type: Recipe", html_path="html/testsite/abc123.html")
+    db.mark_content("https://example.com/recipe/1", "Recipe", html_path="html/testsite/abc123.html")
     pending = db.get_pending()
     assert len(pending) == 1
     assert pending[0]["url"] == "https://example.com/recipe/2"
@@ -147,30 +82,30 @@ def test_get_pending_respects_limit(tmp_db):
 def test_mark_blocked(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")
-    db.mark_blocked("https://example.com/recipe/1", "cf-challenge detected")
+    db.mark_blocked("https://example.com/recipe/1")
     row = db.conn.execute("SELECT * FROM pages WHERE url = ?", ("https://example.com/recipe/1",)).fetchone()
     assert row["status"] == "blocked"
-    assert row["error"] == "cf-challenge detected"
     db.close()
 
 
 def test_mark_content(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")
-    db.mark_content("https://example.com/recipe/1", "Article", "JSON-LD @type: Article")
+    db.mark_content("https://example.com/recipe/1", "Article")
     row = db.conn.execute("SELECT * FROM pages WHERE url = ?", ("https://example.com/recipe/1",)).fetchone()
     assert row["status"] == "Article"
     assert row["fetched_at"] is not None
     db.close()
 
 
-def test_mark_failed_increments_attempts(tmp_db):
+def test_mark_failed_increments_attempts_and_sets_fetch_error(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")
     db.mark_failed("https://example.com/recipe/1", "Connection timeout")
     row = db.conn.execute("SELECT * FROM pages WHERE url = ?", ("https://example.com/recipe/1",)).fetchone()
     assert row["attempts"] == 1
     assert row["status"] == "pending"  # still pending, under max attempts
+    assert row["fetch_error"] == "Connection timeout"
 
     db.mark_failed("https://example.com/recipe/1", "Connection timeout")
     db.mark_failed("https://example.com/recipe/1", "Connection timeout")
@@ -184,7 +119,7 @@ def test_get_recent_statuses(tmp_db):
     db = Database(tmp_db)
     for i in range(5):
         db.add_url("testsite", f"https://example.com/recipe/{i}")
-        db.mark_content(f"https://example.com/recipe/{i}", "Recipe", "JSON-LD @type: Recipe", html_path=f"html/testsite/{i}.html")
+        db.mark_content(f"https://example.com/recipe/{i}", "Recipe", html_path=f"html/testsite/{i}.html")
     for i in range(5, 8):
         db.add_url("testsite", f"https://example.com/recipe/{i}")
         db.mark_blocked(f"https://example.com/recipe/{i}", "blocked")
@@ -199,7 +134,7 @@ def test_get_stats(tmp_db):
     db = Database(tmp_db)
     db.add_url("site_a", "https://a.com/1")
     db.add_url("site_a", "https://a.com/2")
-    db.mark_content("https://a.com/1", "Recipe", "JSON-LD @type: Recipe", html_path="html/site_a/1.html")
+    db.mark_content("https://a.com/1", "Recipe", html_path="html/site_a/1.html")
     db.add_url("site_b", "https://b.com/1")
     stats = db.get_stats()
     assert stats == {"site_a": {"pending": 1, "Recipe": 1}, "site_b": {"pending": 1}}
@@ -476,26 +411,26 @@ def test_get_unextracted_returns_drink_recipe_buckets_with_html(tmp_db):
     )
     # a: likely_drink_recipe + fetched
     db.set_content_type("https://x/a", "likely_drink_recipe")
-    db.mark_content("https://x/a", "valid", "ok", html_path="difs/a.html")
+    db.mark_content("https://x/a", "valid", html_path="difs/a.html")
     # b: likely_drink_recipe but no html_path
     db.set_content_type("https://x/b", "likely_drink_recipe")
     # c: fetched but not a drink recipe
     db.set_content_type("https://x/c", "likely_food_recipe")
-    db.mark_content("https://x/c", "valid", "ok", html_path="difs/c.html")
+    db.mark_content("https://x/c", "valid", html_path="difs/c.html")
     # d: likely_drink_recipe, fetched, already extracted
     db.set_content_type("https://x/d", "likely_drink_recipe")
-    db.mark_content("https://x/d", "valid", "ok", html_path="difs/d.html")
+    db.mark_content("https://x/d", "valid", html_path="difs/d.html")
     db.mark_extracted("https://x/d")
     # e: confirmed_drink + fetched → should be queued
     db.set_content_type("https://x/e", "confirmed_drink")
-    db.mark_content("https://x/e", "Recipe", "ok", html_path="difs/e.html")
+    db.mark_content("https://x/e", "Recipe", html_path="difs/e.html")
     # f: confirmed_drink, already extracted → excluded
     db.set_content_type("https://x/f", "confirmed_drink")
-    db.mark_content("https://x/f", "Recipe", "ok", html_path="difs/f.html")
+    db.mark_content("https://x/f", "Recipe", html_path="difs/f.html")
     db.mark_extracted("https://x/f")
     # g: confirmed_food (even with html) → excluded
     db.set_content_type("https://x/g", "confirmed_food")
-    db.mark_content("https://x/g", "Recipe", "ok", html_path="difs/g.html")
+    db.mark_content("https://x/g", "Recipe", html_path="difs/g.html")
 
     rows = db.get_unextracted()
     urls = sorted(r["url"] for r in rows)
@@ -513,9 +448,9 @@ def test_reset_extract_state_covers_drink_recipe_buckets(tmp_db):
     db.set_content_type("https://x/a", "likely_drink_recipe")
     db.set_content_type("https://x/b", "confirmed_drink")
     db.set_content_type("https://x/c", "confirmed_food")
-    db.mark_content("https://x/a", "valid", "ok", html_path="difs/a.html")
-    db.mark_content("https://x/b", "Recipe", "ok", html_path="difs/b.html")
-    db.mark_content("https://x/c", "Recipe", "ok", html_path="difs/c.html")
+    db.mark_content("https://x/a", "valid", html_path="difs/a.html")
+    db.mark_content("https://x/b", "Recipe", html_path="difs/b.html")
+    db.mark_content("https://x/c", "Recipe", html_path="difs/c.html")
     db.mark_extracted("https://x/a")
     db.mark_extract_error("https://x/b", "no_recipe")
     db.mark_extracted("https://x/c")
@@ -545,8 +480,8 @@ def test_reset_extract_state_scoped_by_site(tmp_db):
     db.add_url("site_b", "https://b/1")
     db.set_content_type("https://a/1", "confirmed_drink")
     db.set_content_type("https://b/1", "confirmed_drink")
-    db.mark_content("https://a/1", "Recipe", "ok", html_path="a/1.html")
-    db.mark_content("https://b/1", "Recipe", "ok", html_path="b/1.html")
+    db.mark_content("https://a/1", "Recipe", html_path="a/1.html")
+    db.mark_content("https://b/1", "Recipe", html_path="b/1.html")
     db.mark_extracted("https://a/1")
     db.mark_extracted("https://b/1")
 
@@ -566,7 +501,7 @@ def test_mark_extract_error_blocks_reprocessing(tmp_db):
     db = Database(tmp_db)
     db.add_urls_batch("difs", ["https://x/a"])
     db.set_content_type("https://x/a", "likely_drink_recipe")
-    db.mark_content("https://x/a", "valid", "ok", html_path="difs/a.html")
+    db.mark_content("https://x/a", "valid", html_path="difs/a.html")
 
     assert len(db.get_unextracted()) == 1
     db.mark_extract_error("https://x/a", "no_jsonld_recipe")
@@ -579,7 +514,7 @@ def test_mark_extracted_clears_extract_error(tmp_db):
     db = Database(tmp_db)
     db.add_urls_batch("difs", ["https://x/a"])
     db.set_content_type("https://x/a", "likely_drink_recipe")
-    db.mark_content("https://x/a", "valid", "ok", html_path="difs/a.html")
+    db.mark_content("https://x/a", "valid", html_path="difs/a.html")
     db.mark_extract_error("https://x/a", "no_jsonld_recipe")
 
     db.mark_extracted("https://x/a")
@@ -718,6 +653,60 @@ def test_extract_runs_table_exists(tmp_db):
     }
     pk_cols = [r[1] for r in db.conn.execute("PRAGMA table_info(extract_runs)") if r[5]]
     assert pk_cols == ["page_id"]
+    db.close()
+
+
+def test_legacy_pages_columns_are_migrated_on_open(tmp_db):
+    """Opening an older DB with legacy `error` + `validated_at` columns:
+    drops validated_at, renames error to fetch_error, and narrows fetch_error
+    to status='failed' rows only (other rows' legacy text was really a
+    validate reason — that moves to validate_html_runs.reason on next run).
+    Migration is idempotent across re-opens."""
+    import sqlite3
+    conn = sqlite3.connect(tmp_db)
+    conn.execute("""
+        CREATE TABLE pages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site TEXT NOT NULL,
+            url TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'pending',
+            content_type TEXT,
+            sitemap_source TEXT,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            discovered_at TEXT NOT NULL,
+            fetched_at TEXT,
+            error TEXT,
+            html_path TEXT,
+            validated_at TEXT
+        )
+    """)
+    conn.executemany(
+        "INSERT INTO pages (site, url, status, discovered_at, error, validated_at) VALUES (?, ?, ?, ?, ?, ?)",
+        [
+            ("s", "https://e.com/failed", "failed", "2026-01-01T00:00:00+00:00", "connection timeout", None),
+            ("s", "https://e.com/blocked", "blocked", "2026-01-01T00:00:00+00:00", "cf-challenge detected", "2026-01-02T00:00:00+00:00"),
+        ],
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(tmp_db)
+    cols = {row["name"] for row in db.conn.execute("PRAGMA table_info(pages)")}
+    assert "validated_at" not in cols
+    assert "error" not in cols
+    assert "fetch_error" in cols
+    rows = {r["url"]: r for r in db.conn.execute("SELECT url, fetch_error FROM pages")}
+    # Failed rows keep their error text — it was a real fetch exception.
+    assert rows["https://e.com/failed"]["fetch_error"] == "connection timeout"
+    # Non-failed rows' legacy text was a validate reason; cleared on migration.
+    assert rows["https://e.com/blocked"]["fetch_error"] is None
+    db.close()
+
+    # Re-open is idempotent — no error, same shape.
+    db = Database(tmp_db)
+    cols = {row["name"] for row in db.conn.execute("PRAGMA table_info(pages)")}
+    assert "validated_at" not in cols
+    assert "fetch_error" in cols
     db.close()
 
 

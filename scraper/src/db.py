@@ -17,12 +17,11 @@ CREATE TABLE IF NOT EXISTS pages (
     attempts INTEGER NOT NULL DEFAULT 0,
     discovered_at TEXT NOT NULL,
     fetched_at TEXT,
-    error TEXT,
+    fetch_error TEXT,
     html_path TEXT,
     extracted_at TEXT,
     extract_error TEXT,
-    disabled_reason TEXT,
-    validated_at TEXT
+    disabled_reason TEXT
 );
 """
 
@@ -125,13 +124,6 @@ class Database:
             for idx in CREATE_INDEXES:
                 self.conn.execute(idx)
             self.conn.commit()
-            # Idempotent column adds for existing DBs (SQLite has no ADD COLUMN IF NOT EXISTS).
-            existing_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(pages)").fetchall()}
-            if "extracted_at" not in existing_cols:
-                self.conn.execute("ALTER TABLE pages ADD COLUMN extracted_at TEXT")
-            if "extract_error" not in existing_cols:
-                self.conn.execute("ALTER TABLE pages ADD COLUMN extract_error TEXT")
-            self.conn.commit()
             self.conn.execute(CREATE_PIPELINE_RUNS_TABLE)
             self.conn.execute(CREATE_CLASSIFY_URL_RUNS_TABLE)
             self.conn.execute(CREATE_VALIDATE_HTML_RUNS_TABLE)
@@ -147,12 +139,22 @@ class Database:
         if "disabled_reason" not in cols:
             self.conn.execute("ALTER TABLE pages ADD COLUMN disabled_reason TEXT")
             self.conn.commit()
-        if "validated_at" not in cols:
-            self.conn.execute("ALTER TABLE pages ADD COLUMN validated_at TEXT")
+        # Legacy schema cleanup — idempotent. Each of these ALTERs is a
+        # one-shot for older DBs; new DBs already ship with the target shape.
+        if "error" in cols and "fetch_error" not in cols:
+            # Narrow the column to its current meaning: "last fetch exception".
+            # Validate reasons (which historically shared this column) moved
+            # to validate_html_runs.reason, so clear them on non-failed rows.
+            # Re-running validate re-populates those reasons in the eval table.
+            self.conn.execute("ALTER TABLE pages RENAME COLUMN error TO fetch_error")
+            self.conn.execute("UPDATE pages SET fetch_error = NULL WHERE status != 'failed'")
+            self.conn.commit()
+        if "validated_at" in cols:
+            # Replaced by validate_html_runs — work queue now joins against
+            # the presence of an eval row, not this timestamp.
+            self.conn.execute("ALTER TABLE pages DROP COLUMN validated_at")
             self.conn.commit()
         # Legacy `classifications` table was superseded by `classify_url_runs`.
-        # Drop on sight; all prior data was one-shot migrated into the new
-        # table in a previous commit.
         self.conn.execute("DROP TABLE IF EXISTS classifications")
         self.conn.commit()
 
@@ -200,29 +202,37 @@ class Database:
             rows = self.conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
-    def mark_blocked(self, url: str, reason: str, html_path: str | None = None):
+    def mark_blocked(self, url: str, html_path: str | None = None):
+        """Mark a page as blocked by the validator. The blocker reason lives
+        in validate_html_runs.reason, written by whichever CLI ran validate;
+        pages only tracks the bucketed status."""
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             self.conn.execute(
-                "UPDATE pages SET status = 'blocked', error = ?, html_path = ?, fetched_at = ? WHERE url = ?",
-                (reason, html_path, now, url),
+                "UPDATE pages SET status = 'blocked', html_path = ?, fetched_at = ? WHERE url = ?",
+                (html_path, now, url),
             )
             self.conn.commit()
 
-    def mark_content(self, url: str, status: str, reason: str, html_path: str | None = None):
-        """Mark a page with an arbitrary content status (JSON-LD @type, 'unverified', etc.)."""
+    def mark_content(self, url: str, status: str, html_path: str | None = None):
+        """Mark a page with an arbitrary content status (JSON-LD @type,
+        'unverified', etc.). The validate reason lives in
+        validate_html_runs.reason, not on pages."""
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             self.conn.execute(
-                "UPDATE pages SET status = ?, error = ?, html_path = ?, fetched_at = ? WHERE url = ?",
-                (status, reason, html_path, now, url),
+                "UPDATE pages SET status = ?, html_path = ?, fetched_at = ? WHERE url = ?",
+                (status, html_path, now, url),
             )
             self.conn.commit()
 
     def mark_failed(self, url: str, error: str):
+        """Record a fetch exception (network, HTTP error). fetch_error
+        captures the exception message verbatim; after MAX_ATTEMPTS the row
+        moves to status='failed' and drops out of the pending queue."""
         with self._lock:
             self.conn.execute(
-                "UPDATE pages SET attempts = attempts + 1, error = ? WHERE url = ?",
+                "UPDATE pages SET attempts = attempts + 1, fetch_error = ? WHERE url = ?",
                 (error, url),
             )
             self.conn.execute(
@@ -401,43 +411,6 @@ class Database:
             cursor = self.conn.execute(query, params)
             self.conn.commit()
             return cursor.rowcount
-
-    def mark_validated(self, url: str):
-        """Stamp validated_at = now() so the validate CLI's work queue
-        (`validated_at IS NULL`) skips this row on future runs."""
-        now = datetime.now(timezone.utc).isoformat()
-        with self._lock:
-            self.conn.execute(
-                "UPDATE pages SET validated_at = ? WHERE url = ?",
-                (now, url),
-            )
-            self.conn.commit()
-
-    def clear_validated_at(self, site: str | None = None) -> int:
-        """Clear validated_at for html-cached rows so the validate CLI
-        re-processes them. Optionally scoped to a site. Returns row count."""
-        query = "UPDATE pages SET validated_at = NULL WHERE html_path IS NOT NULL"
-        params: list = []
-        if site:
-            query += " AND site = ?"
-            params.append(site)
-        with self._lock:
-            cursor = self.conn.execute(query, params)
-            self.conn.commit()
-            return cursor.rowcount
-
-    def count_pending_validation(self, site: str | None = None) -> int:
-        """Rows with cached HTML that haven't been validated yet."""
-        query = (
-            "SELECT COUNT(*) FROM pages "
-            "WHERE html_path IS NOT NULL AND validated_at IS NULL"
-        )
-        params: list = []
-        if site:
-            query += " AND site = ?"
-            params.append(site)
-        with self._lock:
-            return self.conn.execute(query, params).fetchone()[0]
 
     def count_unclassified(self, site: str | None = None) -> int:
         """Count of rows with `content_type IS NULL`, optionally scoped to a site."""

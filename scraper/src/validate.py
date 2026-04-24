@@ -96,14 +96,9 @@ def revalidate(
             ] += 1
             if not dry_run:
                 if new_status == "blocked":
-                    db.mark_blocked(row["url"], result.reason or "blocked")
+                    db.mark_blocked(row["url"])
                 else:
-                    db.mark_content(
-                        row["url"],
-                        new_status,
-                        result.reason or new_status,
-                        html_path=row["html_path"],
-                    )
+                    db.mark_content(row["url"], new_status, html_path=row["html_path"])
 
         if not dry_run:
             db.record_validate_html(

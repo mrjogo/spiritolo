@@ -68,10 +68,10 @@ def test_fetch_pages_marks_recipe(tmp_db, tmp_path, sample_recipe_html):
     db.close()
 
 
-def test_fetch_pages_stamps_validated_at(tmp_db, tmp_path, sample_recipe_html):
-    """Successful fetch runs validate+classify_drink synchronously, so it
-    should also stamp validated_at — otherwise every freshly-fetched row
-    would show up in the validate CLI's work queue for no reason."""
+def test_fetch_pages_writes_validate_html_runs_row(tmp_db, tmp_path, sample_recipe_html):
+    """Successful fetch runs validate() synchronously, so it must also write
+    a validate_html_runs row — otherwise every freshly-fetched row would
+    appear in the validate CLI's work queue for no reason."""
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipes/margarita")
     db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
@@ -87,18 +87,24 @@ def test_fetch_pages_stamps_validated_at(tmp_db, tmp_path, sample_recipe_html):
     fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
 
     row = db.conn.execute(
-        "SELECT validated_at FROM pages WHERE url = ?",
+        "SELECT v.status, v.validator_version, v.run_id "
+        "FROM validate_html_runs v JOIN pages p ON p.id = v.page_id "
+        "WHERE p.url = ?",
         ("https://example.com/recipes/margarita",),
     ).fetchone()
-    assert row["validated_at"] is not None
+    assert row is not None
+    assert row["status"] == "Recipe"
+    assert row["validator_version"]
+    assert row["run_id"] is not None
     db.close()
 
 
-def test_fetch_pages_stamps_validated_at_on_blocked(tmp_db, tmp_path, sample_blocked_html):
-    """Blocked pages never reach classify_drink, but validate still ran on
-    the HTML and produced a verdict. Stamping validated_at keeps the
-    work-queue invariant simple: every row we've seen through validate is
-    stamped, regardless of outcome."""
+def test_fetch_pages_writes_validate_html_runs_row_on_blocked(
+    tmp_db, tmp_path, sample_blocked_html,
+):
+    """Blocked pages still had validate() run on them. The eval row captures
+    that verdict, keeping the work-queue invariant simple: every row we've
+    seen through validate has an eval row, regardless of outcome."""
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipes/blocked")
     db.set_content_type("https://example.com/recipes/blocked", "likely_drink_recipe")
@@ -114,10 +120,81 @@ def test_fetch_pages_stamps_validated_at_on_blocked(tmp_db, tmp_path, sample_blo
     fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
 
     row = db.conn.execute(
-        "SELECT validated_at FROM pages WHERE url = ?",
+        "SELECT v.status, v.reason FROM validate_html_runs v "
+        "JOIN pages p ON p.id = v.page_id WHERE p.url = ?",
         ("https://example.com/recipes/blocked",),
     ).fetchone()
-    assert row["validated_at"] is not None
+    assert row is not None
+    assert row["status"] == "blocked"
+    assert row["reason"]  # blocker fingerprint text is persisted here
+    db.close()
+
+
+def test_fetch_pages_writes_classify_drink_runs_row(
+    tmp_db, tmp_path, sample_drink_recipe_html,
+):
+    """Fetch also runs classify_drink inline, so the eval row captures the
+    score + rule attribution for every fetched page."""
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
+
+    mock_client = MagicMock()
+    mock_client.get_account.return_value = {
+        "concurrencyLimit": 1, "concurrentRequests": 0,
+        "requestCount": 0, "requestLimit": 5000,
+        "burst": 0, "failedRequestCount": 0,
+    }
+    mock_client.fetch.return_value = sample_drink_recipe_html
+
+    fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+
+    row = db.conn.execute(
+        "SELECT d.label, d.score, d.pages_content_type_before "
+        "FROM classify_drink_runs d JOIN pages p ON p.id = d.page_id "
+        "WHERE p.url = ?",
+        ("https://example.com/recipes/margarita",),
+    ).fetchone()
+    assert row is not None
+    assert row["label"] == "confirmed_drink"
+    assert row["score"] >= 2
+    # Snapshot captures the PRE-fetch content_type (likely_drink_recipe, set above).
+    assert row["pages_content_type_before"] == "likely_drink_recipe"
+    db.close()
+
+
+def test_fetch_pages_opens_and_closes_pipeline_run(
+    tmp_db, tmp_path, sample_recipe_html,
+):
+    """Every fetch_pages invocation opens one pipeline_runs row with
+    stage='fetch', closes it with a summary, and tags every eval row it
+    writes with that run_id."""
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipes/margarita")
+    db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
+
+    mock_client = MagicMock()
+    mock_client.get_account.return_value = {
+        "concurrencyLimit": 1, "concurrentRequests": 0,
+        "requestCount": 0, "requestLimit": 5000,
+        "burst": 0, "failedRequestCount": 0,
+    }
+    mock_client.fetch.return_value = sample_recipe_html
+
+    fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+
+    runs = db.conn.execute(
+        "SELECT id, stage, started_at, finished_at FROM pipeline_runs"
+    ).fetchall()
+    assert len(runs) == 1
+    assert runs[0]["stage"] == "fetch"
+    assert runs[0]["started_at"] is not None
+    assert runs[0]["finished_at"] is not None
+
+    v_run = db.conn.execute("SELECT run_id FROM validate_html_runs").fetchone()
+    d_run = db.conn.execute("SELECT run_id FROM classify_drink_runs").fetchone()
+    assert v_run["run_id"] == runs[0]["id"]
+    assert d_run["run_id"] == runs[0]["id"]
     db.close()
 
 

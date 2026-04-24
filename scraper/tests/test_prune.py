@@ -22,7 +22,7 @@ from scraper.src.prune import STAGE_TABLES, prune_stage, prune_all
 
 def _seed(db, site, url, html_path):
     db.add_url(site, url)
-    db.mark_content(url, "Recipe", "seeded", html_path=html_path)
+    db.mark_content(url, "Recipe", html_path=html_path)
 
 
 def _record_validate(db, url, *, version, evaluated_at, run_id=None):

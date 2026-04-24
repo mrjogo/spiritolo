@@ -64,7 +64,7 @@ def _seed_cached_row(
     (html_dir / site).mkdir(parents=True, exist_ok=True)
     (html_dir / rel_path).write_text(html, encoding="utf-8")
     db.add_url(site, url)
-    db.mark_content(url, status, "seeded", html_path=rel_path)
+    db.mark_content(url, status, html_path=rel_path)
     if content_type:
         db.set_content_type(url, content_type)
     return rel_path
