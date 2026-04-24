@@ -645,8 +645,7 @@ class Database:
         self, site: str | None = None, limit: int | None = None,
     ) -> list[dict]:
         """Work queue: pages with cached HTML that have no validate_html_runs
-        row. Replaces the old `validated_at IS NULL` query — a missing eval
-        row is the signal to re-run, and nothing else."""
+        row. A missing eval row is the only signal that a page needs to run."""
         query = [
             "SELECT p.id, p.site, p.url, p.status, p.content_type, p.html_path",
             "FROM pages p",

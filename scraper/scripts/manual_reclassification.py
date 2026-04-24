@@ -127,13 +127,18 @@ def run_one(db: Database, key: str, sql: str, label: str, dry_run: bool) -> int:
         return len(rows)
     raw = json.dumps({"label": label, "key": key})
     for row in rows:
-        db.record_classification(
+        page = db.conn.execute(
+            "SELECT content_type FROM pages WHERE id = ?", (row["id"],),
+        ).fetchone()
+        db.record_classify_url(
             page_id=row["id"],
+            run_id=None,
             label=label,
             model="manual",
             prompt_version="manual",
             raw_response=raw,
             latency_ms=None,
+            pages_content_type_before=page["content_type"],
         )
     return len(rows)
 

@@ -9,6 +9,36 @@ Look at the branch commit log and file changes compared to destination branch. C
 
 Once the PR is merged, checkout the primary branch, pull it, and delete the old branch.
 
+## Data model
+
+`data/scraper.db` (SQLite) has one canonical table plus five stage-scoped run tables:
+
+- **`pages`** — one row per URL. Tracks work-queue state: `site`, `url`, `status`, `content_type`, `html_path`, `fetched_at`, `fetch_error`, `attempts`, `disabled_reason`, etc. This is the only table that holds permanent state about a page.
+- **`pipeline_runs`** — one row per CLI invocation: `stage`, `started_at`, `finished_at`, `site`, `args` (JSON), `summary` (JSON). Audit trail for "what ran when."
+- **`classify_url_runs`**, **`validate_html_runs`**, **`classify_drink_runs`**, **`extract_runs`** — one row per `page_id` (latest-only UPSERT), keyed as primary key. Each carries a `run_id` FK to `pipeline_runs`, an evaluator version string, an `evaluated_at` timestamp, and — for stages that mutate a `pages.*` field — a snapshot of that field's pre-run value. These tables are prunable: deleting rows just puts pages back on the corresponding stage's work queue.
+
+Each stage's work queue is "pages that qualify for this stage AND have no `*_runs` row for it" — no timestamp flags on `pages` to forget to clear. Extracted recipes live in the Mac-host Supabase `recipes` table (website-facing columns + full `jsonld` blob).
+
+### Versioning
+
+Every evaluator has a version constant, written into every eval row it produces:
+
+| Stage | Constant | File |
+|---|---|---|
+| URL classification | `PROMPT_VERSION` | [classify_prompt.py](scraper/src/classify_prompt.py) |
+| HTML validation | `VALIDATOR_VERSION` | [validation.py](scraper/src/validation.py) |
+| Drink scoring | `SCORER_VERSION` | [classify_drink.py](scraper/src/classify_drink.py) |
+| JSON-LD extraction | `EXTRACTOR_VERSION` | [extract.py](scraper/src/extract.py) |
+
+**Re-run workflow when you change an evaluator's logic:** bump the constant, then prune rows at the old version so they fall back on the stage's work queue:
+
+```bash
+cd scraper && uv run python -m scraper.src.prune --stage classify_drink --except-version v2
+cd scraper && uv run python -m scraper.src.validate
+```
+
+Bumping the constant without pruning just means new rows land at the new version alongside old ones — useful when you want the diff side-by-side but are fine with a gradual migration.
+
 ## URL Classifier
 
 The classifier lives at `scraper/src/classify.py`. It reads `content_type IS NULL` rows from `data/scraper.db`, sends each URL to a local ollama model, UPSERTs a `classify_url_runs` row (label + model + prompt_version + raw_response + latency_ms, latest-only per page), and updates `pages.content_type`. Each invocation opens a `pipeline_runs` row with stage=`classify_url`.
@@ -84,32 +114,27 @@ cd scraper && uv run python -m scraper.src.extract --limit 10
 
 ## Validate CLI
 
-`scraper/src/validate.py` re-runs `validate()` + `classify_drink()` over cached HTML that hasn't been evaluated by the current schema yet. Work queue is "pages with `html_path` set that have no row in `validate_html_runs`" — runs are resumable, restart picks up where it left off.
+`scraper/src/validate.py` runs `validate()` + `classify_drink_scored()` on cached HTML and writes `validate_html_runs` + `classify_drink_runs` rows. Fetch performs the same evaluations inline at fetch time, so a run here is only needed to re-evaluate older pages after a version bump or prompt change — the work queue surfaces exactly those.
 
-Each invocation opens a `pipeline_runs` row (stage=`validate_html`), writes one `validate_html_runs` and one `classify_drink_runs` row per processed page (UPSERT on `page_id` — latest-only), and snapshots the pre-run `pages.status` / `pages.content_type` onto those eval rows so "what flipped on the last run" is a trivial SELECT:
+```bash
+# Process every cached-HTML page that lacks a validate_html_runs row.
+cd scraper && uv run python -m scraper.src.validate
+
+# Dry-run preview, scoped to one site. Doesn't write eval rows or pages updates.
+cd scraper && uv run python -m scraper.src.validate --site imbibe --dry-run
+
+# Force re-evaluation of imbibe: deletes its validate_html_runs +
+# classify_drink_runs rows first so they land back on the work queue.
+cd scraper && uv run python -m scraper.src.validate --site imbibe --reset
+```
+
+The snapshot columns (`pages_status_before`, `pages_content_type_before`) let you see "what flipped on the last run" without any history kept:
 
 ```sql
 SELECT p.url, d.pages_content_type_before AS was, d.label AS now
 FROM classify_drink_runs d JOIN pages p ON p.id = d.page_id
 WHERE d.label IS NOT NULL AND d.label != d.pages_content_type_before
   AND d.run_id = (SELECT MAX(id) FROM pipeline_runs WHERE stage='classify_drink');
-```
-
-```bash
-# Re-process everything that hasn't been evaluated yet.
-cd scraper && uv run python -m scraper.src.validate
-
-# Dry-run preview, scoped to one site. Doesn't write eval rows or pages updates.
-cd scraper && uv run python -m scraper.src.validate --site imbibe --dry-run
-
-# Force re-evaluation of imbibe: deletes its validate_html_runs + classify_drink_runs
-# rows first, so everything lands back on the work queue.
-cd scraper && uv run python -m scraper.src.validate --site imbibe --reset
-
-# Selective re-evaluation via the prune CLI (see below) — e.g. drop rows from
-# an older scorer version so only those get re-scored:
-#   cd scraper && uv run python -m scraper.src.prune --stage classify_drink --except-version v2
-# Then run `validate` normally.
 ```
 
 All pipeline scripts (`fetch`, `classify`, `extract`, `validate`) share the same `--site` / `--limit` / `--dry-run` / `--reset --yes` conventions where applicable, the same progress line (`X/Y (Z%) rows/s ETA 1h3m34s`), and the same per-site / per-category summary.

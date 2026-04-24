@@ -190,8 +190,7 @@ def test_revalidate_reports_content_type_transitions(tmp_db, tmp_path):
 
 
 def test_revalidate_writes_validate_html_runs_row(tmp_db, tmp_path):
-    """Processed pages get a validate_html_runs row (UPSERT, latest-only).
-    Replaces the old `validated_at` stamp on `pages`."""
+    """Processed pages get a validate_html_runs row (UPSERT, latest-only)."""
     db = Database(tmp_db)
     html_dir = tmp_path / "html"
     url = "https://imbibemagazine.com/negroni"
@@ -291,8 +290,7 @@ def test_revalidate_opens_and_closes_pipeline_runs_row(tmp_db, tmp_path):
 
 
 def test_revalidate_skips_rows_with_existing_eval(tmp_db, tmp_path):
-    """Work queue excludes pages that already have a validate_html_runs row.
-    Replaces the old `validated_at IS NULL` logic."""
+    """Work queue excludes pages that already have a validate_html_runs row."""
     db = Database(tmp_db)
     html_dir = tmp_path / "html"
     url = "https://imbibemagazine.com/negroni"

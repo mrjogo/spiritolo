@@ -877,7 +877,7 @@ def test_record_classify_drink_accepts_null_label_for_abstain(tmp_db):
 
 def test_get_pending_validate_html_returns_rows_without_eval(tmp_db):
     """Work queue: pages with cached HTML that don't have a validate_html_runs
-    row yet. Replaces the old `validated_at IS NULL` work queue."""
+    row yet."""
     db = Database(tmp_db)
     _seed_fetched(db, "imbibe", "https://imbibe.com/a", "imbibe/a.html")
     _seed_fetched(db, "imbibe", "https://imbibe.com/b", "imbibe/b.html")
