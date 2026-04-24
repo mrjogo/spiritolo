@@ -253,7 +253,9 @@ def test_classify_drink_no_jsonld_at_all():
 
 
 def test_classify_drink_spirit_in_food_is_not_drink():
-    """A food recipe with a spirit name in keywords should NOT be classified as drink."""
+    """A food recipe with a spirit name in keywords must NOT be classified as drink.
+    The scored classifier may abstain (None) when there are no strong signals
+    either way — that's fine, the downstream LLM classifier will label it."""
     body = "<p>A delicious glazed dish.</p>\n" * 40
     html = """<!DOCTYPE html>
 <html><body>
@@ -268,4 +270,4 @@ def test_classify_drink_spirit_in_food_is_not_drink():
 </script>
 </body></html>"""
     result = classify_drink(html)
-    assert result == "confirmed_food"
+    assert result != "confirmed_drink"

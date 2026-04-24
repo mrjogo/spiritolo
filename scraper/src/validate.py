@@ -35,18 +35,6 @@ MIN_PAGE_SIZE = 5000  # bytes
 
 MIN_TEXT_LENGTH = 500  # visible characters after stripping tags
 
-DRINK_TERMS = {
-    # drink types / categories
-    "cocktail", "cocktails", "drink", "drinks", "drinking",
-    "beverage", "beverages", "mixed drink",
-    # cocktail families and styles
-    "highball", "lowball", "aperitif", "aperitivo", "digestif",
-    "nightcap", "spritz", "sour", "fizz", "flip", "toddy",
-    "grog", "sangria", "shooter", "shot", "punch",
-    "martini", "margarita", "daiquiri", "mojito", "negroni",
-    "colada", "mule", "smash", "swizzle", "cobbler",
-    "rickey", "julep", "bellini", "mimosa", "paloma",
-}
 
 
 class TextExtractor(HTMLParser):
@@ -212,68 +200,6 @@ def validate(html: str, url: str | None = None) -> ValidationResult:
     return ValidationResult("unverified", "No structured data found")
 
 
-def _check_terms(value: str) -> bool:
-    """Check if any DRINK_TERMS appear in a comma-separated metadata value."""
-    for segment in value.lower().split(","):
-        segment = segment.strip()
-        if any(term in segment for term in DRINK_TERMS):
-            return True
-    return False
-
-
-def _extract_breadcrumb_names(recipe: dict) -> list[str]:
-    """Extract breadcrumb item names from a Recipe JSON-LD object."""
-    mep = recipe.get("mainEntityOfPage", {})
-    if not isinstance(mep, dict):
-        return []
-    bc = mep.get("breadcrumb", {})
-    if not isinstance(bc, dict):
-        return []
-    items = bc.get("itemListElement", [])
-    names = []
-    for item in items:
-        if isinstance(item, dict):
-            inner = item.get("item", {})
-            if isinstance(inner, dict):
-                name = inner.get("name", "")
-                if name:
-                    names.append(name)
-            elif isinstance(inner, str):
-                names.append(inner)
-    return names
-
-
-def classify_drink(html: str) -> str | None:
-    """Classify a fetched page as confirmed_drink, confirmed_food, or None (no Recipe data).
-
-    Checks recipeCategory, breadcrumb, and keywords against DRINK_TERMS across
-    both JSON-LD and microdata Recipe sources. Returns None if no Recipe is found.
-    """
-    structured = extract_structured(html)
-    recipes = list(iter_recipes(structured))
-
-    if not recipes:
-        return None
-
-    for recipe in recipes:
-        # Check recipeCategory
-        category = recipe.get("recipeCategory", "")
-        if isinstance(category, list):
-            category = ", ".join(category)
-        if category and _check_terms(category):
-            return "confirmed_drink"
-
-        # Check breadcrumb
-        bc_names = _extract_breadcrumb_names(recipe)
-        for name in bc_names:
-            if _check_terms(name):
-                return "confirmed_drink"
-
-        # Check keywords
-        keywords = recipe.get("keywords", "")
-        if isinstance(keywords, list):
-            keywords = ", ".join(keywords)
-        if keywords and _check_terms(keywords):
-            return "confirmed_drink"
-
-    return "confirmed_food"
+# classify_drink lives in scraper.src.classify_drink — kept as a re-export so
+# existing callers (fetch.py, revalidate.py, tests) don't need to change.
+from scraper.src.classify_drink import classify_drink  # noqa: E402, F401

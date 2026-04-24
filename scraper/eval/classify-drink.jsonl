@@ -1,0 +1,18 @@
+{"html_path": "classify-drink/imbibe_dessert_category_cocktail.html", "expected": "confirmed_drink", "note": "Imbibe pattern: recipeCategory='Dessert' but clear cocktail"}
+{"html_path": "classify-drink/punch_microdata_spritz.html", "expected": "confirmed_drink", "note": "Punch microdata Recipe; name+keyword spritz"}
+{"html_path": "classify-drink/liquor_margarita.html", "expected": "confirmed_drink", "note": "Liquor.com — rim the glass + margarita name"}
+{"html_path": "classify-drink/bonappetit_old_fashioned.html", "expected": "confirmed_drink", "note": "Classic cocktail with muddle + bitters"}
+{"html_path": "classify-drink/imbibe_hot_toddy.html", "expected": "confirmed_drink", "note": "Toddy family — no shake, liquid units carry"}
+{"html_path": "classify-drink/foodnetwork_mojito.html", "expected": "confirmed_drink", "note": "Muddle + highball + mojito"}
+{"html_path": "classify-drink/diffordsguide_daiquiri.html", "expected": "confirmed_drink", "note": "ml units, shake+coupette"}
+{"html_path": "classify-drink/imbibe_paloma.html", "expected": "confirmed_drink", "note": "Paloma — rim + highball + numeric yield 1"}
+{"html_path": "classify-drink/punch_whiskey_sour.html", "expected": "confirmed_drink", "note": "Dry shake + Whiskey Sour name"}
+{"html_path": "classify-drink/imbibe_espresso_martini.html", "expected": "confirmed_drink", "note": "Martini name, shake, martini glass"}
+{"html_path": "classify-drink/foodnetwork_bourbon_pecan_pie.html", "expected": "confirmed_food", "note": "Adversarial: bourbon in ingredients, pie name"}
+{"html_path": "classify-drink/foodnetwork_rum_cake.html", "expected": "confirmed_food", "note": "Adversarial: rum in ingredients, cake name"}
+{"html_path": "classify-drink/foodnetwork_linguine_clams.html", "expected": "confirmed_food", "note": "Pasta in name, dry units"}
+{"html_path": "classify-drink/bonappetit_roast_chicken.html", "expected": "confirmed_food", "note": "Long cook time, oven verbs, dry units"}
+{"html_path": "classify-drink/seriouseats_caesar_salad.html", "expected": "confirmed_food", "note": "Salad name, Salad category"}
+{"html_path": "classify-drink/foodnetwork_beef_stew.html", "expected": "confirmed_food", "note": "Stew name, long cook time"}
+{"html_path": "classify-drink/foodnetwork_cocktail_sauce.html", "expected": "confirmed_food", "note": "Adversarial: 'cocktail' in name is sauce not drink"}
+{"html_path": "classify-drink/bonappetit_strawberry_compote.html", "expected": "confirmed_food", "note": "Dry-unit ingredients drive a small food vote even with no explicit food name"}
