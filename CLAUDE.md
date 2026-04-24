@@ -11,7 +11,7 @@ Once the PR is merged, checkout the primary branch, pull it, and delete the old 
 
 ## URL Classifier
 
-The classifier lives at `scraper/src/classify.py`. It reads `content_type IS NULL` rows from `data/scraper.db`, sends each URL to a local ollama model, and writes the label back plus an audit row in the `classifications` table.
+The classifier lives at `scraper/src/classify.py`. It reads `content_type IS NULL` rows from `data/scraper.db`, sends each URL to a local ollama model, UPSERTs a `classify_url_runs` row (label + model + prompt_version + raw_response + latency_ms, latest-only per page), and updates `pages.content_type`. Each invocation opens a `pipeline_runs` row with stage=`classify_url`.
 
 **One-time setup:**
 
