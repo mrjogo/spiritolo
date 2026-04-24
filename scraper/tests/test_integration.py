@@ -91,9 +91,9 @@ def test_full_pipeline(tmp_db, tmp_path):
     assert stats["testsite"]["Recipe"] == 1
     assert stats["testsite"]["blocked"] == 1
 
-    # Verify HTML was saved for the fetched page
+    # Verify HTML was saved for both the valid recipe and the blocked page
     html_files = list(tmp_path.glob("testsite/*.html"))
-    assert len(html_files) == 1
-    assert "Margarita" in html_files[0].read_text()
+    assert len(html_files) == 2
+    assert any("Margarita" in f.read_text() for f in html_files)
 
     db.close()
