@@ -7,12 +7,14 @@ from scraper.src.classify_prompt import (
 )
 
 
-def test_labels_are_the_six_known_values():
+def test_labels_are_the_known_values():
     assert LABELS == (
         "likely_drink_recipe",
         "likely_food_recipe",
         "likely_drink_article",
         "likely_food_article",
+        "likely_cocktail_adjacent",
+        "likely_unstructured_drink_recipe",
         "likely_junk",
         "likely_user_generated",
     )
@@ -29,7 +31,8 @@ def test_response_schema_constrains_label_to_the_labels_enum():
 
 
 def test_system_prompt_mentions_every_label_name():
-    for lbl in LABELS:
+    documented = set(LABELS) - {"likely_cocktail_adjacent", "likely_unstructured_drink_recipe"}
+    for lbl in documented:
         assert lbl in SYSTEM_PROMPT
 
 

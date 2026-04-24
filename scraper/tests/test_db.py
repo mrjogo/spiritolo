@@ -405,6 +405,68 @@ def test_mark_extracted_clears_extract_error(tmp_db):
     db.close()
 
 
+def test_schema_has_disabled_reason_column(tmp_db):
+    db = Database(tmp_db)
+    columns = [r[1] for r in db.conn.execute("PRAGMA table_info(pages)").fetchall()]
+    assert "disabled_reason" in columns
+    db.close()
+
+
+def test_get_pending_excludes_disabled(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipe/1")
+    db.add_url("testsite", "https://example.com/recipe/2")
+    db.conn.execute(
+        "UPDATE pages SET disabled_reason = ? WHERE url = ?",
+        ("canonical host mismatch", "https://example.com/recipe/1"),
+    )
+    db.conn.commit()
+    pending = db.get_pending()
+    assert len(pending) == 1
+    assert pending[0]["url"] == "https://example.com/recipe/2"
+    db.close()
+
+
+def test_migrate_adds_disabled_reason_to_existing_db(tmp_db):
+    """An existing DB that predates the disabled_reason column should be migrated
+    in place on Database() init — verifies _migrate() runs ALTER TABLE."""
+    import sqlite3
+
+    conn = sqlite3.connect(tmp_db)
+    conn.execute(
+        """
+        CREATE TABLE pages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site TEXT NOT NULL,
+            url TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'pending',
+            content_type TEXT,
+            sitemap_source TEXT,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            discovered_at TEXT NOT NULL,
+            fetched_at TEXT,
+            error TEXT,
+            html_path TEXT
+        )
+        """
+    )
+    conn.execute(
+        "INSERT INTO pages (site, url, discovered_at) VALUES (?, ?, ?)",
+        ("testsite", "https://example.com/1", "2026-01-01T00:00:00+00:00"),
+    )
+    conn.commit()
+    conn.close()
+
+    db = Database(tmp_db)
+    columns = [r[1] for r in db.conn.execute("PRAGMA table_info(pages)").fetchall()]
+    assert "disabled_reason" in columns
+    row = db.conn.execute("SELECT disabled_reason FROM pages").fetchone()
+    assert row["disabled_reason"] is None  # existing rows default to NULL (enabled)
+    pending = db.get_pending()
+    assert len(pending) == 1  # and still fetchable
+    db.close()
+
+
 def test_db_safe_from_multiple_threads(tmp_db):
     """Regression: Database used to raise 'SQLite objects created in a thread
     can only be used in that same thread' when accessed from worker threads.

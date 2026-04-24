@@ -29,8 +29,11 @@ cd scraper && uv run python -m scraper.src.classify --site liquor
 # Prompt iteration — run against the checked-in eval set, no DB writes.
 cd scraper && uv run python -m scraper.src.classify --review
 
-# Ad-hoc spot-check after a run.
-cd scraper && uv run python -m scraper.src.classify --sample --site liquor --category likely_drink_recipe --n 10
+# Ad-hoc spot-check after a run. Filters are optional; combine as needed.
+cd scraper && uv run python -m scraper.src.classify --sample --n 20                                                # N random across all sites/labels
+cd scraper && uv run python -m scraper.src.classify --sample --site imbibe --n 20                                  # N random from one site
+cd scraper && uv run python -m scraper.src.classify --sample --site liquor --category likely_drink_recipe --n 10   # site + label
+cd scraper && uv run python -m scraper.src.classify --sample --urls "https://foo/bar" "https://baz/qux"            # look up specific URLs
 ```
 
 The prompt lives in `scraper/src/classify_prompt.py`. To iterate, edit the prompt, bump `PROMPT_VERSION`, and re-run `--review` until the eval set passes at an acceptable rate.

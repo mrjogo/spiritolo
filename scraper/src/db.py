@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS pages (
     error TEXT,
     html_path TEXT,
     extracted_at TEXT,
-    extract_error TEXT
+    extract_error TEXT,
+    disabled_reason TEXT
 );
 """
 
@@ -70,6 +71,13 @@ class Database:
             for idx in CREATE_CLASSIFICATIONS_INDEXES:
                 self.conn.execute(idx)
             self.conn.commit()
+            self._migrate()
+
+    def _migrate(self):
+        cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(pages)")}
+        if "disabled_reason" not in cols:
+            self.conn.execute("ALTER TABLE pages ADD COLUMN disabled_reason TEXT")
+            self.conn.commit()
 
     def close(self):
         with self._lock:
@@ -99,7 +107,7 @@ class Database:
             return cursor.rowcount
 
     def get_pending(self, site: str | None = None, limit: int | None = None, content_type: str | None = None) -> list[dict]:
-        query = "SELECT * FROM pages WHERE status = 'pending'"
+        query = "SELECT * FROM pages WHERE status = 'pending' AND disabled_reason IS NULL"
         params: list = []
         if site:
             query += " AND site = ?"
@@ -115,11 +123,12 @@ class Database:
             rows = self.conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
 
-    def mark_blocked(self, url: str, reason: str):
+    def mark_blocked(self, url: str, reason: str, html_path: str | None = None):
+        now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             self.conn.execute(
-                "UPDATE pages SET status = 'blocked', error = ? WHERE url = ?",
-                (reason, url),
+                "UPDATE pages SET status = 'blocked', error = ?, html_path = ?, fetched_at = ? WHERE url = ?",
+                (reason, html_path, now, url),
             )
             self.conn.commit()
 
@@ -281,28 +290,58 @@ class Database:
             row = self.conn.execute(query, params).fetchone()
         return row[0]
 
-    def sample_classifications(self, site: str, label: str, n: int = 10) -> list[dict]:
-        """Return n random (url, label, raw_response) rows for a (site, label) pair.
+    def sample_classifications(
+        self, site: str | None = None, label: str | None = None, n: int = 10
+    ) -> list[dict]:
+        """Return n random (site, url, label, raw_response) rows, optionally filtered
+        by site and/or label.
 
         Returns the MOST RECENT classification per page, so re-classifications don't
         produce duplicates in the sample.
         """
+        query = [
+            "SELECT p.site, p.url, c.label, c.raw_response, c.created_at",
+            "FROM classifications c JOIN pages p ON p.id = c.page_id",
+            "WHERE c.id = (SELECT MAX(id) FROM classifications WHERE page_id = c.page_id)",
+        ]
+        params: list = []
+        if site:
+            query.append("AND p.site = ?")
+            params.append(site)
+        if label:
+            query.append("AND c.label = ?")
+            params.append(label)
+        query.append("ORDER BY RANDOM() LIMIT ?")
+        params.append(n)
+        with self._lock:
+            rows = self.conn.execute(" ".join(query), params).fetchall()
+        return [dict(r) for r in rows]
+
+    def get_classifications_for_urls(self, urls: list[str]) -> list[dict]:
+        """Look up the most-recent classification for each URL. URLs not present
+        in the DB (or present but never classified) are returned with label=None
+        so callers can report 'not found' distinctly from 'has a label'."""
+        if not urls:
+            return []
+        placeholders = ",".join("?" for _ in urls)
         with self._lock:
             rows = self.conn.execute(
-                """
-                SELECT p.url, c.label, c.raw_response, c.created_at
-                FROM classifications c
-                JOIN pages p ON p.id = c.page_id
-                WHERE p.site = ? AND c.label = ?
-                  AND c.id = (
-                      SELECT MAX(id) FROM classifications WHERE page_id = c.page_id
-                  )
-                ORDER BY RANDOM()
-                LIMIT ?
+                f"""
+                SELECT p.site, p.url, c.label, c.raw_response, c.created_at
+                FROM pages p
+                LEFT JOIN classifications c
+                  ON c.page_id = p.id
+                 AND c.id = (SELECT MAX(id) FROM classifications WHERE page_id = p.id)
+                WHERE p.url IN ({placeholders})
                 """,
-                (site, label, n),
+                urls,
             ).fetchall()
-        return [dict(r) for r in rows]
+        found = {r["url"]: dict(r) for r in rows}
+        # Preserve input order; synthesize rows for URLs not in DB at all.
+        return [
+            found.get(u, {"site": None, "url": u, "label": None, "raw_response": None, "created_at": None})
+            for u in urls
+        ]
 
     def get_by_content_type(self, content_type: str, site: str | None = None, limit: int | None = None) -> list[dict]:
         query = "SELECT * FROM pages WHERE content_type = ?"

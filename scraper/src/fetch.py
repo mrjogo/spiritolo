@@ -125,14 +125,14 @@ def fetch_pages(
             return
 
         result = validate(html, url=url)
+        filename = url_to_filename(url)
+        rel_path = save_html(html_dir, page_site, filename, html)
         if result.status == "blocked":
-            db.mark_blocked(url, result.reason or "blocked")
+            db.mark_blocked(url, result.reason or "blocked", html_path=rel_path)
             with state_lock:
                 results["blocked"] += 1
             print(f"  BLOCKED: {result.reason}")
         else:
-            filename = url_to_filename(url)
-            rel_path = save_html(html_dir, page_site, filename, html)
             db.mark_content(url, result.status, result.reason or result.status, html_path=rel_path)
             with state_lock:
                 results[result.status] = results.get(result.status, 0) + 1

@@ -27,10 +27,11 @@ class ScraperAPIClient:
                 "No API key provided. Pass api_key or set SCRAPERAPI_KEY environment variable."
             )
 
-    def fetch(self, url: str, render: bool = False) -> str:
+    def fetch(self, url: str, render: bool = False, country_code: str = "us") -> str:
         params = {
             "api_key": self.api_key,
             "url": url,
+            "country_code": country_code,
         }
         if render:
             params["render"] = "true"

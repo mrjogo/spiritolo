@@ -113,9 +113,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--review", action="store_true",
                    help="Run the prompt against the checked-in eval set instead of the DB.")
     p.add_argument("--sample", action="store_true",
-                   help="Print N random (url, label, raw_response) rows for --site --category.")
-    p.add_argument("--category", help="For --sample: which label to sample from.")
+                   help="Print N random (site, url, label, raw) rows. Optionally filter "
+                        "with --site and/or --category, or look up specific URLs with --urls.")
+    p.add_argument("--category", help="For --sample: filter to this label.")
     p.add_argument("--n", type=int, default=10, help="For --sample: number of rows (default 10).")
+    p.add_argument("--urls", nargs="+",
+                   help="For --sample: look up these specific URLs instead of sampling. "
+                        "Overrides --site/--category/--n.")
     return p
 
 
@@ -284,24 +288,47 @@ async def run_review(
     return 0 if correct == total else 1
 
 
-def run_sample(db_path: str | Path, site: str, category: str, n: int = 10) -> int:
-    if not site or not category:
-        print("--sample requires both --site and --category", file=sys.stderr)
-        return 2
+def run_sample(
+    db_path: str | Path,
+    site: str | None = None,
+    category: str | None = None,
+    n: int = 10,
+    urls: list[str] | None = None,
+) -> int:
     db = Database(db_path)
-    rows = db.sample_classifications(site=site, label=category, n=n)
-    db.close()
+    try:
+        if urls:
+            rows = db.get_classifications_for_urls(urls)
+        else:
+            rows = db.sample_classifications(site=site, label=category, n=n)
+    finally:
+        db.close()
     if not rows:
-        print(f"No classifications found for site={site} category={category}")
+        scope = []
+        if site:
+            scope.append(f"site={site}")
+        if category:
+            scope.append(f"category={category}")
+        scope_str = " ".join(scope) if scope else "any"
+        print(f"No classifications found ({scope_str})")
         return 0
     for r in rows:
-        print(f"{r['url']}")
-        print(f"    raw: {r['raw_response']}")
+        site_col = r.get("site") or "(not in DB)"
+        label_col = r.get("label") or "(unclassified)"
+        print(f"{site_col:<14} {label_col:<22} {r['url']}")
+        if r.get("raw_response"):
+            print(f"    raw: {r['raw_response']}")
     return 0
 
 
 def _run_sample(args: argparse.Namespace) -> int:
-    return run_sample(db_path=args.db, site=args.site, category=args.category, n=args.n)
+    return run_sample(
+        db_path=args.db,
+        site=args.site,
+        category=args.category,
+        n=args.n,
+        urls=args.urls,
+    )
 
 
 async def _run_review(args: argparse.Namespace) -> int:
