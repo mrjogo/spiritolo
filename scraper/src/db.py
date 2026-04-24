@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS pages (
     fetched_at TEXT,
     error TEXT,
     html_path TEXT,
+    extracted_at TEXT,
+    extract_error TEXT,
     disabled_reason TEXT
 );
 """
@@ -57,6 +59,13 @@ class Database:
             self.conn.execute(CREATE_TABLE)
             for idx in CREATE_INDEXES:
                 self.conn.execute(idx)
+            self.conn.commit()
+            # Idempotent column adds for existing DBs (SQLite has no ADD COLUMN IF NOT EXISTS).
+            existing_cols = {row[1] for row in self.conn.execute("PRAGMA table_info(pages)").fetchall()}
+            if "extracted_at" not in existing_cols:
+                self.conn.execute("ALTER TABLE pages ADD COLUMN extracted_at TEXT")
+            if "extract_error" not in existing_cols:
+                self.conn.execute("ALTER TABLE pages ADD COLUMN extract_error TEXT")
             self.conn.commit()
             self.conn.execute(CREATE_CLASSIFICATIONS_TABLE)
             for idx in CREATE_CLASSIFICATIONS_INDEXES:
@@ -226,6 +235,64 @@ class Database:
         with self._lock:
             rows = self.conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
+
+    def get_unextracted(self, site: str | None = None, limit: int | None = None) -> list[dict]:
+        """Work queue for the extractor: drink-recipe pages that have fetched HTML but haven't been extracted or errored.
+
+        Ordered by id so iteration is deterministic and resumable across runs.
+        """
+        query = (
+            "SELECT id, site, url, html_path, fetched_at FROM pages "
+            "WHERE content_type = 'likely_drink_recipe' "
+            "AND html_path IS NOT NULL "
+            "AND extracted_at IS NULL "
+            "AND extract_error IS NULL"
+        )
+        params: list = []
+        if site:
+            query += " AND site = ?"
+            params.append(site)
+        query += " ORDER BY id"
+        if limit:
+            query += " LIMIT ?"
+            params.append(limit)
+        with self._lock:
+            rows = self.conn.execute(query, params).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_extracted(self, url: str):
+        """Mark a page as successfully extracted. Clears any prior extract_error."""
+        now = datetime.now(timezone.utc).isoformat()
+        with self._lock:
+            self.conn.execute(
+                "UPDATE pages SET extracted_at = ?, extract_error = NULL WHERE url = ?",
+                (now, url),
+            )
+            self.conn.commit()
+
+    def mark_extract_error(self, url: str, reason: str):
+        """Mark a page as failed to extract. Leaves extracted_at NULL."""
+        with self._lock:
+            self.conn.execute(
+                "UPDATE pages SET extract_error = ? WHERE url = ?",
+                (reason, url),
+            )
+            self.conn.commit()
+
+    def reset_extract_state(self, site: str | None = None) -> int:
+        """Clear extracted_at and extract_error on all drink-recipe rows, optionally scoped to a site. Returns row count."""
+        query = (
+            "UPDATE pages SET extracted_at = NULL, extract_error = NULL "
+            "WHERE content_type = 'likely_drink_recipe'"
+        )
+        params: list = []
+        if site:
+            query += " AND site = ?"
+            params.append(site)
+        with self._lock:
+            cursor = self.conn.execute(query, params)
+            self.conn.commit()
+            return cursor.rowcount
 
     def count_unclassified(self, site: str | None = None) -> int:
         """Count of rows with `content_type IS NULL`, optionally scoped to a site."""
