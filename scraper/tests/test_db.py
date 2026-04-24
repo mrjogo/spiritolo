@@ -396,10 +396,19 @@ def test_get_classify_url_for_urls_returns_label_or_none(tmp_db):
     db.close()
 
 
+def _record_extract(db, url, outcome="extracted", error=None):
+    page_id = db.conn.execute("SELECT id FROM pages WHERE url = ?", (url,)).fetchone()["id"]
+    db.record_extract(
+        page_id=page_id, run_id=None, outcome=outcome,
+        error=error, extractor_version="v1",
+    )
+
+
 def test_get_unextracted_returns_drink_recipe_buckets_with_html(tmp_db):
     """Extractor queue covers both `likely_drink_recipe` (LLM-classified) and
-    `confirmed_drink` (validate.py Schema.org Recipe + drink terms). Filters out
-    rows without html_path, rows already extracted, and food/other buckets."""
+    `confirmed_drink` (validate-confirmed Schema.org Recipe + drink terms).
+    Filters out rows without html_path, rows with an existing extract_runs
+    row, and food/other buckets."""
     from scraper.src.db import Database
     db = Database(tmp_db)
     db.add_urls_batch(
@@ -409,7 +418,7 @@ def test_get_unextracted_returns_drink_recipe_buckets_with_html(tmp_db):
             "https://x/e", "https://x/f", "https://x/g",
         ],
     )
-    # a: likely_drink_recipe + fetched
+    # a: likely_drink_recipe + fetched → queued
     db.set_content_type("https://x/a", "likely_drink_recipe")
     db.mark_content("https://x/a", "valid", html_path="difs/a.html")
     # b: likely_drink_recipe but no html_path
@@ -417,18 +426,18 @@ def test_get_unextracted_returns_drink_recipe_buckets_with_html(tmp_db):
     # c: fetched but not a drink recipe
     db.set_content_type("https://x/c", "likely_food_recipe")
     db.mark_content("https://x/c", "valid", html_path="difs/c.html")
-    # d: likely_drink_recipe, fetched, already extracted
+    # d: likely_drink_recipe, fetched, already extracted → excluded
     db.set_content_type("https://x/d", "likely_drink_recipe")
     db.mark_content("https://x/d", "valid", html_path="difs/d.html")
-    db.mark_extracted("https://x/d")
-    # e: confirmed_drink + fetched → should be queued
+    _record_extract(db, "https://x/d")
+    # e: confirmed_drink + fetched → queued
     db.set_content_type("https://x/e", "confirmed_drink")
     db.mark_content("https://x/e", "Recipe", html_path="difs/e.html")
     # f: confirmed_drink, already extracted → excluded
     db.set_content_type("https://x/f", "confirmed_drink")
     db.mark_content("https://x/f", "Recipe", html_path="difs/f.html")
-    db.mark_extracted("https://x/f")
-    # g: confirmed_food (even with html) → excluded
+    _record_extract(db, "https://x/f")
+    # g: confirmed_food → excluded regardless of extract_runs state
     db.set_content_type("https://x/g", "confirmed_food")
     db.mark_content("https://x/g", "Recipe", html_path="difs/g.html")
 
@@ -438,10 +447,34 @@ def test_get_unextracted_returns_drink_recipe_buckets_with_html(tmp_db):
     db.close()
 
 
-def test_reset_extract_state_covers_drink_recipe_buckets(tmp_db):
-    """reset_extract_state must clear extracted_at/extract_error on both
-    likely_drink_recipe and confirmed_drink — same scope as the extractor queue.
-    Must NOT touch food/other buckets."""
+def test_record_extract_upsert_latest_only(tmp_db):
+    """Re-recording overwrites the prior extract_runs row for the same page
+    (latest-only)."""
+    from scraper.src.db import Database
+    db = Database(tmp_db)
+    db.add_url("difs", "https://x/a")
+    page_id = db.conn.execute("SELECT id FROM pages").fetchone()["id"]
+
+    db.record_extract(
+        page_id=page_id, run_id=None, outcome="no_recipe",
+        error=None, extractor_version="v1",
+    )
+    db.record_extract(
+        page_id=page_id, run_id=None, outcome="extracted",
+        error=None, extractor_version="v2",
+    )
+
+    rows = db.conn.execute("SELECT * FROM extract_runs").fetchall()
+    assert len(rows) == 1
+    assert rows[0]["outcome"] == "extracted"
+    assert rows[0]["extractor_version"] == "v2"
+    db.close()
+
+
+def test_clear_extract_runs_covers_drink_buckets(tmp_db):
+    """clear_extract_runs deletes extract_runs rows on both likely_drink_recipe
+    and confirmed_drink pages — same scope as the extractor queue. Must NOT
+    touch food/other buckets."""
     from scraper.src.db import Database
     db = Database(tmp_db)
     db.add_urls_batch("difs", ["https://x/a", "https://x/b", "https://x/c"])
@@ -451,29 +484,26 @@ def test_reset_extract_state_covers_drink_recipe_buckets(tmp_db):
     db.mark_content("https://x/a", "valid", html_path="difs/a.html")
     db.mark_content("https://x/b", "Recipe", html_path="difs/b.html")
     db.mark_content("https://x/c", "Recipe", html_path="difs/c.html")
-    db.mark_extracted("https://x/a")
-    db.mark_extract_error("https://x/b", "no_recipe")
-    db.mark_extracted("https://x/c")
+    _record_extract(db, "https://x/a")
+    _record_extract(db, "https://x/b", outcome="no_recipe")
+    _record_extract(db, "https://x/c")
 
-    n = db.reset_extract_state()
+    n = db.clear_extract_runs()
     assert n == 2  # only the two drink-bucket rows
 
-    import sqlite3
-    conn = sqlite3.connect(tmp_db)
-    conn.row_factory = sqlite3.Row
-    rows = {r["url"]: r for r in conn.execute(
-        "SELECT url, extracted_at, extract_error FROM pages"
-    ).fetchall()}
-    assert rows["https://x/a"]["extracted_at"] is None
-    assert rows["https://x/a"]["extract_error"] is None
-    assert rows["https://x/b"]["extracted_at"] is None
-    assert rows["https://x/b"]["extract_error"] is None
-    # confirmed_food row untouched
-    assert rows["https://x/c"]["extracted_at"] is not None
+    rows = {
+        r["url"]: r["page_id"] for r in db.conn.execute(
+            "SELECT p.url, e.page_id FROM pages p "
+            "LEFT JOIN extract_runs e ON e.page_id = p.id"
+        )
+    }
+    assert rows["https://x/a"] is None
+    assert rows["https://x/b"] is None
+    assert rows["https://x/c"] is not None  # confirmed_food row untouched
     db.close()
 
 
-def test_reset_extract_state_scoped_by_site(tmp_db):
+def test_clear_extract_runs_scoped_by_site(tmp_db):
     from scraper.src.db import Database
     db = Database(tmp_db)
     db.add_url("site_a", "https://a/1")
@@ -482,21 +512,22 @@ def test_reset_extract_state_scoped_by_site(tmp_db):
     db.set_content_type("https://b/1", "confirmed_drink")
     db.mark_content("https://a/1", "Recipe", html_path="a/1.html")
     db.mark_content("https://b/1", "Recipe", html_path="b/1.html")
-    db.mark_extracted("https://a/1")
-    db.mark_extracted("https://b/1")
+    _record_extract(db, "https://a/1")
+    _record_extract(db, "https://b/1")
 
-    n = db.reset_extract_state(site="site_a")
+    n = db.clear_extract_runs(site="site_a")
     assert n == 1
-    import sqlite3
-    conn = sqlite3.connect(tmp_db)
-    conn.row_factory = sqlite3.Row
-    rows = {r["url"]: r for r in conn.execute("SELECT url, extracted_at FROM pages").fetchall()}
-    assert rows["https://a/1"]["extracted_at"] is None
-    assert rows["https://b/1"]["extracted_at"] is not None
+    rows = {r["url"]: r["page_id"] for r in db.conn.execute(
+        "SELECT p.url, e.page_id FROM pages p LEFT JOIN extract_runs e ON e.page_id = p.id"
+    )}
+    assert rows["https://a/1"] is None
+    assert rows["https://b/1"] is not None
     db.close()
 
 
-def test_mark_extract_error_blocks_reprocessing(tmp_db):
+def test_record_extract_blocks_reprocessing(tmp_db):
+    """Any extract_runs row (extracted, errored, or missing) removes the
+    page from the extract work queue until the row is deleted."""
     from scraper.src.db import Database
     db = Database(tmp_db)
     db.add_urls_batch("difs", ["https://x/a"])
@@ -504,26 +535,8 @@ def test_mark_extract_error_blocks_reprocessing(tmp_db):
     db.mark_content("https://x/a", "valid", html_path="difs/a.html")
 
     assert len(db.get_unextracted()) == 1
-    db.mark_extract_error("https://x/a", "no_jsonld_recipe")
+    _record_extract(db, "https://x/a", outcome="no_recipe")
     assert db.get_unextracted() == []
-    db.close()
-
-
-def test_mark_extracted_clears_extract_error(tmp_db):
-    from scraper.src.db import Database
-    db = Database(tmp_db)
-    db.add_urls_batch("difs", ["https://x/a"])
-    db.set_content_type("https://x/a", "likely_drink_recipe")
-    db.mark_content("https://x/a", "valid", html_path="difs/a.html")
-    db.mark_extract_error("https://x/a", "no_jsonld_recipe")
-
-    db.mark_extracted("https://x/a")
-    # extract_error should be cleared on success
-    import sqlite3
-    conn = sqlite3.connect(tmp_db)
-    row = conn.execute("select extracted_at, extract_error from pages where url = ?", ("https://x/a",)).fetchone()
-    assert row[0] is not None
-    assert row[1] is None
     db.close()
 
 

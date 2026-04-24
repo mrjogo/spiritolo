@@ -19,8 +19,6 @@ CREATE TABLE IF NOT EXISTS pages (
     fetched_at TEXT,
     fetch_error TEXT,
     html_path TEXT,
-    extracted_at TEXT,
-    extract_error TEXT,
     disabled_reason TEXT
 );
 """
@@ -156,6 +154,50 @@ class Database:
             self.conn.commit()
         # Legacy `classifications` table was superseded by `classify_url_runs`.
         self.conn.execute("DROP TABLE IF EXISTS classifications")
+        self.conn.commit()
+        self._migrate_extract_columns(cols)
+
+    def _migrate_extract_columns(self, cols: set[str]) -> None:
+        """One-shot: backfill extract_runs from pages.extracted_at /
+        extract_error, then drop those columns. Preserves "we already
+        extracted this" signal so re-running extract after migration
+        doesn't redo every Supabase UPSERT."""
+        if "extracted_at" not in cols and "extract_error" not in cols:
+            return
+        # Successful extractions.
+        if "extracted_at" in cols:
+            self.conn.execute(
+                """
+                INSERT OR IGNORE INTO extract_runs
+                    (page_id, run_id, outcome, error, extractor_version, evaluated_at)
+                SELECT id, NULL, 'extracted', NULL, 'legacy', extracted_at
+                FROM pages WHERE extracted_at IS NOT NULL
+                """
+            )
+        # Errored extractions — the legacy extract_error text was one of a few
+        # known sentinels. Map them so future re-runs can filter cleanly.
+        if "extract_error" in cols:
+            self.conn.execute(
+                """
+                INSERT OR IGNORE INTO extract_runs
+                    (page_id, run_id, outcome, error, extractor_version, evaluated_at)
+                SELECT id, NULL,
+                       CASE extract_error
+                           WHEN 'no_recipe' THEN 'no_recipe'
+                           WHEN 'html_file_missing' THEN 'html_missing'
+                           ELSE 'legacy_error'
+                       END,
+                       CASE WHEN extract_error IN ('no_recipe', 'html_file_missing')
+                            THEN NULL ELSE extract_error END,
+                       'legacy',
+                       ''
+                FROM pages WHERE extract_error IS NOT NULL
+                """
+            )
+        if "extracted_at" in cols:
+            self.conn.execute("ALTER TABLE pages DROP COLUMN extracted_at")
+        if "extract_error" in cols:
+            self.conn.execute("ALTER TABLE pages DROP COLUMN extract_error")
         self.conn.commit()
 
     def close(self):
@@ -348,26 +390,27 @@ class Database:
     EXTRACT_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink")
 
     def get_unextracted(self, site: str | None = None, limit: int | None = None) -> list[dict]:
-        """Work queue for the extractor: drink-recipe pages that have fetched HTML but haven't been extracted or errored.
+        """Work queue for the extractor: drink-recipe pages with cached HTML
+        that have no extract_runs row yet.
 
-        Covers both `likely_drink_recipe` (LLM-classified from URL, JSON-LD not
-        yet verified) and `confirmed_drink` (validate.py confirmed Schema.org
-        Recipe + drink terms at fetch time). Ordered by id so iteration is
-        deterministic and resumable across runs.
+        Covers both `likely_drink_recipe` (LLM-classified) and
+        `confirmed_drink` (validate confirmed Schema.org Recipe + drink
+        terms). To retry errored rows, DELETE their extract_runs row first
+        (or use --reset).
         """
         placeholders = ",".join("?" for _ in self.EXTRACT_CONTENT_TYPES)
         query = (
-            "SELECT id, site, url, html_path, fetched_at FROM pages "
-            f"WHERE content_type IN ({placeholders}) "
-            "AND html_path IS NOT NULL "
-            "AND extracted_at IS NULL "
-            "AND extract_error IS NULL"
+            "SELECT p.id, p.site, p.url, p.html_path, p.fetched_at FROM pages p "
+            "LEFT JOIN extract_runs e ON e.page_id = p.id "
+            f"WHERE p.content_type IN ({placeholders}) "
+            "AND p.html_path IS NOT NULL "
+            "AND e.page_id IS NULL"
         )
         params: list = list(self.EXTRACT_CONTENT_TYPES)
         if site:
-            query += " AND site = ?"
+            query += " AND p.site = ?"
             params.append(site)
-        query += " ORDER BY id"
+        query += " ORDER BY p.id"
         if limit:
             query += " LIMIT ?"
             params.append(limit)
@@ -375,38 +418,50 @@ class Database:
             rows = self.conn.execute(query, params).fetchall()
         return [dict(r) for r in rows]
 
-    def mark_extracted(self, url: str):
-        """Mark a page as successfully extracted. Clears any prior extract_error."""
+    def record_extract(
+        self,
+        *,
+        page_id: int,
+        run_id: int | None,
+        outcome: str,
+        error: str | None,
+        extractor_version: str,
+    ) -> None:
+        """UPSERT the extract_runs row for this page. Latest-only; re-runs
+        overwrite. `outcome` is 'extracted' | 'no_recipe' | 'html_missing'."""
         now = datetime.now(timezone.utc).isoformat()
         with self._lock:
             self.conn.execute(
-                "UPDATE pages SET extracted_at = ?, extract_error = NULL WHERE url = ?",
-                (now, url),
+                """
+                INSERT INTO extract_runs
+                    (page_id, run_id, outcome, error, extractor_version, evaluated_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(page_id) DO UPDATE SET
+                    run_id = excluded.run_id,
+                    outcome = excluded.outcome,
+                    error = excluded.error,
+                    extractor_version = excluded.extractor_version,
+                    evaluated_at = excluded.evaluated_at
+                """,
+                (page_id, run_id, outcome, error, extractor_version, now),
             )
             self.conn.commit()
 
-    def mark_extract_error(self, url: str, reason: str):
-        """Mark a page as failed to extract. Leaves extracted_at NULL."""
-        with self._lock:
-            self.conn.execute(
-                "UPDATE pages SET extract_error = ? WHERE url = ?",
-                (reason, url),
-            )
-            self.conn.commit()
-
-    def reset_extract_state(self, site: str | None = None) -> int:
-        """Clear extracted_at and extract_error on all drink-recipe rows,
-        optionally scoped to a site. Covers the same content_type set as
-        get_unextracted. Returns row count."""
+    def clear_extract_runs(self, site: str | None = None) -> int:
+        """Delete rows from extract_runs (scoped by drink-recipe content types
+        — matching the extractor's work queue — and optionally by site).
+        Returns deleted row count. Intended as the --reset equivalent for the
+        extract CLI."""
         placeholders = ",".join("?" for _ in self.EXTRACT_CONTENT_TYPES)
         query = (
-            "UPDATE pages SET extracted_at = NULL, extract_error = NULL "
-            f"WHERE content_type IN ({placeholders})"
+            f"DELETE FROM extract_runs WHERE page_id IN ("
+            f"  SELECT id FROM pages WHERE content_type IN ({placeholders})"
         )
         params: list = list(self.EXTRACT_CONTENT_TYPES)
         if site:
             query += " AND site = ?"
             params.append(site)
+        query += ")"
         with self._lock:
             cursor = self.conn.execute(query, params)
             self.conn.commit()

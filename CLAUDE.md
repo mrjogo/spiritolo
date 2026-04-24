@@ -40,7 +40,7 @@ The prompt lives in `scraper/src/classify_prompt.py`. To iterate, edit the promp
 
 ## JSON-LD Extractor
 
-The extractor lives at `scraper/src/extract.py`. It reads pages where `content_type = 'likely_drink_recipe'` and `html_path IS NOT NULL` and `extracted_at IS NULL` and `extract_error IS NULL`, parses the embedded Schema.org `Recipe` JSON-LD, and writes it to the local Supabase `recipes` table (website-facing columns + full `jsonld` blob).
+The extractor lives at `scraper/src/extract.py`. It reads drink-recipe pages (`content_type IN ('likely_drink_recipe', 'confirmed_drink')`) with cached HTML that have no `extract_runs` row yet, parses the embedded Schema.org `Recipe` JSON-LD, writes it to the local Supabase `recipes` table (website-facing columns + full `jsonld` blob), and UPSERTs an `extract_runs` row recording the outcome (`extracted` / `no_recipe` / `html_missing`).
 
 **Supabase runs on the Mac host, not in the devcontainer.** DooD doesn't play well with `supabase start`'s bind-mount paths and network probes. The devcontainer connects to the host's Supabase via `host.docker.internal`.
 
@@ -78,7 +78,7 @@ cd scraper && uv run python -m scraper.src.extract --site diffordsguide
 cd scraper && uv run python -m scraper.src.extract --limit 10
 ```
 
-**Re-extraction:** clear `extracted_at` (and optionally `extract_error`) on the rows you want to retry (either via SQL or `--reset`); UPSERT on `source_url` keeps re-runs idempotent.
+**Re-extraction:** delete the relevant `extract_runs` rows (via `--reset`, the prune CLI, or raw SQL); those pages land back on the extract work queue. Supabase UPSERTs on `source_url` so re-runs are idempotent.
 
 **Local Supabase Studio:** http://localhost:54323 (on the Mac host).
 

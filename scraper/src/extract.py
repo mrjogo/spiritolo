@@ -12,6 +12,10 @@ from scraper.src.structured import find_recipe
 from scraper.src.summary import print_summary
 from scraper.src.supabase_client import SupabaseClient
 
+EXTRACTOR_VERSION = "v1"
+"""Bumped when the extractor's JSON-LD parsing or field derivation changes.
+Recorded on every extract_runs row."""
+
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
@@ -71,9 +75,12 @@ def extract_pages(
     limit: int | None = None,
 ) -> dict[str, Counter]:
     """Process the extractor work queue. Returns per-site Counter keyed by
-    category ('extracted' / 'no_recipe' / 'missing') — same shape as the
-    validate CLI, so scraper.src.summary.print_summary renders both
-    uniformly."""
+    outcome ('extracted' / 'no_recipe' / 'html_missing') — same shape as the
+    validate CLI, so scraper.src.summary.print_summary renders both uniformly.
+
+    Opens one pipeline_runs row (stage='extract') per invocation, writes an
+    extract_runs row per processed page (UPSERT, latest-only), closes the
+    run on return."""
     rows = db.get_unextracted(site=site, limit=limit)
     total = len(rows)
     if total == 0:
@@ -81,6 +88,10 @@ def extract_pages(
         return {}
 
     log.info("extracting %d pages", total)
+    run_id = db.start_run(
+        stage="extract", site=site,
+        args={"limit": limit, "extractor_version": EXTRACTOR_VERSION},
+    )
     changes: dict[str, Counter] = {}
     progress = make_progress(total=total)
 
@@ -92,14 +103,22 @@ def extract_pages(
         try:
             html = html_path.read_text(encoding="utf-8")
         except FileNotFoundError:
-            db.mark_extract_error(row["url"], "html_file_missing")
-            bump(row["site"], "missing")
+            db.record_extract(
+                page_id=row["id"], run_id=run_id,
+                outcome="html_missing", error=None,
+                extractor_version=EXTRACTOR_VERSION,
+            )
+            bump(row["site"], "html_missing")
             progress(idx)
             continue
 
         recipe = find_recipe(html)
         if recipe is None:
-            db.mark_extract_error(row["url"], "no_recipe")
+            db.record_extract(
+                page_id=row["id"], run_id=run_id,
+                outcome="no_recipe", error=None,
+                extractor_version=EXTRACTOR_VERSION,
+            )
             bump(row["site"], "no_recipe")
         else:
             sb.upsert_recipe(
@@ -111,11 +130,17 @@ def extract_pages(
                 jsonld=recipe,
                 fetched_at=row["fetched_at"],
             )
-            db.mark_extracted(row["url"])
+            db.record_extract(
+                page_id=row["id"], run_id=run_id,
+                outcome="extracted", error=None,
+                extractor_version=EXTRACTOR_VERSION,
+            )
             bump(row["site"], "extracted")
 
         progress(idx)
 
+    summary = {s: dict(c) for s, c in changes.items()}
+    db.finish_run(run_id, summary={"per_site": summary})
     return changes
 
 
@@ -131,8 +156,8 @@ def main() -> int:
     parser.add_argument("--html-dir", default=str(DEFAULT_HTML_DIR))
     parser.add_argument(
         "--reset", action="store_true",
-        help="Clear extracted_at and extract_error on drink-recipe rows before "
-             "extracting (scoped by --site if given).",
+        help="Delete extract_runs rows for drink-recipe pages before "
+             "extracting (scoped by --site if given), forcing re-extraction.",
     )
     parser.add_argument(
         "--yes", action="store_true",
@@ -145,19 +170,16 @@ def main() -> int:
     sb = SupabaseClient()
     try:
         if args.reset:
-            # Count what the reset would affect so confirm_reset can show it.
-            rows = db.get_unextracted(site=args.site)
-            # Actually we want "how many rows CURRENTLY have extracted_at or
-            # extract_error set and would be cleared". Query directly.
             placeholders = ",".join("?" for _ in db.EXTRACT_CONTENT_TYPES)
             q = (
-                f"SELECT COUNT(*) c FROM pages WHERE content_type IN ({placeholders}) "
-                "AND (extracted_at IS NOT NULL OR extract_error IS NOT NULL)"
+                f"SELECT COUNT(*) c FROM extract_runs WHERE page_id IN ("
+                f"  SELECT id FROM pages WHERE content_type IN ({placeholders})"
             )
             params: list = list(db.EXTRACT_CONTENT_TYPES)
             if args.site:
                 q += " AND site = ?"
                 params.append(args.site)
+            q += ")"
             already = db.conn.execute(q, params).fetchone()["c"]
             scope = f"site={args.site}" if args.site else "all sites"
             if not confirm_reset(
@@ -166,8 +188,8 @@ def main() -> int:
                 log.error("reset aborted")
                 return 1
             if already:
-                n = db.reset_extract_state(site=args.site)
-                log.info("reset extract state on %d rows", n)
+                n = db.clear_extract_runs(site=args.site)
+                log.info("cleared %d extract_runs rows", n)
 
         changes = extract_pages(
             db=db,

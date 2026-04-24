@@ -70,13 +70,13 @@ def test_extract_upsert_is_idempotent(seeded_scraper_db, isolated_supabase):
     db, html_dir = seeded_scraper_db
     extract_pages(db=db, sb=isolated_supabase, html_dir=html_dir)
 
-    # Force re-extraction of the one successful row.
-    import sqlite3
-    conn = sqlite3.connect(db.conn.execute("PRAGMA database_list").fetchone()[2])
-    conn.execute("UPDATE pages SET extracted_at = NULL WHERE url = ?", ("https://example.com/negroni",))
-    conn.commit()
-    conn.close()
+    # Force re-extraction of the one successful row by deleting its
+    # extract_runs row — the CLI's work queue picks it back up.
+    db.clear_extract_runs()
 
     changes = extract_pages(db=db, sb=isolated_supabase, html_dir=html_dir)
+    # Both rows get re-processed; Supabase UPSERT on source_url means the
+    # recipe count doesn't grow.
     assert changes["difs"]["extracted"] == 1
-    assert isolated_supabase.count_recipes() == 1  # still one, UPSERT on source_url
+    assert changes["difs"]["no_recipe"] == 1
+    assert isolated_supabase.count_recipes() == 1
