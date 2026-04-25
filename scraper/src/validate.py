@@ -33,7 +33,7 @@ from scraper.src.cli_common import (
 )
 from scraper.src.classify_drink import SCORER_VERSION, classify_drink_scored
 from scraper.src.db import Database
-from scraper.src.progress import make_progress
+from spiritolo_common.progress import make_progress
 from scraper.src.summary import print_summary
 from scraper.src.validation import VALIDATOR_VERSION, validate
 

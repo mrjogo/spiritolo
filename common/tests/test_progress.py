@@ -2,7 +2,7 @@
 
 import io
 
-from scraper.src.progress import PROGRESS_EVERY, format_eta, make_progress
+from spiritolo_common.progress import PROGRESS_EVERY, format_eta, make_progress
 
 
 def test_format_eta_seconds():

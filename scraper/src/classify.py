@@ -23,7 +23,7 @@ from scraper.src.cli_common import (
 )
 from scraper.src.db import Database
 from scraper.src.ollama_client import ClassificationResult, classify_url
-from scraper.src.progress import make_progress
+from spiritolo_common.progress import make_progress
 from scraper.src.summary import print_summary
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
