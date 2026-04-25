@@ -38,4 +38,16 @@ describe('buildSearchFilters', () => {
       'vermouth',
     ]);
   });
+
+  it('drops terms shorter than 3 characters', () => {
+    expect(buildSearchFilters('a gin').terms).toEqual(['gin']);
+  });
+
+  it('returns empty when every term is too short', () => {
+    expect(buildSearchFilters('a b cd')).toEqual({ terms: [], orFilters: [] });
+  });
+
+  it('keeps exactly-3-character terms', () => {
+    expect(buildSearchFilters('rye').terms).toEqual(['rye']);
+  });
 });
