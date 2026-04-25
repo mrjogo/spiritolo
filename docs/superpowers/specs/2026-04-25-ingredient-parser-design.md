@@ -92,9 +92,11 @@ Reality-check on 49,500 ingredient lines from the three sites loaded so far (dif
 | `Top up with <thing>` | 0.6% | Mostly diffordsguide |
 | Tail (garnish keyword, empty) | 0.2% | |
 
-Rule-based parsing comfortably handles the head and adds two-three site-specific rules to handle the tail. No "I have no idea what this string means" category appears; every weird bucket is itself patterned. Existing libraries (`ingreedypy`) likely cover the qty/unit/name extraction out of the box.
+Rule-based parsing comfortably handles the head and adds two-three site-specific rules to handle the tail. No "I have no idea what this string means" category appears; every weird bucket is itself patterned.
 
-LLM is rejected for v1: slower, costs, nondeterministic, harder to test. Rule output is deterministic, which makes the eval-set discipline tighter than the existing LLM stages.
+**Hand-rolled rules, no library dependency.** The leading Python option for ingredient parsing as of 2026 is `ingredient-parser-nlp` (strangetom/ingredient-parser, 147 stars, 26K downloads/month, actively maintained), but it is a trained sequence-labelling model rather than a rule-based parser. Sequence labellers do not naturally implement strict abstain — they emit labels for every token with some confidence. To match our precision-over-recall discipline you would threshold per-token confidence and treat low-confidence parses as unparseable. Possible but a different evaluation discipline. The cocktail-ingredient surface is simple enough (90% structurally regular per the reality check above) that there is no library worth its dependency cost in v1. Hand-rolled regex against a closed unit table is the right tool. ingredient-parser-nlp stays in the back pocket as a possible fallback for the unparseable bucket if v1's rate exceeds target.
+
+LLM is also rejected for v1: slower, costs, nondeterministic, harder to test. Rule output is deterministic, which makes the eval-set discipline tighter than the existing LLM stages.
 
 **Caveat.** Only 3 of 13 sites are loaded. Food-cooking sites (foodnetwork, bonappetit, foodandwine, etc.) have not extracted yet. From an HTML peek, foodandwine has at least one ugly pattern (occasional `Name: qty unit` reverse and rows where the ingredient list got concatenated into one string). We expect the clean percentage to dip a few points but not collapse — JSON-LD authors generally publish structured strings to satisfy Google.
 
@@ -248,6 +250,6 @@ Progress + summary lines match scraper format (`X/Y (Z%) rows/s ETA ...`, per-si
 
 - **Where does `PARSER_VERSION` and the canonical units table physically live in the new package?** Default: `ingredients/src/ingredients/parser.py` (`PARSER_VERSION`) and `ingredients/src/ingredients/units.py` (canonical units, count nouns).
 - **Does `parse_ingredients --reset` accept `--site`?** Default: yes, mirroring scraper convention. Filters AND together.
-- **`ingreedypy` vs. hand-rolled rules?** Default: try `ingreedypy` for the 90% qty_unit case, fall through to hand-rolled rules for site-specific quirks. Confirm at plan-time after a half-hour spike running the 49.5K-line sample through `ingreedypy` and measuring its abstain behavior.
+- **Library fallback for the unparseable bucket?** Default: none in v1. After a full-corpus pass measures the unparseable rate and shape, if the rate exceeds 3% target, evaluate `ingredient-parser-nlp` (the SOTA Python option) as a confidence-thresholded second pass — only on rows where rules abstained, and only accepting parses above a calibrated probability threshold. Decision deferred to a follow-up; v1 ships with rules only.
 - **One transaction per recipe vs. batch?** Default: batch with savepoints — one savepoint per recipe so one bad row doesn't roll back a thousand good ones.
 - **Migration ordering in plan-time.** Does plan-time tackle (1) workspace skeleton, (2) carve out `common`, (3) migrate scraper to depend on `common`, (4) build `ingredients` package, (5) ship parser, in that order? Default: yes. Each step is independently verifiable; scraper tests must stay green throughout.
