@@ -70,4 +70,25 @@ describe('buildSearchFilters', () => {
   it('applies min-length AFTER stripping punctuation', () => {
     expect(buildSearchFilters('!!!ab!!! gin').terms).toEqual(['gin']);
   });
+
+  it('escapes ILIKE % wildcard in user input', () => {
+    const r = buildSearchFilters('50%');
+    expect(r.terms).toEqual(['50%']);
+    expect(r.orFilters[0]).toContain('*50\\%*');
+  });
+
+  it('escapes ILIKE _ wildcard in user input', () => {
+    const r = buildSearchFilters('foo_bar');
+    expect(r.orFilters[0]).toContain('*foo\\_bar*');
+  });
+
+  it('escapes backslash in user input', () => {
+    const r = buildSearchFilters('foo\\bar');
+    expect(r.orFilters[0]).toContain('*foo\\\\bar*');
+  });
+
+  it('escapes literal asterisk so it does not act as a PostgREST wildcard', () => {
+    const r = buildSearchFilters('foo*bar');
+    expect(r.orFilters[0]).toContain('*foo\\*bar*');
+  });
 });
