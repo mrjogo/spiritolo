@@ -1,13 +1,22 @@
 import argparse
 import logging
-import time
+from collections import Counter
 from pathlib import Path
 
 from dotenv import load_dotenv
 
+from scraper.src.cli_common import (
+    add_reset_args, confirm_reset, describe_reset_scope,
+)
 from scraper.src.db import Database
+from scraper.src.progress import make_progress
 from scraper.src.structured import find_recipe
+from scraper.src.summary import print_summary
 from scraper.src.supabase_client import SupabaseClient
+
+EXTRACTOR_VERSION = "v1"
+"""Bumped when the extractor's JSON-LD parsing or field derivation changes.
+Recorded on every extract_runs row."""
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
@@ -66,33 +75,66 @@ def extract_pages(
     html_dir: Path,
     site: str | None = None,
     limit: int | None = None,
-) -> dict:
-    """Process the extractor work queue. Returns {'extracted': N, 'no_recipe': M, 'missing': K}."""
-    rows = db.get_unextracted(site=site, limit=limit)
+) -> dict[str, Counter]:
+    """Process the extractor work queue. Returns per-site Counter keyed by
+    outcome ('extracted' / 'no_recipe' / 'html_missing') — same shape as the
+    validate CLI, so scraper.src.summary.print_summary renders both uniformly.
+
+    Supabase is the source of truth for 'has this page been extracted' —
+    its `recipes` table can be wiped independently of scraper.db, and when
+    that happens we MUST re-extract. Local `extract_runs` remains useful as
+    the source of truth for known failures (`outcome != 'extracted'`) and
+    as audit metadata, but it never overrides Supabase for successes.
+
+    Opens one pipeline_runs row (stage='extract') per invocation, writes an
+    extract_runs row per processed page (UPSERT, latest-only), closes the
+    run on return."""
+    candidates = db.get_unextracted(site=site)
+    already_extracted = sb.get_extracted_source_urls(site=site)
+    rows = [r for r in candidates if r["url"] not in already_extracted]
+    if limit is not None:
+        rows = rows[:limit]
     total = len(rows)
     if total == 0:
         log.info("nothing to extract")
-        return {"extracted": 0, "no_recipe": 0, "missing": 0}
+        return {}
 
-    log.info("extracting %d pages", total)
-    extracted = 0
-    no_recipe = 0
-    missing = 0
-    started = time.monotonic()
+    log.info(
+        "extracting %d pages (%d candidates; %d already in Supabase)",
+        total, len(candidates), len(candidates) - len(rows),
+    )
+    run_id = db.start_run(
+        stage="extract", site=site,
+        args={"limit": limit, "extractor_version": EXTRACTOR_VERSION},
+    )
+    changes: dict[str, Counter] = {}
+    progress = make_progress(total=total)
+
+    def bump(site_name: str, category: str) -> None:
+        changes.setdefault(site_name, Counter())[category] += 1
 
     for idx, row in enumerate(rows, start=1):
         html_path = html_dir / row["html_path"]
         try:
             html = html_path.read_text(encoding="utf-8")
         except FileNotFoundError:
-            db.mark_extract_error(row["url"], "html_file_missing")
-            missing += 1
+            db.record_extract(
+                page_id=row["id"], run_id=run_id,
+                outcome="html_missing", error=None,
+                extractor_version=EXTRACTOR_VERSION,
+            )
+            bump(row["site"], "html_missing")
+            progress(idx)
             continue
 
         recipe = find_recipe(html)
         if recipe is None:
-            db.mark_extract_error(row["url"], "no_recipe")
-            no_recipe += 1
+            db.record_extract(
+                page_id=row["id"], run_id=run_id,
+                outcome="no_recipe", error=None,
+                extractor_version=EXTRACTOR_VERSION,
+            )
+            bump(row["site"], "no_recipe")
         else:
             sb.upsert_recipe(
                 source_url=row["url"],
@@ -103,50 +145,71 @@ def extract_pages(
                 jsonld=recipe,
                 fetched_at=row["fetched_at"],
             )
-            db.mark_extracted(row["url"])
-            extracted += 1
+            db.record_extract(
+                page_id=row["id"], run_id=run_id,
+                outcome="extracted", error=None,
+                extractor_version=EXTRACTOR_VERSION,
+            )
+            bump(row["site"], "extracted")
 
-        if idx % 25 == 0 or idx == total:
-            elapsed = time.monotonic() - started
-            rate = idx / elapsed if elapsed > 0 else 0.0
-            remaining = total - idx
-            eta = remaining / rate if rate > 0 else 0.0
-            log.info("progress %d/%d (%.1f rows/sec, ETA %.0fs)", idx, total, rate, eta)
+        progress(idx)
 
-    return {"extracted": extracted, "no_recipe": no_recipe, "missing": missing}
+    summary = {s: dict(c) for s, c in changes.items()}
+    db.finish_run(run_id, summary={"per_site": summary})
+    return changes
 
 
-def main():
+def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logging.getLogger("httpcore").setLevel(logging.WARNING)
 
     parser = argparse.ArgumentParser(description="Extract JSON-LD recipes to Supabase.")
-    parser.add_argument("--site", default=None)
-    parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--site", default=None, help="Only process a specific site.")
+    parser.add_argument("--limit", type=int, default=None, help="Process at most N rows.")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--html-dir", default=str(DEFAULT_HTML_DIR))
-    parser.add_argument(
-        "--reset",
-        action="store_true",
-        help="Clear extracted_at and extract_error on drink-recipe rows before extracting (scoped by --site if given). Use after a local Supabase db reset.",
-    )
+    add_reset_args(parser, stage="extract_runs")
     args = parser.parse_args()
 
     db = Database(args.db)
     sb = SupabaseClient()
     try:
         if args.reset:
-            n = db.reset_extract_state(site=args.site)
-            log.info("reset extract state on %d rows%s", n, f" for site={args.site}" if args.site else "")
-        stats = extract_pages(
+            to_delete = db.count_eval_rows(
+                "extract_runs",
+                site=args.site,
+                except_version=args.except_version,
+                older_than=args.older_than,
+            )
+            scope = describe_reset_scope(
+                site=args.site,
+                except_version=args.except_version,
+                older_than=args.older_than,
+            )
+            if not confirm_reset(
+                row_count=to_delete, scope_desc=scope, assume_yes=args.yes,
+            ):
+                log.error("reset aborted")
+                return 1
+            if to_delete:
+                n = db.clear_eval_rows(
+                    "extract_runs",
+                    site=args.site,
+                    except_version=args.except_version,
+                    older_than=args.older_than,
+                )
+                log.info("cleared %d extract_runs rows", n)
+
+        changes = extract_pages(
             db=db,
             sb=sb,
             html_dir=Path(args.html_dir),
             site=args.site,
             limit=args.limit,
         )
-        log.info("done: %s", stats)
+        print_summary("Extract", changes)
+        return 0
     finally:
         db.close()
         sb.close()

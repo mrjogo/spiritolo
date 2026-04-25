@@ -60,6 +60,7 @@ async def test_classify_one_records_successful_result(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")
     row = db.get_unclassified()[0]
+    run_id = db.start_run(stage="classify_url")
 
     fake_classify = AsyncMock(return_value=ClassificationResult(
         label="likely_drink_recipe",
@@ -73,14 +74,18 @@ async def test_classify_one_records_successful_result(tmp_db):
         db=db,
         model="qwen3:14b",
         prompt_version="v1",
+        run_id=run_id,
     )
 
     page = db.conn.execute("SELECT content_type FROM pages").fetchone()
     assert page["content_type"] == "likely_drink_recipe"
-    clsf = db.conn.execute("SELECT label, model, prompt_version, raw_response FROM classifications").fetchone()
+    clsf = db.conn.execute(
+        "SELECT label, model, prompt_version, raw_response, run_id FROM classify_url_runs"
+    ).fetchone()
     assert clsf["label"] == "likely_drink_recipe"
     assert clsf["model"] == "qwen3:14b"
     assert clsf["prompt_version"] == "v1"
+    assert clsf["run_id"] == run_id
     db.close()
 
 
@@ -115,7 +120,7 @@ async def test_classify_one_leaves_row_unclassified_on_error(tmp_db):
 
     page = db.conn.execute("SELECT content_type FROM pages").fetchone()
     assert page["content_type"] is None
-    clsf_count = db.conn.execute("SELECT COUNT(*) FROM classifications").fetchone()[0]
+    clsf_count = db.conn.execute("SELECT COUNT(*) FROM classify_url_runs").fetchone()[0]
     assert clsf_count == 0
     db.close()
 
@@ -133,7 +138,7 @@ async def test_classify_one_swallows_transport_errors(tmp_db):
 
     page = db.conn.execute("SELECT content_type FROM pages").fetchone()
     assert page["content_type"] is None
-    clsf_count = db.conn.execute("SELECT COUNT(*) FROM classifications").fetchone()[0]
+    clsf_count = db.conn.execute("SELECT COUNT(*) FROM classify_url_runs").fetchone()[0]
     assert clsf_count == 0
     db.close()
 
@@ -314,9 +319,16 @@ def test_run_sample_prints_matching_rows(tmp_db, capsys):
     db.add_url("foodnetwork", "https://foodnetwork.com/recipes/salmon")
 
     ids = {r["url"]: r["id"] for r in db.conn.execute("SELECT id, url FROM pages").fetchall()}
-    db.record_classification(ids["https://liquor.com/recipes/negroni"], "likely_drink_recipe", "qwen3:14b", "v1", "{}", 1)
-    db.record_classification(ids["https://liquor.com/recipes/margarita"], "likely_drink_recipe", "qwen3:14b", "v1", "{}", 1)
-    db.record_classification(ids["https://foodnetwork.com/recipes/salmon"], "likely_food_recipe", "qwen3:14b", "v1", "{}", 1)
+    for url, label in [
+        ("https://liquor.com/recipes/negroni", "likely_drink_recipe"),
+        ("https://liquor.com/recipes/margarita", "likely_drink_recipe"),
+        ("https://foodnetwork.com/recipes/salmon", "likely_food_recipe"),
+    ]:
+        db.record_classify_url(
+            page_id=ids[url], run_id=None, label=label, model="qwen3:14b",
+            prompt_version="v1", raw_response="{}", latency_ms=1,
+            pages_content_type_before=None,
+        )
     db.close()
 
     rc = run_sample(db_path=tmp_db, site="liquor", category="likely_drink_recipe", n=10)
@@ -373,7 +385,7 @@ async def test_end_to_end_classify_run_with_mocked_ollama(tmp_db):
     assert labels["https://liquor.com/tag/gin"] == "likely_junk"
     assert labels["https://liquor.com/articles/home-bar-guide"] == "likely_drink_article"
 
-    clsf_count = db.conn.execute("SELECT COUNT(*) FROM classifications").fetchone()[0]
+    clsf_count = db.conn.execute("SELECT COUNT(*) FROM classify_url_runs").fetchone()[0]
     assert clsf_count == 2  # only the two new classifications, not the pre-existing row
     db.close()
 

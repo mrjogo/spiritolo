@@ -59,6 +59,21 @@ class SupabaseClient:
     def count_recipes(self) -> int:
         return self.conn.execute("select count(*) from recipes").fetchone()[0]
 
+    def get_extracted_source_urls(self, site: str | None = None) -> set[str]:
+        """Return every source_url currently present in `recipes`, optionally
+        scoped to a site. This is the canonical 'has been extracted' signal —
+        the extract CLI uses it to decide what to skip. Supabase can be wiped
+        independently of scraper.db (e.g. local `supabase db reset`), so
+        trusting the local extract_runs table alone would cause the wipe
+        scenario to silently skip re-uploads."""
+        if site is None:
+            rows = self.conn.execute("SELECT source_url FROM recipes").fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT source_url FROM recipes WHERE site = %s", (site,),
+            ).fetchall()
+        return {r[0] for r in rows}
+
     def truncate_recipes(self):
         """Test-only helper."""
         self.conn.execute("truncate table recipes")

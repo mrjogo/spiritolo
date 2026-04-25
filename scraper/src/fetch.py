@@ -7,9 +7,10 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from scraper.src.classify_drink import SCORER_VERSION, classify_drink_scored
 from scraper.src.client import ScraperAPIClient, ScraperAPIError, AuthError, QuotaExhaustedError
 from scraper.src.db import Database
-from scraper.src.validate import validate, classify_drink
+from scraper.src.validation import VALIDATOR_VERSION, validate
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
@@ -86,11 +87,23 @@ def fetch_pages(
         results["paused_sites"] = []
         return results
 
+    run_id = db.start_run(
+        stage="fetch",
+        site=site or force_site,
+        args={
+            "limit": limit, "content_type": content_type,
+            "workers": n_workers, "delay": delay, "force_site": force_site,
+        },
+    )
+
     def process_one(row: dict) -> None:
         if shutdown.is_set():
             return
         page_site = row["site"]
         url = row["url"]
+        page_id = row["id"]
+        status_before = row["status"]
+        content_type_before = row["content_type"]
 
         # Circuit breaker check (skip if --force-site)
         if page_site != force_site:
@@ -128,19 +141,44 @@ def fetch_pages(
         filename = url_to_filename(url)
         rel_path = save_html(html_dir, page_site, filename, html)
         if result.status == "blocked":
-            db.mark_blocked(url, result.reason or "blocked", html_path=rel_path)
+            db.mark_blocked(url, html_path=rel_path)
             with state_lock:
                 results["blocked"] += 1
             print(f"  BLOCKED: {result.reason}")
         else:
-            db.mark_content(url, result.status, result.reason or result.status, html_path=rel_path)
+            db.mark_content(url, result.status, html_path=rel_path)
             with state_lock:
                 results[result.status] = results.get(result.status, 0) + 1
             print(f"  {result.status}: {result.reason}")
 
-            drink_result = classify_drink(html)
-            if drink_result:
-                db.set_content_type(url, drink_result)
+        # Record the validate + classify_drink evaluations into the same
+        # eval tables the standalone validate CLI uses, so both entry points
+        # contribute to the same provenance record and latest-only is
+        # preserved per page. Snapshot the PRE-fetch pages.* values — they
+        # reflect what the row looked like before this fetch ran.
+        db.record_validate_html(
+            page_id=page_id,
+            run_id=run_id,
+            status=result.status,
+            reason=result.reason,
+            validator_version=VALIDATOR_VERSION,
+            pages_status_before=status_before,
+        )
+
+        # classify_drink runs even on blocked pages; the result is an abstain
+        # (label=None, score=0) when there's no Recipe to score.
+        classification = classify_drink_scored(html)
+        if result.status != "blocked" and classification.label is not None:
+            db.set_content_type(url, classification.label)
+        db.record_classify_drink(
+            page_id=page_id,
+            run_id=run_id,
+            label=classification.label,
+            score=classification.score,
+            score_detail={"rules": classification.rules},
+            scorer_version=SCORER_VERSION,
+            pages_content_type_before=content_type_before,
+        )
 
         # Re-check circuit breaker after each fetch
         if page_site != force_site:
@@ -176,6 +214,7 @@ def fetch_pages(
 
     with state_lock:
         results["paused_sites"] = list(paused_sites)
+    db.finish_run(run_id, summary=results)
     return results
 
 

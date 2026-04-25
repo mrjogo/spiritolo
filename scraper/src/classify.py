@@ -1,7 +1,9 @@
 """URL classifier: main runner, review mode, and sample subcommand.
 
-Main run: asyncio pool of workers pulling unclassified rows, classifying each
-via ollama, writing back to pages.content_type + classifications audit table.
+Main run: opens a pipeline_runs row, asyncio pool of workers pull
+unclassified rows, classify each via ollama, UPSERT classify_url_runs
+(latest-only per page) with the label + prompt_version + snapshot of the
+prior pages.content_type, then update pages.content_type.
 """
 
 import argparse
@@ -9,15 +11,20 @@ import asyncio
 import json
 import logging
 import sys
-import time
+from collections import Counter
 from pathlib import Path
 from typing import Awaitable, Callable
 
 from ollama import AsyncClient
 
 from scraper.src.classify_prompt import PROMPT_VERSION
+from scraper.src.cli_common import (
+    add_reset_args, confirm_reset, describe_reset_scope,
+)
 from scraper.src.db import Database
 from scraper.src.ollama_client import ClassificationResult, classify_url
+from scraper.src.progress import make_progress
+from scraper.src.summary import print_summary
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
@@ -34,6 +41,7 @@ async def classify_one(
     db: Database,
     model: str,
     prompt_version: str,
+    run_id: int | None = None,
 ) -> bool:
     """Classify one row. Errors are logged and the row is left unclassified
     so a future run will retry it.
@@ -50,13 +58,15 @@ async def classify_one(
         log.warning("classify failed for id=%s url=%s: %s", row["id"], row["url"], e, exc_info=True)
         return False
 
-    db.record_classification(
+    db.record_classify_url(
         page_id=row["id"],
+        run_id=run_id,
         label=result.label,
         model=model,
         prompt_version=prompt_version,
         raw_response=result.raw_response,
         latency_ms=result.latency_ms,
+        pages_content_type_before=row.get("content_type"),
     )
     return True
 
@@ -69,6 +79,7 @@ async def run_classify_pool(
     prompt_version: str,
     concurrency: int = 4,
     on_progress: Callable[[int, int], None] | None = None,
+    run_id: int | None = None,
 ) -> int:
     """Run classify_one over rows with at most `concurrency` in-flight calls.
 
@@ -86,7 +97,7 @@ async def run_classify_pool(
     async def worker(r: dict):
         nonlocal done, successes
         async with sem:
-            ok = await classify_one(r, classify_fn, db, model, prompt_version)
+            ok = await classify_one(r, classify_fn, db, model, prompt_version, run_id=run_id)
         if ok:
             successes += 1
         done += 1
@@ -120,40 +131,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--urls", nargs="+",
                    help="For --sample: look up these specific URLs instead of sampling. "
                         "Overrides --site/--category/--n.")
+    add_reset_args(p, stage="classify_url_runs")
     return p
-
-
-def _format_eta(seconds: float) -> str:
-    if seconds < 60:
-        return f"{int(seconds)}s"
-    if seconds < 3600:
-        return f"{int(seconds / 60)}m{int(seconds % 60):02d}s"
-    h = int(seconds / 3600)
-    m = int((seconds % 3600) / 60)
-    return f"{h}h{m:02d}m"
-
-
-def _make_overall_progress(
-    grand_total_offset: int, overall_total: int, start_time: float
-) -> Callable[[int, int], None]:
-    """Build an on_progress callback that reports overall progress, velocity,
-    and ETA — not just the within-batch fraction the pool sees."""
-    def progress(done: int, total: int) -> None:
-        if done != total and done % 25 != 0:
-            return
-        overall = grand_total_offset + done
-        elapsed = time.monotonic() - start_time
-        rate = overall / elapsed if elapsed > 0 else 0
-        eta_str = _format_eta((overall_total - overall) / rate) if rate > 0 else "?"
-        pct = 100 * overall / overall_total if overall_total else 0
-        print(
-            f"\r  {overall:,}/{overall_total:,} ({pct:.1f}%)  "
-            f"{rate:.1f}/s  ETA {eta_str}    ",
-            end="", flush=True,
-        )
-        if done == total:
-            print()
-    return progress
 
 
 async def run_main(args: argparse.Namespace) -> int:
@@ -181,7 +160,24 @@ async def run_main(args: argparse.Namespace) -> int:
     if args.limit is not None:
         overall_total = min(overall_total, args.limit)
 
-    start_time = time.monotonic()
+    progress = make_progress(total=overall_total)
+    changes: dict[str, Counter] = {}
+
+    def adapter(batch_done: int, _batch_total: int) -> None:
+        # The pool reports within-batch progress; translate to cumulative so
+        # the shared progress callback's ETA is based on total work, not
+        # per-batch fractions.
+        progress(grand_total + batch_done)
+
+    run_id = db.start_run(
+        stage="classify_url",
+        site=args.site,
+        args={
+            "limit": args.limit, "batch_size": args.batch_size,
+            "model": args.model, "concurrency": args.concurrency,
+            "prompt_version": PROMPT_VERSION,
+        },
+    )
 
     try:
         while True:
@@ -194,11 +190,16 @@ async def run_main(args: argparse.Namespace) -> int:
 
             if grand_total == 0:
                 scope = f"site={args.site}" if args.site else "all sites"
-                print(f"Classifying {overall_total:,} URLs ({scope}) via {args.model} "
-                      f"(concurrency={args.concurrency}, batch_size={args.batch_size}, "
-                      f"prompt={PROMPT_VERSION})")
-            print(f"Batch of {len(rows)}")
+                log.info(
+                    "classifying %s URLs (%s) via %s (concurrency=%d, batch_size=%d, prompt=%s)",
+                    f"{overall_total:,}", scope, args.model,
+                    args.concurrency, args.batch_size, PROMPT_VERSION,
+                )
 
+            # Accumulate per-site / per-label counts by reading back what was
+            # written this batch. Cheap because we already paid the round-trip
+            # to write them.
+            batch_urls = [r["url"] for r in rows]
             successes = await run_classify_pool(
                 rows=rows,
                 classify_fn=classify_with_shared,
@@ -206,8 +207,10 @@ async def run_main(args: argparse.Namespace) -> int:
                 model=args.model,
                 prompt_version=PROMPT_VERSION,
                 concurrency=args.concurrency,
-                on_progress=_make_overall_progress(grand_total, overall_total, start_time),
+                on_progress=adapter,
+                run_id=run_id,
             )
+            _accumulate_changes(db, batch_urls, changes)
 
             if successes == 0:
                 print(
@@ -222,13 +225,32 @@ async def run_main(args: argparse.Namespace) -> int:
             if remaining is not None:
                 remaining -= len(rows)
 
-        if grand_total == 0 and exit_code == 0:
-            print("No unclassified rows. Done.")
-        elif exit_code == 0:
-            print(f"Done. Classified {grand_total} rows.")
+        print_summary("Classify", changes)
+        summary_dict = {site_key: dict(counter) for site_key, counter in changes.items()}
+        db.finish_run(run_id, summary={
+            "per_site": summary_dict, "total": grand_total, "exit_code": exit_code,
+        })
     finally:
         db.close()
     return exit_code
+
+
+def _accumulate_changes(
+    db: Database, urls: list[str], changes: dict[str, Counter]
+) -> None:
+    """Read the post-batch content_type for the URLs just processed and fold
+    them into the per-site Counter. URLs that are still NULL (errors) are
+    counted under 'classify_error'."""
+    if not urls:
+        return
+    placeholders = ",".join("?" for _ in urls)
+    rows = db.conn.execute(
+        f"SELECT site, content_type FROM pages WHERE url IN ({placeholders})",
+        urls,
+    ).fetchall()
+    for row in rows:
+        label = row["content_type"] or "classify_error"
+        changes.setdefault(row["site"], Counter())[label] += 1
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -241,7 +263,46 @@ def main(argv: list[str] | None = None) -> int:
         return _run_sample(args)
     if args.review:
         return asyncio.run(_run_review(args))
+    if args.reset:
+        rc = _do_reset(args)
+        if rc != 0:
+            return rc
     return asyncio.run(run_main(args))
+
+
+def _do_reset(args: argparse.Namespace) -> int:
+    """classify --reset: deletes classify_url_runs rows AND nulls
+    pages.content_type for the same rows, atomically. Both are required —
+    the work queue gates on `content_type IS NULL`, so dropping the eval
+    row alone wouldn't actually re-queue anything."""
+    db = Database(args.db)
+    try:
+        to_delete = db.count_eval_rows(
+            "classify_url_runs",
+            site=args.site,
+            except_version=args.except_version,
+            older_than=args.older_than,
+        )
+        scope = describe_reset_scope(
+            site=args.site,
+            except_version=args.except_version,
+            older_than=args.older_than,
+        )
+        if not confirm_reset(
+            row_count=to_delete, scope_desc=scope, assume_yes=args.yes,
+        ):
+            log.error("reset aborted")
+            return 1
+        if to_delete:
+            n = db.reset_classify_url(
+                site=args.site,
+                except_version=args.except_version,
+                older_than=args.older_than,
+            )
+            log.info("cleared %d classify_url_runs rows (and nulled content_type)", n)
+        return 0
+    finally:
+        db.close()
 
 
 def load_eval_set(path: Path) -> list[dict]:
@@ -298,9 +359,9 @@ def run_sample(
     db = Database(db_path)
     try:
         if urls:
-            rows = db.get_classifications_for_urls(urls)
+            rows = db.get_classify_url_for_urls(urls)
         else:
-            rows = db.sample_classifications(site=site, label=category, n=n)
+            rows = db.sample_classify_url(site=site, label=category, n=n)
     finally:
         db.close()
     if not rows:
