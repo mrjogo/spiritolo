@@ -2,30 +2,45 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { Pagination } from '../components/Pagination';
+import { buildSearchFilters } from '../searchQuery';
 import type { RecipeListItem } from '../types';
 
 const PAGE_SIZE = 50;
 
+type LoadedState = { status: 'loaded'; rows: RecipeListItem[]; total: number };
 type State =
-  | { status: 'loading' }
+  | { status: 'initial' }
   | { status: 'error'; message: string }
-  | { status: 'loaded'; rows: RecipeListItem[]; total: number };
+  | (LoadedState & { pending: boolean });
 
 export function RecipeList() {
-  const [params] = useSearchParams();
+  const [params, setSearchParams] = useSearchParams();
   const page = Math.max(1, parseInt(params.get('page') ?? '1', 10) || 1);
-  const [state, setState] = useState<State>({ status: 'loading' });
+  const q = params.get('q') ?? '';
+  const [inputValue, setInputValue] = useState(q);
+  const [state, setState] = useState<State>({ status: 'initial' });
 
   useEffect(() => {
     let cancelled = false;
-    setState({ status: 'loading' });
+    setState((prev) =>
+      prev.status === 'loaded'
+        ? { ...prev, pending: true }
+        : { status: 'initial' },
+    );
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
-    supabase
+    let query = supabase
       .from('recipes_public')
-      .select('id, site, name, image_url', { count: 'exact' })
-      .order('id')
+      .select('id, site, name, image_url', { count: 'exact' });
+
+    const { orFilters } = buildSearchFilters(q);
+    for (const f of orFilters) {
+      query = query.or(f);
+    }
+
+    query
+      .order('name', { nullsFirst: false })
       .range(from, to)
       .then(({ data, count, error }) => {
         if (cancelled) return;
@@ -37,15 +52,31 @@ export function RecipeList() {
           status: 'loaded',
           rows: (data ?? []) as RecipeListItem[],
           total: count ?? 0,
+          pending: false,
         });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [page]);
+  }, [page, q]);
 
-  if (state.status === 'loading') return <div className="page">Loading…</div>;
+  // Keep input in sync if URL changes externally (back/forward navigation).
+  useEffect(() => {
+    setInputValue(q);
+  }, [q]);
+
+  // Debounce inputValue → URL.
+  useEffect(() => {
+    if (inputValue === q) return;
+    const handle = setTimeout(() => {
+      setSearchParams(
+        inputValue === '' ? { page: '1' } : { q: inputValue, page: '1' },
+        { replace: true },
+      );
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [inputValue, q, setSearchParams]);
 
   if (state.status === 'error') {
     return (
@@ -59,27 +90,62 @@ export function RecipeList() {
   return (
     <div className="page">
       <h1>Recipes</h1>
-      <Pagination total={state.total} pageSize={PAGE_SIZE} />
-      {state.rows.length === 0 ? (
-        <p className="recipe-list__empty">No recipes yet — extract some and they'll show up here.</p>
+      <div className="recipe-list__search">
+        <input
+          type="search"
+          aria-label="Search recipes"
+          placeholder="Search recipes…"
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+        />
+        {inputValue !== '' && (
+          <button
+            type="button"
+            className="recipe-list__search-clear"
+            aria-label="Clear search"
+            onClick={() => setInputValue('')}
+          >
+            ×
+          </button>
+        )}
+      </div>
+      {state.status === 'initial' ? (
+        <div>Loading…</div>
       ) : (
-        <ul className="recipe-list">
-          {state.rows.map((r) => (
-            <li key={r.id} className="recipe-list__item">
-              <Link to={`/recipes/${r.id}`}>
-                {r.image_url && (
-                  <img src={r.image_url} alt="" className="recipe-list__thumb" />
-                )}
-                <div className="recipe-list__meta">
-                  <div className="recipe-list__name">{r.name ?? 'Untitled'}</div>
-                  <div className="recipe-list__site">{r.site}</div>
-                </div>
-              </Link>
-            </li>
-          ))}
-        </ul>
+        <>
+          <Pagination total={state.total} pageSize={PAGE_SIZE} />
+          {state.rows.length === 0 ? (
+            q === '' ? (
+              <p className="recipe-list__empty">
+                No recipes yet — extract some and they'll show up here.
+              </p>
+            ) : (
+              <p className="recipe-list__empty">No recipes match "{q}".</p>
+            )
+          ) : (
+            <ul
+              className={
+                state.pending ? 'recipe-list recipe-list--loading' : 'recipe-list'
+              }
+            >
+              {state.rows.map((r) => (
+                <li key={r.id} className="recipe-list__item">
+                  <Link to={`/recipes/${r.id}`}>
+                    {r.image_url && (
+                      <img src={r.image_url} alt="" className="recipe-list__thumb" />
+                    )}
+                    <div className="recipe-list__meta">
+                      <div className="recipe-list__name">{r.name ?? 'Untitled'}</div>
+                      <div className="recipe-list__site">{r.site}</div>
+                    </div>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+          <Pagination total={state.total} pageSize={PAGE_SIZE} />
+        </>
       )}
-      <Pagination total={state.total} pageSize={PAGE_SIZE} />
     </div>
   );
 }
