@@ -50,4 +50,24 @@ describe('buildSearchFilters', () => {
   it('keeps exactly-3-character terms', () => {
     expect(buildSearchFilters('rye').terms).toEqual(['rye']);
   });
+
+  it('strips trailing punctuation from terms', () => {
+    expect(buildSearchFilters('gin, vermouth').terms).toEqual(['gin', 'vermouth']);
+  });
+
+  it('strips wrapping brackets/parens', () => {
+    expect(buildSearchFilters('(rye) [bourbon]').terms).toEqual(['rye', 'bourbon']);
+  });
+
+  it('preserves internal punctuation', () => {
+    expect(buildSearchFilters('st-germain').terms).toEqual(['st-germain']);
+  });
+
+  it('drops a term whose only content is punctuation', () => {
+    expect(buildSearchFilters('gin --- lime').terms).toEqual(['gin', 'lime']);
+  });
+
+  it('applies min-length AFTER stripping punctuation', () => {
+    expect(buildSearchFilters('!!!ab!!! gin').terms).toEqual(['gin']);
+  });
 });
