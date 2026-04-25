@@ -34,7 +34,7 @@ from scraper.src.cli_common import (
 from scraper.src.classify_drink import SCORER_VERSION, classify_drink_scored
 from scraper.src.db import Database
 from spiritolo_common.progress import make_progress
-from scraper.src.summary import print_summary
+from spiritolo_common.summary import print_summary
 from scraper.src.validation import VALIDATOR_VERSION, validate
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
@@ -54,7 +54,7 @@ def revalidate(
     """Walk the work queue and re-validate each row.
 
     Returns per-site Counter of transition descriptions, for rendering via
-    scraper.src.summary.print_summary.
+    spiritolo_common.summary.print_summary.
     """
     rows = db.get_pending_validate_html(site=site, limit=limit)
     total = len(rows)

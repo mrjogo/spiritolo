@@ -3,7 +3,7 @@
 import io
 from collections import Counter
 
-from scraper.src.summary import print_summary
+from spiritolo_common.summary import print_summary
 
 
 def test_print_summary_empty():
