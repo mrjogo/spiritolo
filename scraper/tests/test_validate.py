@@ -290,7 +290,9 @@ def test_revalidate_opens_and_closes_pipeline_runs_row(tmp_db, tmp_path):
 
 
 def test_revalidate_skips_rows_with_existing_eval(tmp_db, tmp_path):
-    """Work queue excludes pages that already have a validate_html_runs row."""
+    """Work queue excludes pages that have BOTH eval rows. Half-validated rows
+    (only one of the two) are deliberately re-queued so interrupted runs heal.
+    """
     db = Database(tmp_db)
     html_dir = tmp_path / "html"
     url = "https://imbibemagazine.com/negroni"
@@ -303,6 +305,11 @@ def test_revalidate_skips_rows_with_existing_eval(tmp_db, tmp_path):
     db.record_validate_html(
         page_id=page_id, run_id=seeded_run, status="Recipe", reason="seeded",
         validator_version="v0", pages_status_before="Recipe",
+    )
+    db.record_classify_drink(
+        page_id=page_id, run_id=seeded_run, label="confirmed_food", score=0,
+        score_detail={}, scorer_version="v0",
+        pages_content_type_before="confirmed_food",
     )
 
     changes = revalidate(db, html_dir=html_dir)

@@ -30,14 +30,17 @@ Every evaluator has a version constant, written into every eval row it produces:
 | Drink scoring | `SCORER_VERSION` | [classify_drink.py](scraper/src/classify_drink.py) |
 | JSON-LD extraction | `EXTRACTOR_VERSION` | [extract.py](scraper/src/extract.py) |
 
-**Re-run workflow when you change an evaluator's logic:** bump the constant, then prune rows at the old version so they fall back on the stage's work queue:
+**Re-run workflow when you change an evaluator's logic:** bump the constant, then run that stage's CLI with `--reset --except-version V` so rows from prior versions fall back on the work queue:
 
 ```bash
-cd scraper && uv run python -m scraper.src.prune --stage classify_drink --except-version v2
-cd scraper && uv run python -m scraper.src.validate
+cd scraper && uv run python -m scraper.src.validate --reset --except-version v2 --yes
 ```
 
-Bumping the constant without pruning just means new rows land at the new version alongside old ones — useful when you want the diff side-by-side but are fine with a gradual migration.
+Bumping the constant without resetting just means new rows land at the new version alongside old ones — useful when you want the diff side-by-side but are fine with a gradual migration.
+
+### Reset surface
+
+Every stage CLI with an eval table (`classify`, `validate`, `extract`) accepts the same flags: `--reset [--site S] [--except-version V] [--older-than ISO_TS] [--yes]`. Filters AND together; `--reset` alone wipes the stage's whole eval scope. `validate --reset` clears both `validate_html_runs` and `classify_drink_runs` together (they're written and consumed together). `classify --reset` also nulls `pages.content_type` for the cleared rows — required because the classify work queue gates on `content_type IS NULL`, not on eval-row presence.
 
 ## URL Classifier
 
@@ -108,7 +111,7 @@ cd scraper && uv run python -m scraper.src.extract --site diffordsguide
 cd scraper && uv run python -m scraper.src.extract --limit 10
 ```
 
-**Re-extraction:** delete the relevant `extract_runs` rows (via `--reset`, the prune CLI, or raw SQL); those pages land back on the extract work queue. Supabase UPSERTs on `source_url` so re-runs are idempotent.
+**Re-extraction:** delete the relevant `extract_runs` rows (via `--reset` or raw SQL); those pages land back on the extract work queue. Supabase UPSERTs on `source_url` so re-runs are idempotent.
 
 **Local Supabase Studio:** http://localhost:54323 (on the Mac host).
 
@@ -138,19 +141,6 @@ WHERE d.label IS NOT NULL AND d.label != d.pages_content_type_before
 ```
 
 All pipeline scripts (`fetch`, `classify`, `extract`, `validate`) share the same `--site` / `--limit` / `--dry-run` / `--reset --yes` conventions where applicable, the same progress line (`X/Y (Z%) rows/s ETA 1h3m34s`), and the same per-site / per-category summary.
-
-## Prune CLI
-
-`scraper/src/prune.py` deletes rows from the per-stage eval tables (`classify_url_runs`, `validate_html_runs`, `classify_drink_runs`, `extract_runs`) to manage DB disk usage. Eval tables are latest-only and regeneratable — pruning just puts pages back on the corresponding stage's work queue. `pages` and `pipeline_runs` are never touched.
-
-```bash
-cd scraper && uv run python -m scraper.src.prune --stage classify_drink --older-than 2026-01-01T00:00:00+00:00
-cd scraper && uv run python -m scraper.src.prune --stage validate_html --except-version v1
-cd scraper && uv run python -m scraper.src.prune --stage classify_url --site imbibe
-cd scraper && uv run python -m scraper.src.prune --all --yes     # wipe every eval table
-```
-
-Filters AND together. Without any filter, `--stage X` empties X's whole table.
 
 ## Web UI
 

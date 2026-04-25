@@ -28,7 +28,9 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from scraper.src.cli_common import confirm_reset
+from scraper.src.cli_common import (
+    add_reset_args, confirm_reset, describe_reset_scope,
+)
 from scraper.src.classify_drink import SCORER_VERSION, classify_drink_scored
 from scraper.src.db import Database
 from scraper.src.progress import make_progress
@@ -160,17 +162,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--dry-run", action="store_true",
         help="Report transitions without writing to the DB or recording eval rows.",
     )
-    parser.add_argument(
-        "--reset", action="store_true",
-        help="Delete validate_html_runs + classify_drink_runs for in-scope "
-             "rows before running, forcing re-evaluation. Combine with --site "
-             "for partial re-sweeps; use raw SQL for anything more exotic.",
-    )
-    parser.add_argument(
-        "--yes", action="store_true",
-        help="Skip the --reset confirmation prompt. Required when stdin is "
-             "not a terminal (e.g. piped/CI).",
-    )
+    add_reset_args(parser, stage="validate_html_runs + classify_drink_runs")
     return parser.parse_args(argv)
 
 
@@ -181,29 +173,50 @@ def main(argv: list[str] | None = None) -> int:
     db = Database(DEFAULT_DB_PATH)
     try:
         if args.reset:
-            scope = f"site={args.site}" if args.site else "all sites"
-            # Count rows that would be deleted (validate_html_runs is the
-            # authoritative "has been validated" signal now).
-            q = (
-                "SELECT COUNT(*) c FROM validate_html_runs v "
-                "JOIN pages p ON p.id = v.page_id"
+            # Validate's --reset clears BOTH eval tables together: they're
+            # written together and the work queue picks up a page if either
+            # is missing, so leaving one half behind would leak audit rows
+            # without changing scheduling. --except-version applies to each
+            # table's own version column (validator_version on one,
+            # scorer_version on the other), so bumping either constant and
+            # passing --except-version V re-queues the same set of pages.
+            v_count = db.count_eval_rows(
+                "validate_html_runs",
+                site=args.site,
+                except_version=args.except_version,
+                older_than=args.older_than,
             )
-            params: list = []
-            if args.site:
-                q += " WHERE p.site = ?"
-                params.append(args.site)
-            with db._lock:
-                already = db.conn.execute(q, params).fetchone()["c"]
+            d_count = db.count_eval_rows(
+                "classify_drink_runs",
+                site=args.site,
+                except_version=args.except_version,
+                older_than=args.older_than,
+            )
+            scope = describe_reset_scope(
+                site=args.site,
+                except_version=args.except_version,
+                older_than=args.older_than,
+            )
             if not confirm_reset(
-                row_count=already,
+                row_count=v_count + d_count,
                 scope_desc=scope,
                 assume_yes=args.yes,
             ):
                 log.error("reset aborted")
                 return 1
-            if already:
-                v = db.clear_validate_html_runs(site=args.site)
-                d = db.clear_classify_drink_runs(site=args.site)
+            if v_count + d_count:
+                v = db.clear_eval_rows(
+                    "validate_html_runs",
+                    site=args.site,
+                    except_version=args.except_version,
+                    older_than=args.older_than,
+                )
+                d = db.clear_eval_rows(
+                    "classify_drink_runs",
+                    site=args.site,
+                    except_version=args.except_version,
+                    older_than=args.older_than,
+                )
                 log.info("cleared %d validate_html_runs + %d classify_drink_runs rows", v, d)
 
         changes = revalidate(

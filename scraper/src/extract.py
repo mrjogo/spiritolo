@@ -5,7 +5,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from scraper.src.cli_common import confirm_reset
+from scraper.src.cli_common import (
+    add_reset_args, confirm_reset, describe_reset_scope,
+)
 from scraper.src.db import Database
 from scraper.src.progress import make_progress
 from scraper.src.structured import find_recipe
@@ -167,41 +169,36 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=None, help="Process at most N rows.")
     parser.add_argument("--db", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--html-dir", default=str(DEFAULT_HTML_DIR))
-    parser.add_argument(
-        "--reset", action="store_true",
-        help="Delete extract_runs rows for drink-recipe pages before "
-             "extracting (scoped by --site if given), forcing re-extraction.",
-    )
-    parser.add_argument(
-        "--yes", action="store_true",
-        help="Skip the --reset confirmation prompt. Required when stdin is "
-             "not a terminal.",
-    )
+    add_reset_args(parser, stage="extract_runs")
     args = parser.parse_args()
 
     db = Database(args.db)
     sb = SupabaseClient()
     try:
         if args.reset:
-            placeholders = ",".join("?" for _ in db.EXTRACT_CONTENT_TYPES)
-            q = (
-                f"SELECT COUNT(*) c FROM extract_runs WHERE page_id IN ("
-                f"  SELECT id FROM pages WHERE content_type IN ({placeholders})"
+            to_delete = db.count_eval_rows(
+                "extract_runs",
+                site=args.site,
+                except_version=args.except_version,
+                older_than=args.older_than,
             )
-            params: list = list(db.EXTRACT_CONTENT_TYPES)
-            if args.site:
-                q += " AND site = ?"
-                params.append(args.site)
-            q += ")"
-            already = db.conn.execute(q, params).fetchone()["c"]
-            scope = f"site={args.site}" if args.site else "all sites"
+            scope = describe_reset_scope(
+                site=args.site,
+                except_version=args.except_version,
+                older_than=args.older_than,
+            )
             if not confirm_reset(
-                row_count=already, scope_desc=scope, assume_yes=args.yes,
+                row_count=to_delete, scope_desc=scope, assume_yes=args.yes,
             ):
                 log.error("reset aborted")
                 return 1
-            if already:
-                n = db.clear_extract_runs(site=args.site)
+            if to_delete:
+                n = db.clear_eval_rows(
+                    "extract_runs",
+                    site=args.site,
+                    except_version=args.except_version,
+                    older_than=args.older_than,
+                )
                 log.info("cleared %d extract_runs rows", n)
 
         changes = extract_pages(

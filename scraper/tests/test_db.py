@@ -161,6 +161,58 @@ def test_set_content_type(tmp_db):
     db.close()
 
 
+def test_set_content_type_drops_stale_extract_failure(tmp_db):
+    """Reclassifying a page TO a drink type clears prior extract failure rows
+    (no_recipe / html_missing) so the page re-enters the extract queue.
+    An 'extracted' row, in contrast, stays — Supabase is the success dedupe."""
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipe/1")
+    db.add_url("testsite", "https://example.com/recipe/2")
+    page1 = db.conn.execute(
+        "SELECT id FROM pages WHERE url = ?", ("https://example.com/recipe/1",),
+    ).fetchone()["id"]
+    page2 = db.conn.execute(
+        "SELECT id FROM pages WHERE url = ?", ("https://example.com/recipe/2",),
+    ).fetchone()["id"]
+    run_id = db.start_run(stage="extract")
+    db.record_extract(
+        page_id=page1, run_id=run_id, outcome="no_recipe",
+        error=None, extractor_version="v1",
+    )
+    db.record_extract(
+        page_id=page2, run_id=run_id, outcome="extracted",
+        error=None, extractor_version="v1",
+    )
+
+    db.set_content_type("https://example.com/recipe/1", "likely_drink_recipe")
+    db.set_content_type("https://example.com/recipe/2", "likely_drink_recipe")
+
+    surviving = db.conn.execute(
+        "SELECT page_id, outcome FROM extract_runs ORDER BY page_id"
+    ).fetchall()
+    # page1's no_recipe row is gone; page2's extracted row stays.
+    assert [(r["page_id"], r["outcome"]) for r in surviving] == [(page2, "extracted")]
+    db.close()
+
+
+def test_set_content_type_non_drink_leaves_extract_runs(tmp_db):
+    """Flipping to a non-drink type must not touch extract_runs."""
+    db = Database(tmp_db)
+    db.add_url("testsite", "https://example.com/recipe/1")
+    page1 = db.conn.execute(
+        "SELECT id FROM pages WHERE url = ?", ("https://example.com/recipe/1",),
+    ).fetchone()["id"]
+    run_id = db.start_run(stage="extract")
+    db.record_extract(
+        page_id=page1, run_id=run_id, outcome="no_recipe",
+        error=None, extractor_version="v1",
+    )
+    db.set_content_type("https://example.com/recipe/1", "other")
+    row = db.conn.execute("SELECT outcome FROM extract_runs").fetchone()
+    assert row["outcome"] == "no_recipe"
+    db.close()
+
+
 def test_set_content_type_batch(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")
@@ -887,23 +939,64 @@ def test_record_classify_drink_accepts_null_label_for_abstain(tmp_db):
 
 
 def test_get_pending_validate_html_returns_rows_without_eval(tmp_db):
-    """Work queue: pages with cached HTML that don't have a validate_html_runs
-    row yet."""
+    """Work queue: pages with cached HTML that are missing either the
+    validate_html_runs row or the classify_drink_runs row."""
     db = Database(tmp_db)
     _seed_fetched(db, "imbibe", "https://imbibe.com/a", "imbibe/a.html")
     _seed_fetched(db, "imbibe", "https://imbibe.com/b", "imbibe/b.html")
     _seed_fetched(db, "punch", "https://punch.com/c", "punch/c.html")
-    # Seed one validate_html_runs row for /a — it should be skipped.
+    # /a has BOTH eval rows → skipped. /b and /c have neither → queued.
     page_a = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://imbibe.com/a",)).fetchone()["id"]
     run_id = db.start_run(stage="validate_html")
     db.record_validate_html(
         page_id=page_a, run_id=run_id, status="Recipe", reason=None,
         validator_version="v1", pages_status_before="Recipe",
     )
+    db.record_classify_drink(
+        page_id=page_a, run_id=run_id, label="confirmed_drink", score=3,
+        score_detail={}, scorer_version="v1",
+        pages_content_type_before="likely_drink_recipe",
+    )
 
     pending = db.get_pending_validate_html()
     urls = {row["url"] for row in pending}
     assert urls == {"https://imbibe.com/b", "https://punch.com/c"}
+    db.close()
+
+
+def test_get_pending_validate_html_requeues_half_validated(tmp_db):
+    """Interrupted run: validate_html_runs written but classify_drink_runs
+    missing. The page must come back on the queue so the gap heals."""
+    db = Database(tmp_db)
+    _seed_fetched(db, "imbibe", "https://imbibe.com/half", "imbibe/half.html")
+    page_id = db.conn.execute(
+        "SELECT id FROM pages WHERE url = ?", ("https://imbibe.com/half",),
+    ).fetchone()["id"]
+    run_id = db.start_run(stage="validate_html")
+    db.record_validate_html(
+        page_id=page_id, run_id=run_id, status="Recipe", reason=None,
+        validator_version="v1", pages_status_before="Recipe",
+    )
+    pending = db.get_pending_validate_html()
+    assert [row["url"] for row in pending] == ["https://imbibe.com/half"]
+    db.close()
+
+
+def test_get_pending_validate_html_requeues_missing_validate_row(tmp_db):
+    """Symmetric case: classify_drink_runs written but validate_html_runs
+    missing. Also re-queued."""
+    db = Database(tmp_db)
+    _seed_fetched(db, "imbibe", "https://imbibe.com/half", "imbibe/half.html")
+    page_id = db.conn.execute(
+        "SELECT id FROM pages WHERE url = ?", ("https://imbibe.com/half",),
+    ).fetchone()["id"]
+    run_id = db.start_run(stage="classify_drink")
+    db.record_classify_drink(
+        page_id=page_id, run_id=run_id, label="confirmed_drink", score=3,
+        score_detail={}, scorer_version="v1", pages_content_type_before=None,
+    )
+    pending = db.get_pending_validate_html()
+    assert [row["url"] for row in pending] == ["https://imbibe.com/half"]
     db.close()
 
 
@@ -991,12 +1084,18 @@ def test_count_pending_validate_html(tmp_db):
     assert db.count_pending_validate_html() == 3
     assert db.count_pending_validate_html(site="imbibe") == 2
 
-    # Record one and re-check.
+    # Record BOTH eval rows for /a — page must leave the queue only when both
+    # are present. Writing only one leaves the gap open.
     page_a = db.conn.execute("SELECT id FROM pages WHERE url = ?", ("https://imbibe.com/a",)).fetchone()["id"]
     run_id = db.start_run(stage="validate_html")
     db.record_validate_html(
         page_id=page_a, run_id=run_id, status="Recipe", reason=None,
         validator_version="v1", pages_status_before="Recipe",
+    )
+    db.record_classify_drink(
+        page_id=page_a, run_id=run_id, label="confirmed_drink", score=3,
+        score_detail={}, scorer_version="v1",
+        pages_content_type_before="likely_drink_recipe",
     )
     assert db.count_pending_validate_html() == 2
     db.close()

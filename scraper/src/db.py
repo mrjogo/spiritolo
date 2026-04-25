@@ -310,6 +310,18 @@ class Database:
                 "UPDATE pages SET content_type = ? WHERE url = ?",
                 (content_type, url),
             )
+            if content_type in self.EXTRACT_CONTENT_TYPES:
+                # A page flipping TO a drink type must shed any stale
+                # extract_runs failure row from a prior classification, or
+                # it'd stay excluded from the extract work queue forever.
+                # Keeping `outcome='extracted'` rows is still correct — Supabase
+                # is the source of truth for successes.
+                self.conn.execute(
+                    "DELETE FROM extract_runs "
+                    "WHERE outcome != 'extracted' "
+                    "AND page_id = (SELECT id FROM pages WHERE url = ?)",
+                    (url,),
+                )
             self.conn.commit()
 
     def set_content_type_batch(self, ids: list[int], content_type: str):
@@ -321,6 +333,12 @@ class Database:
                 f"UPDATE pages SET content_type = ? WHERE id IN ({placeholders})",
                 [content_type] + ids,
             )
+            if content_type in self.EXTRACT_CONTENT_TYPES:
+                self.conn.execute(
+                    f"DELETE FROM extract_runs "
+                    f"WHERE outcome != 'extracted' AND page_id IN ({placeholders})",
+                    ids,
+                )
             self.conn.commit()
 
     def record_classify_url(
@@ -364,6 +382,13 @@ class Database:
                 "UPDATE pages SET content_type = ? WHERE id = ?",
                 (label, page_id),
             )
+            if label in self.EXTRACT_CONTENT_TYPES:
+                # See set_content_type — stale failure rows would keep the
+                # page out of the extract queue on reclassification.
+                self.conn.execute(
+                    "DELETE FROM extract_runs WHERE outcome != 'extracted' AND page_id = ?",
+                    (page_id,),
+                )
             self.conn.commit()
 
     def get_unclassified(self, site: str | None = None, limit: int | None = None) -> list[dict]:
@@ -649,13 +674,20 @@ class Database:
     def get_pending_validate_html(
         self, site: str | None = None, limit: int | None = None,
     ) -> list[dict]:
-        """Work queue: pages with cached HTML that have no validate_html_runs
-        row. A missing eval row is the only signal that a page needs to run."""
+        """Work queue: pages with cached HTML that are missing EITHER the
+        validate_html_runs row or the classify_drink_runs row.
+
+        Both eval rows are written together (by fetch or validate), so a page
+        missing only one indicates an interrupted run. Including it in the
+        queue heals the gap on next invocation — the remaining eval is
+        idempotent UPSERT, so re-running both sides is safe."""
         query = [
             "SELECT p.id, p.site, p.url, p.status, p.content_type, p.html_path",
             "FROM pages p",
             "LEFT JOIN validate_html_runs v ON v.page_id = p.id",
-            "WHERE p.html_path IS NOT NULL AND v.page_id IS NULL",
+            "LEFT JOIN classify_drink_runs d ON d.page_id = p.id",
+            "WHERE p.html_path IS NOT NULL",
+            "AND (v.page_id IS NULL OR d.page_id IS NULL)",
         ]
         params: list = []
         if site:
@@ -673,7 +705,9 @@ class Database:
         query = [
             "SELECT COUNT(*) c FROM pages p",
             "LEFT JOIN validate_html_runs v ON v.page_id = p.id",
-            "WHERE p.html_path IS NOT NULL AND v.page_id IS NULL",
+            "LEFT JOIN classify_drink_runs d ON d.page_id = p.id",
+            "WHERE p.html_path IS NOT NULL",
+            "AND (v.page_id IS NULL OR d.page_id IS NULL)",
         ]
         params: list = []
         if site:
@@ -682,26 +716,136 @@ class Database:
         with self._lock:
             return self.conn.execute(" ".join(query), params).fetchone()["c"]
 
-    def clear_validate_html_runs(self, site: str | None = None) -> int:
-        """Delete rows from validate_html_runs, optionally scoped to a site
-        (joined via pages). Returns deleted row count."""
-        return self._clear_eval_table("validate_html_runs", site)
+    # Per-eval-table metadata. Each stage's --reset CLI uses this to build the
+    # DELETE filters (site, except_version, older_than) uniformly.
+    EVAL_TABLES: dict[str, dict[str, str]] = {
+        "classify_url_runs":   {"version_col": "prompt_version"},
+        "validate_html_runs":  {"version_col": "validator_version"},
+        "classify_drink_runs": {"version_col": "scorer_version"},
+        "extract_runs":        {"version_col": "extractor_version"},
+    }
 
-    def clear_classify_drink_runs(self, site: str | None = None) -> int:
-        return self._clear_eval_table("classify_drink_runs", site)
-
-    def clear_classify_url_runs(self, site: str | None = None) -> int:
-        return self._clear_eval_table("classify_url_runs", site)
-
-    def _clear_eval_table(self, table: str, site: str | None) -> int:
+    def clear_eval_rows(
+        self,
+        table: str,
+        *,
+        site: str | None = None,
+        except_version: str | None = None,
+        older_than: str | None = None,
+    ) -> int:
+        """Delete rows from one eval table, filtered by any combination of
+        site / except_version / older_than (ANDed). No filters → wipe the
+        table. Returns deleted row count. Whether re-queuing needs a
+        companion pages.* update is the caller's responsibility."""
+        if table not in self.EVAL_TABLES:
+            raise ValueError(f"unknown eval table: {table!r}")
+        version_col = self.EVAL_TABLES[table]["version_col"]
+        wheres: list[str] = []
+        params: list = []
+        if site is not None:
+            wheres.append("page_id IN (SELECT id FROM pages WHERE site = ?)")
+            params.append(site)
+        if except_version is not None:
+            wheres.append(f"{version_col} != ?")
+            params.append(except_version)
+        if older_than is not None:
+            wheres.append("evaluated_at < ?")
+            params.append(older_than)
+        query = f"DELETE FROM {table}"
+        if wheres:
+            query += " WHERE " + " AND ".join(wheres)
         with self._lock:
-            if site is None:
-                cursor = self.conn.execute(f"DELETE FROM {table}")
-            else:
-                cursor = self.conn.execute(
-                    f"DELETE FROM {table} WHERE page_id IN "
-                    "(SELECT id FROM pages WHERE site = ?)",
-                    (site,),
-                )
+            cursor = self.conn.execute(query, params)
             self.conn.commit()
             return cursor.rowcount
+
+    def count_eval_rows(
+        self,
+        table: str,
+        *,
+        site: str | None = None,
+        except_version: str | None = None,
+        older_than: str | None = None,
+    ) -> int:
+        """Count rows that clear_eval_rows with the same filters would delete.
+        Used by --reset to render the confirmation prompt."""
+        if table not in self.EVAL_TABLES:
+            raise ValueError(f"unknown eval table: {table!r}")
+        version_col = self.EVAL_TABLES[table]["version_col"]
+        wheres: list[str] = []
+        params: list = []
+        if site is not None:
+            wheres.append("page_id IN (SELECT id FROM pages WHERE site = ?)")
+            params.append(site)
+        if except_version is not None:
+            wheres.append(f"{version_col} != ?")
+            params.append(except_version)
+        if older_than is not None:
+            wheres.append("evaluated_at < ?")
+            params.append(older_than)
+        query = f"SELECT COUNT(*) c FROM {table}"
+        if wheres:
+            query += " WHERE " + " AND ".join(wheres)
+        with self._lock:
+            return self.conn.execute(query, params).fetchone()["c"]
+
+    def reset_classify_url(
+        self,
+        *,
+        site: str | None = None,
+        except_version: str | None = None,
+        older_than: str | None = None,
+    ) -> int:
+        """classify's --reset needs BOTH the eval-row delete AND a
+        pages.content_type=NULL update for the same rows — the classify work
+        queue gates on `content_type IS NULL`, not on eval-row presence.
+
+        Done in a single transaction so a crash can't leave pages where the
+        eval row is gone but content_type is still set (which would put the
+        rows out of both the queue and the audit trail).
+        Returns the number of eval rows deleted."""
+        version_col = "prompt_version"
+        wheres: list[str] = []
+        params: list = []
+        if site is not None:
+            wheres.append("page_id IN (SELECT id FROM pages WHERE site = ?)")
+            params.append(site)
+        if except_version is not None:
+            wheres.append(f"{version_col} != ?")
+            params.append(except_version)
+        if older_than is not None:
+            wheres.append("evaluated_at < ?")
+            params.append(older_than)
+        where_clause = (" WHERE " + " AND ".join(wheres)) if wheres else ""
+        with self._lock:
+            # Snapshot matching page_ids first; we need them for the
+            # content_type null-out after the DELETE removes the rows.
+            page_ids = [
+                r[0] for r in self.conn.execute(
+                    f"SELECT page_id FROM classify_url_runs{where_clause}",
+                    params,
+                ).fetchall()
+            ]
+            if not page_ids:
+                return 0
+            placeholders = ",".join("?" for _ in page_ids)
+            cursor = self.conn.execute(
+                f"DELETE FROM classify_url_runs WHERE page_id IN ({placeholders})",
+                page_ids,
+            )
+            self.conn.execute(
+                f"UPDATE pages SET content_type = NULL WHERE id IN ({placeholders})",
+                page_ids,
+            )
+            self.conn.commit()
+            return cursor.rowcount
+
+    # Backwards-compat shims — kept so existing call sites keep working.
+    def clear_validate_html_runs(self, site: str | None = None) -> int:
+        return self.clear_eval_rows("validate_html_runs", site=site)
+
+    def clear_classify_drink_runs(self, site: str | None = None) -> int:
+        return self.clear_eval_rows("classify_drink_runs", site=site)
+
+    def clear_classify_url_runs(self, site: str | None = None) -> int:
+        return self.clear_eval_rows("classify_url_runs", site=site)

@@ -18,6 +18,9 @@ from typing import Awaitable, Callable
 from ollama import AsyncClient
 
 from scraper.src.classify_prompt import PROMPT_VERSION
+from scraper.src.cli_common import (
+    add_reset_args, confirm_reset, describe_reset_scope,
+)
 from scraper.src.db import Database
 from scraper.src.ollama_client import ClassificationResult, classify_url
 from scraper.src.progress import make_progress
@@ -128,6 +131,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--urls", nargs="+",
                    help="For --sample: look up these specific URLs instead of sampling. "
                         "Overrides --site/--category/--n.")
+    add_reset_args(p, stage="classify_url_runs")
     return p
 
 
@@ -259,7 +263,46 @@ def main(argv: list[str] | None = None) -> int:
         return _run_sample(args)
     if args.review:
         return asyncio.run(_run_review(args))
+    if args.reset:
+        rc = _do_reset(args)
+        if rc != 0:
+            return rc
     return asyncio.run(run_main(args))
+
+
+def _do_reset(args: argparse.Namespace) -> int:
+    """classify --reset: deletes classify_url_runs rows AND nulls
+    pages.content_type for the same rows, atomically. Both are required —
+    the work queue gates on `content_type IS NULL`, so dropping the eval
+    row alone wouldn't actually re-queue anything."""
+    db = Database(args.db)
+    try:
+        to_delete = db.count_eval_rows(
+            "classify_url_runs",
+            site=args.site,
+            except_version=args.except_version,
+            older_than=args.older_than,
+        )
+        scope = describe_reset_scope(
+            site=args.site,
+            except_version=args.except_version,
+            older_than=args.older_than,
+        )
+        if not confirm_reset(
+            row_count=to_delete, scope_desc=scope, assume_yes=args.yes,
+        ):
+            log.error("reset aborted")
+            return 1
+        if to_delete:
+            n = db.reset_classify_url(
+                site=args.site,
+                except_version=args.except_version,
+                older_than=args.older_than,
+            )
+            log.info("cleared %d classify_url_runs rows (and nulled content_type)", n)
+        return 0
+    finally:
+        db.close()
 
 
 def load_eval_set(path: Path) -> list[dict]:

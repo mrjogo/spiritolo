@@ -5,8 +5,52 @@ Kept tiny on purpose: one helper per pain point, uniform behavior everywhere.
 
 from __future__ import annotations
 
+import argparse
 import sys
 from typing import TextIO
+
+
+def add_reset_args(parser: argparse.ArgumentParser, *, stage: str) -> None:
+    """Attach the standard --reset / --site-scoped reset filters to a CLI.
+
+    Every pipeline script's --reset accepts the same trio of filters
+    (--site / --except-version / --older-than), ANDed together. Without any
+    filter, --reset wipes the entire scope for that stage.
+    """
+    parser.add_argument(
+        "--reset", action="store_true",
+        help=f"Delete {stage} eval rows for in-scope pages before running, "
+             "forcing re-evaluation. Combine with the filters below to "
+             "narrow the scope.",
+    )
+    parser.add_argument(
+        "--except-version", metavar="V",
+        help="With --reset: only delete rows whose evaluator version is NOT "
+             "this value. Use to drop everything left over from a prior "
+             "prompt/scorer/extractor version.",
+    )
+    parser.add_argument(
+        "--older-than", metavar="ISO_TS",
+        help="With --reset: only delete rows whose evaluated_at is before "
+             "this ISO-8601 timestamp. Example: 2026-01-01T00:00:00+00:00",
+    )
+    parser.add_argument(
+        "--yes", action="store_true",
+        help="Skip the --reset confirmation prompt. Required when stdin is "
+             "not a terminal (e.g. piped/CI).",
+    )
+
+
+def describe_reset_scope(
+    *, site: str | None, except_version: str | None, older_than: str | None,
+) -> str:
+    parts: list[str] = []
+    parts.append(f"site={site}" if site else "all sites")
+    if except_version is not None:
+        parts.append(f"except-version={except_version}")
+    if older_than is not None:
+        parts.append(f"older-than={older_than}")
+    return ", ".join(parts)
 
 
 def confirm_reset(
