@@ -25,7 +25,7 @@ export function RecipeList() {
     supabase
       .from('recipes_public')
       .select('id, site, name, image_url', { count: 'exact' })
-      .order('id')
+      .order('name', { nullsFirst: false })
       .range(from, to)
       .then(({ data, count, error }) => {
         if (cancelled) return;

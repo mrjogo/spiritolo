@@ -129,4 +129,16 @@ describe('<RecipeList>', () => {
     expect(container.querySelectorAll('.pagination')).toHaveLength(2);
     expect(screen.getAllByText('1–50 of 127')).toHaveLength(2);
   });
+
+  it('orders results alphabetically by name with nulls last', async () => {
+    const { order } = mockRangeResponse([], 0);
+    render(
+      <MemoryRouter>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(order).toHaveBeenCalledWith('name', { nullsFirst: false }),
+    );
+  });
 });
