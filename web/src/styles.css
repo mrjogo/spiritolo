@@ -95,3 +95,16 @@ a { color: #0a58ca; }
   background: #eee;
   border-radius: 3px;
 }
+
+.recipe-list__search {
+  margin-bottom: 1rem;
+}
+
+.recipe-list__search input[type='search'] {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+}

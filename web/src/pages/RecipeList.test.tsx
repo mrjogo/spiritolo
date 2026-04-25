@@ -141,4 +141,26 @@ describe('<RecipeList>', () => {
       expect(order).toHaveBeenCalledWith('name', { nullsFirst: false }),
     );
   });
+
+  it('renders a search input on the recipe list page', () => {
+    mockRangeResponse([], 0);
+    render(
+      <MemoryRouter>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('searchbox', { name: /search recipes/i })).toBeInTheDocument();
+  });
+
+  it('pre-fills the search input from the URL ?q=', () => {
+    mockRangeResponse([], 0);
+    render(
+      <MemoryRouter initialEntries={['/?q=negroni']}>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole('searchbox', { name: /search recipes/i })).toHaveValue(
+      'negroni',
+    );
+  });
 });
