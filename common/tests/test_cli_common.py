@@ -8,7 +8,7 @@ confirm_reset() enforces a uniform heuristic for --reset confirmation:
 
 import io
 
-from scraper.src.cli_common import confirm_reset
+from spiritolo_common.cli_common import confirm_reset
 
 
 def test_confirm_reset_returns_true_when_assume_yes_set():

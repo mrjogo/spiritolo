@@ -18,7 +18,7 @@ from typing import Awaitable, Callable
 from ollama import AsyncClient
 
 from scraper.src.classify_prompt import PROMPT_VERSION
-from scraper.src.cli_common import (
+from spiritolo_common.cli_common import (
     add_reset_args, confirm_reset, describe_reset_scope,
 )
 from scraper.src.db import Database

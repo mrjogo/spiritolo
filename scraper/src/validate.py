@@ -28,7 +28,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from scraper.src.cli_common import (
+from spiritolo_common.cli_common import (
     add_reset_args, confirm_reset, describe_reset_scope,
 )
 from scraper.src.classify_drink import SCORER_VERSION, classify_drink_scored
