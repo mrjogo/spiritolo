@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { Pagination } from '../components/Pagination';
+import { buildSearchFilters } from '../searchQuery';
 import type { RecipeListItem } from '../types';
 
 const PAGE_SIZE = 50;
@@ -24,9 +25,16 @@ export function RecipeList() {
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
-    supabase
+    let query = supabase
       .from('recipes_public')
-      .select('id, site, name, image_url', { count: 'exact' })
+      .select('id, site, name, image_url', { count: 'exact' });
+
+    const { orFilters } = buildSearchFilters(q);
+    for (const f of orFilters) {
+      query = query.or(f);
+    }
+
+    query
       .order('name', { nullsFirst: false })
       .range(from, to)
       .then(({ data, count, error }) => {
@@ -45,7 +53,7 @@ export function RecipeList() {
     return () => {
       cancelled = true;
     };
-  }, [page]);
+  }, [page, q]);
 
   if (state.status === 'error') {
     return (

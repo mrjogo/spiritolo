@@ -9,19 +9,27 @@ import { RecipeList } from './RecipeList';
 
 type Row = { id: number; site: string; name: string | null; image_url: string | null };
 
-function mockRangeResponse(rows: Row[], count: number, error: unknown = null) {
+type OrChain = {
+  or: ReturnType<typeof vi.fn>;
+  order: ReturnType<typeof vi.fn>;
+};
+
+function makeChain(rows: Row[], count: number, error: unknown = null) {
   const range = vi.fn().mockResolvedValue({ data: rows, count, error });
   const order = vi.fn(() => ({ range }));
-  const select = vi.fn(() => ({ order }));
+  const or: OrChain['or'] = vi.fn();
+  or.mockReturnValue({ or, order });
+  const select = vi.fn(() => ({ or, order }));
   (supabase.from as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ select });
-  return { range, order, select };
+  return { range, order, or, select };
+}
+
+function mockRangeResponse(rows: Row[], count: number, error: unknown = null) {
+  return makeChain(rows, count, error);
 }
 
 function mockRejection(message: string) {
-  const range = vi.fn().mockResolvedValue({ data: null, count: null, error: { message } });
-  const order = vi.fn(() => ({ range }));
-  const select = vi.fn(() => ({ order }));
-  (supabase.from as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ select });
+  makeChain([], 0, { message });
 }
 
 describe('<RecipeList>', () => {
@@ -162,5 +170,57 @@ describe('<RecipeList>', () => {
     expect(screen.getByRole('searchbox', { name: /search recipes/i })).toHaveValue(
       'negroni',
     );
+  });
+
+  it('does not call .or() when q is empty', async () => {
+    const { or, range } = mockRangeResponse([], 0);
+    render(
+      <MemoryRouter>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(range).toHaveBeenCalled());
+    expect(or).not.toHaveBeenCalled();
+  });
+
+  it('calls .or() once per term when q has one term', async () => {
+    const { or } = mockRangeResponse([], 0);
+    render(
+      <MemoryRouter initialEntries={['/?q=negroni']}>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(or).toHaveBeenCalledTimes(1));
+    expect(or).toHaveBeenCalledWith(
+      'name.ilike.*negroni*,jsonld->>recipeIngredient.ilike.*negroni*',
+    );
+  });
+
+  it('calls .or() once per term when q has multiple terms', async () => {
+    const { or } = mockRangeResponse([], 0);
+    render(
+      <MemoryRouter initialEntries={['/?q=gin%20lime']}>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(or).toHaveBeenCalledTimes(2));
+    expect(or).toHaveBeenNthCalledWith(
+      1,
+      'name.ilike.*gin*,jsonld->>recipeIngredient.ilike.*gin*',
+    );
+    expect(or).toHaveBeenNthCalledWith(
+      2,
+      'name.ilike.*lime*,jsonld->>recipeIngredient.ilike.*lime*',
+    );
+  });
+
+  it('does not call .or() when q has only sub-3-char terms', async () => {
+    const { or } = mockRangeResponse([], 0);
+    render(
+      <MemoryRouter initialEntries={['/?q=a%20b']}>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(or).toHaveBeenCalledTimes(0));
   });
 });
