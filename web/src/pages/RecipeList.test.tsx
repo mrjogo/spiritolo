@@ -267,4 +267,45 @@ describe('<RecipeList>', () => {
     );
     vi.useRealTimers();
   });
+
+  it('shows a "no recipes match" message when search yields zero rows', async () => {
+    mockRangeResponse([], 0);
+    render(
+      <MemoryRouter initialEntries={['/?q=zzznevermatch']}>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    expect(
+      await screen.findByText(/no recipes match "zzznevermatch"/i),
+    ).toBeInTheDocument();
+  });
+
+  it('still shows the original empty-state message when q is empty and there are zero rows', async () => {
+    mockRangeResponse([], 0);
+    render(
+      <MemoryRouter>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText(/no recipes yet/i)).toBeInTheDocument();
+  });
+
+  it('renders a clear button that empties the input and removes q from the URL', async () => {
+    vi.useFakeTimers();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockRangeResponse([], 0);
+    render(
+      <MemoryRouter initialEntries={['/?q=negroni']}>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    const box = screen.getByRole('searchbox', { name: /search recipes/i });
+    expect(box).toHaveValue('negroni');
+    const clear = screen.getByRole('button', { name: /clear search/i });
+    await user.click(clear);
+    expect(box).toHaveValue('');
+    vi.advanceTimersByTime(250);
+    await waitFor(() => expect(box).toHaveValue(''));
+    vi.useRealTimers();
+  });
 });

@@ -97,6 +97,7 @@ a { color: #0a58ca; }
 }
 
 .recipe-list__search {
+  position: relative;
   margin-bottom: 1rem;
 }
 
@@ -107,4 +108,24 @@ a { color: #0a58ca; }
   border: 1px solid #ccc;
   border-radius: 6px;
   background: #fff;
+}
+
+.recipe-list__search-clear {
+  position: absolute;
+  top: 50%;
+  right: 0.5rem;
+  transform: translateY(-50%);
+  width: 1.75rem;
+  height: 1.75rem;
+  border: none;
+  background: #eee;
+  border-radius: 50%;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #444;
+}
+
+.recipe-list__search-clear:hover {
+  background: #ddd;
 }

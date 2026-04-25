@@ -93,6 +93,16 @@ export function RecipeList() {
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
         />
+        {inputValue !== '' && (
+          <button
+            type="button"
+            className="recipe-list__search-clear"
+            aria-label="Clear search"
+            onClick={() => setInputValue('')}
+          >
+            ×
+          </button>
+        )}
       </div>
       {state.status === 'loading' ? (
         <div>Loading…</div>
@@ -100,7 +110,13 @@ export function RecipeList() {
         <>
           <Pagination total={state.total} pageSize={PAGE_SIZE} />
           {state.rows.length === 0 ? (
-            <p className="recipe-list__empty">No recipes yet — extract some and they'll show up here.</p>
+            q === '' ? (
+              <p className="recipe-list__empty">
+                No recipes yet — extract some and they'll show up here.
+              </p>
+            ) : (
+              <p className="recipe-list__empty">No recipes match "{q}".</p>
+            )
           ) : (
             <ul className="recipe-list">
               {state.rows.map((r) => (
