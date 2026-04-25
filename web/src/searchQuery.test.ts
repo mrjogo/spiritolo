@@ -21,4 +21,21 @@ describe('buildSearchFilters', () => {
   it('trims surrounding whitespace from a single-term input', () => {
     expect(buildSearchFilters('  martini  ').terms).toEqual(['martini']);
   });
+
+  it('splits multi-word input on whitespace', () => {
+    const result = buildSearchFilters('gin lime');
+    expect(result.terms).toEqual(['gin', 'lime']);
+    expect(result.orFilters).toEqual([
+      'name.ilike.*gin*,jsonld->>recipeIngredient.ilike.*gin*',
+      'name.ilike.*lime*,jsonld->>recipeIngredient.ilike.*lime*',
+    ]);
+  });
+
+  it('collapses runs of whitespace and tabs', () => {
+    expect(buildSearchFilters('gin\t\t  lime  vermouth').terms).toEqual([
+      'gin',
+      'lime',
+      'vermouth',
+    ]);
+  });
 });

@@ -10,6 +10,6 @@ function toOrFilter(term: string): string {
 export function buildSearchFilters(q: string): SearchFilters {
   const trimmed = q.trim();
   if (trimmed === '') return { terms: [], orFilters: [] };
-  const terms = [trimmed];
+  const terms = trimmed.split(/\s+/);
   return { terms, orFilters: terms.map(toOrFilter) };
 }
