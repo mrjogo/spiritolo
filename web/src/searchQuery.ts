@@ -4,6 +4,7 @@ export type SearchFilters = {
 };
 
 const MIN_TERM_LENGTH = 3;
+const MAX_INPUT_LENGTH = 200;
 
 function stripEdges(term: string): string {
   return term.replace(/^[^A-Za-z0-9\\%_*]+|[^A-Za-z0-9\\%_*]+$/g, '');
@@ -19,7 +20,8 @@ function toOrFilter(term: string): string {
 }
 
 export function buildSearchFilters(q: string): SearchFilters {
-  const trimmed = q.trim();
+  const capped = q.slice(0, MAX_INPUT_LENGTH);
+  const trimmed = capped.trim();
   if (trimmed === '') return { terms: [], orFilters: [] };
   const terms = trimmed
     .split(/\s+/)

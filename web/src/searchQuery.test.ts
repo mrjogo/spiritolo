@@ -91,4 +91,14 @@ describe('buildSearchFilters', () => {
     const r = buildSearchFilters('foo*bar');
     expect(r.orFilters[0]).toContain('*foo\\*bar*');
   });
+
+  it('caps input at 200 characters before tokenizing', () => {
+    const longInput = 'a'.repeat(199) + ' beyond_the_cap_should_drop';
+    // Within the 200-char window: 199 'a's + 1 space → "aaa…aaa" + truncated word
+    const r = buildSearchFilters(longInput);
+    // The huge "aaa…" run is one term ≥3 chars, so it is kept and escaped.
+    expect(r.terms.length).toBeGreaterThanOrEqual(1);
+    // The trailing word is past the cap and must NOT appear.
+    expect(r.terms.some((t) => t.includes('beyond_the_cap_should_drop'))).toBe(false);
+  });
 });
