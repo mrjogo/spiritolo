@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { flushSync } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { Pagination } from '../components/Pagination';
@@ -23,16 +22,11 @@ export function RecipeList() {
 
   useEffect(() => {
     let cancelled = false;
-    // flushSync forces the pending=true commit to land before the resolved-
-    // promise pending=false commit below. In production the network round-trip
-    // separates them naturally; this only matters for synchronous test mocks.
-    flushSync(() => {
-      setState((prev) =>
-        prev.status === 'loaded'
-          ? { ...prev, pending: true }
-          : { status: 'initial' },
-      );
-    });
+    setState((prev) =>
+      prev.status === 'loaded'
+        ? { ...prev, pending: true }
+        : { status: 'initial' },
+    );
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 

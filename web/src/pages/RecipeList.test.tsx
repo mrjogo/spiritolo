@@ -312,27 +312,67 @@ describe('<RecipeList>', () => {
   it('dims the list while a refetch is in flight after typing', async () => {
     vi.useFakeTimers();
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
-    mockRangeResponse(
-      [{ id: 1, site: 's', name: 'Old Fashioned', image_url: null }],
-      1,
+
+    // First fetch resolves immediately. Second fetch is deferred so the
+    // pending=true render is observable before the response lands.
+    let resolveSecond!: (value: { data: Row[]; count: number; error: unknown }) => void;
+    const secondPromise = new Promise<{ data: Row[]; count: number; error: unknown }>(
+      (resolve) => {
+        resolveSecond = resolve;
+      },
     );
+
+    const range = vi
+      .fn()
+      .mockResolvedValueOnce({
+        data: [{ id: 1, site: 's', name: 'Old Fashioned', image_url: null }],
+        count: 1,
+        error: null,
+      })
+      .mockReturnValueOnce(secondPromise);
+
+    const order = vi.fn(() => ({ range }));
+    const or: ReturnType<typeof vi.fn> = vi.fn();
+    or.mockReturnValue({ or, order });
+    const select = vi.fn(() => ({ or, order }));
+    (supabase.from as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ select });
+
     render(
       <MemoryRouter>
         <RecipeList />
       </MemoryRouter>,
     );
+
+    // First fetch lands; list rendered, no dim class.
     await screen.findByText('Old Fashioned');
-    const list = document.querySelector('.recipe-list') as HTMLElement;
-    expect(list.className).not.toMatch(/recipe-list--loading/);
+    expect(document.querySelector('.recipe-list')!.className).not.toMatch(
+      /recipe-list--loading/,
+    );
+
+    // Type to trigger debounced URL write → triggers second fetch (deferred).
     const box = screen.getByRole('searchbox', { name: /search recipes/i });
     await user.type(box, 'old');
     vi.advanceTimersByTime(250);
-    // After URL write, fetch is in flight — list should be dimmed but still rendered
+
+    // While the second fetch is in flight, the list is rendered AND dimmed.
     await waitFor(() => {
-      const dimmedList = document.querySelector('.recipe-list') as HTMLElement | null;
-      expect(dimmedList).not.toBeNull();
-      expect(dimmedList!.className).toMatch(/recipe-list--loading/);
+      const list = document.querySelector('.recipe-list');
+      expect(list).not.toBeNull();
+      expect(list!.className).toMatch(/recipe-list--loading/);
     });
+
+    // Resolve the second fetch; dim class clears.
+    resolveSecond({
+      data: [{ id: 1, site: 's', name: 'Old Fashioned', image_url: null }],
+      count: 1,
+      error: null,
+    });
+    await waitFor(() => {
+      expect(document.querySelector('.recipe-list')!.className).not.toMatch(
+        /recipe-list--loading/,
+      );
+    });
+
     vi.useRealTimers();
   });
 });
