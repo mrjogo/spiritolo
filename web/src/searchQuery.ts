@@ -3,6 +3,7 @@ export type SearchFilters = {
   orFilters: string[];
 };
 
-export function buildSearchFilters(_q: string): SearchFilters {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function buildSearchFilters(q: string): SearchFilters {
   return { terms: [], orFilters: [] };
 }
