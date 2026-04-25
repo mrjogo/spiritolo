@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { Link, useSearchParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { Pagination } from '../components/Pagination';
@@ -7,21 +8,28 @@ import type { RecipeListItem } from '../types';
 
 const PAGE_SIZE = 50;
 
+type LoadedState = { status: 'loaded'; rows: RecipeListItem[]; total: number };
 type State =
-  | { status: 'loading' }
+  | { status: 'initial' }
   | { status: 'error'; message: string }
-  | { status: 'loaded'; rows: RecipeListItem[]; total: number };
+  | (LoadedState & { pending: boolean });
 
 export function RecipeList() {
   const [params, setSearchParams] = useSearchParams();
   const page = Math.max(1, parseInt(params.get('page') ?? '1', 10) || 1);
   const q = params.get('q') ?? '';
   const [inputValue, setInputValue] = useState(q);
-  const [state, setState] = useState<State>({ status: 'loading' });
+  const [state, setState] = useState<State>({ status: 'initial' });
 
   useEffect(() => {
     let cancelled = false;
-    setState({ status: 'loading' });
+    flushSync(() => {
+      setState((prev) =>
+        prev.status === 'loaded'
+          ? { ...prev, pending: true }
+          : { status: 'initial' },
+      );
+    });
     const from = (page - 1) * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
@@ -47,6 +55,7 @@ export function RecipeList() {
           status: 'loaded',
           rows: (data ?? []) as RecipeListItem[],
           total: count ?? 0,
+          pending: false,
         });
       });
 
@@ -104,7 +113,7 @@ export function RecipeList() {
           </button>
         )}
       </div>
-      {state.status === 'loading' ? (
+      {state.status === 'initial' ? (
         <div>Loading…</div>
       ) : (
         <>
@@ -118,7 +127,11 @@ export function RecipeList() {
               <p className="recipe-list__empty">No recipes match "{q}".</p>
             )
           ) : (
-            <ul className="recipe-list">
+            <ul
+              className={
+                state.pending ? 'recipe-list recipe-list--loading' : 'recipe-list'
+              }
+            >
               {state.rows.map((r) => (
                 <li key={r.id} className="recipe-list__item">
                   <Link to={`/recipes/${r.id}`}>

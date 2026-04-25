@@ -308,4 +308,31 @@ describe('<RecipeList>', () => {
     await waitFor(() => expect(box).toHaveValue(''));
     vi.useRealTimers();
   });
+
+  it('dims the list while a refetch is in flight after typing', async () => {
+    vi.useFakeTimers();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    mockRangeResponse(
+      [{ id: 1, site: 's', name: 'Old Fashioned', image_url: null }],
+      1,
+    );
+    render(
+      <MemoryRouter>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    await screen.findByText('Old Fashioned');
+    const list = document.querySelector('.recipe-list') as HTMLElement;
+    expect(list.className).not.toMatch(/recipe-list--loading/);
+    const box = screen.getByRole('searchbox', { name: /search recipes/i });
+    await user.type(box, 'old');
+    vi.advanceTimersByTime(250);
+    // After URL write, fetch is in flight — list should be dimmed but still rendered
+    await waitFor(() => {
+      const dimmedList = document.querySelector('.recipe-list') as HTMLElement | null;
+      expect(dimmedList).not.toBeNull();
+      expect(dimmedList!.className).toMatch(/recipe-list--loading/);
+    });
+    vi.useRealTimers();
+  });
 });
