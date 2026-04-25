@@ -12,7 +12,7 @@ from scraper.src.db import Database
 from spiritolo_common.progress import make_progress
 from scraper.src.structured import find_recipe
 from spiritolo_common.summary import print_summary
-from scraper.src.supabase_client import SupabaseClient
+from spiritolo_common.supabase_client import SupabaseClient
 
 EXTRACTOR_VERSION = "v1"
 """Bumped when the extractor's JSON-LD parsing or field derivation changes.
