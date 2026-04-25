@@ -23,6 +23,9 @@ export function RecipeList() {
 
   useEffect(() => {
     let cancelled = false;
+    // flushSync forces the pending=true commit to land before the resolved-
+    // promise pending=false commit below. In production the network round-trip
+    // separates them naturally; this only matters for synchronous test mocks.
     flushSync(() => {
       setState((prev) =>
         prev.status === 'loaded'
@@ -71,16 +74,15 @@ export function RecipeList() {
 
   // Debounce inputValue → URL.
   useEffect(() => {
-    if (inputValue === q) return; // no-op when already in sync
+    if (inputValue === q) return;
     const handle = setTimeout(() => {
-      const next = new URLSearchParams(params);
-      if (inputValue === '') next.delete('q');
-      else next.set('q', inputValue);
-      next.set('page', '1');
-      setSearchParams(next, { replace: true });
+      setSearchParams(
+        inputValue === '' ? { page: '1' } : { q: inputValue, page: '1' },
+        { replace: true },
+      );
     }, 250);
     return () => clearTimeout(handle);
-  }, [inputValue, q, params, setSearchParams]);
+  }, [inputValue, q, setSearchParams]);
 
   if (state.status === 'error') {
     return (
