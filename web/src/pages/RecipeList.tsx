@@ -13,7 +13,7 @@ type State =
   | { status: 'loaded'; rows: RecipeListItem[]; total: number };
 
 export function RecipeList() {
-  const [params] = useSearchParams();
+  const [params, setSearchParams] = useSearchParams();
   const page = Math.max(1, parseInt(params.get('page') ?? '1', 10) || 1);
   const q = params.get('q') ?? '';
   const [inputValue, setInputValue] = useState(q);
@@ -54,6 +54,24 @@ export function RecipeList() {
       cancelled = true;
     };
   }, [page, q]);
+
+  // Keep input in sync if URL changes externally (back/forward navigation).
+  useEffect(() => {
+    setInputValue(q);
+  }, [q]);
+
+  // Debounce inputValue → URL.
+  useEffect(() => {
+    if (inputValue === q) return; // no-op when already in sync
+    const handle = setTimeout(() => {
+      const next = new URLSearchParams(params);
+      if (inputValue === '') next.delete('q');
+      else next.set('q', inputValue);
+      next.set('page', '1');
+      setSearchParams(next, { replace: true });
+    }, 250);
+    return () => clearTimeout(handle);
+  }, [inputValue, q, params, setSearchParams]);
 
   if (state.status === 'error') {
     return (

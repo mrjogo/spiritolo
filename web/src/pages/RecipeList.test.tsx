@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 
 // Mock the supabase module BEFORE importing the component.
@@ -222,5 +223,48 @@ describe('<RecipeList>', () => {
       </MemoryRouter>,
     );
     await waitFor(() => expect(or).toHaveBeenCalledTimes(0));
+  });
+
+  it('updates the URL ?q= 250ms after typing stops, refetching with the new term', async () => {
+    vi.useFakeTimers();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const { or } = mockRangeResponse([], 0);
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    const box = await screen.findByRole('searchbox', { name: /search recipes/i });
+    await user.type(box, 'neg');
+    // Before the debounce fires, .or has NOT been called for "neg"
+    expect(or).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(250);
+    await waitFor(() => expect(or).toHaveBeenCalledTimes(1));
+    expect(or).toHaveBeenCalledWith(
+      'name.ilike.*neg*,jsonld->>recipeIngredient.ilike.*neg*',
+    );
+    vi.useRealTimers();
+  });
+
+  it('coalesces consecutive keystrokes into a single URL write', async () => {
+    vi.useFakeTimers();
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    const { or } = mockRangeResponse([], 0);
+    render(
+      <MemoryRouter initialEntries={['/']}>
+        <RecipeList />
+      </MemoryRouter>,
+    );
+    const box = await screen.findByRole('searchbox', { name: /search recipes/i });
+    await user.type(box, 'negroni');
+    // Many keystrokes typed; debounce hasn't fired
+    vi.advanceTimersByTime(100);
+    expect(or).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(250);
+    await waitFor(() => expect(or).toHaveBeenCalledTimes(1));
+    expect(or).toHaveBeenCalledWith(
+      'name.ilike.*negroni*,jsonld->>recipeIngredient.ilike.*negroni*',
+    );
+    vi.useRealTimers();
   });
 });
