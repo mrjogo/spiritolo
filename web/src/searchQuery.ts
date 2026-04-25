@@ -3,7 +3,13 @@ export type SearchFilters = {
   orFilters: string[];
 };
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
+function toOrFilter(term: string): string {
+  return `name.ilike.*${term}*,jsonld->>recipeIngredient.ilike.*${term}*`;
+}
+
 export function buildSearchFilters(q: string): SearchFilters {
-  return { terms: [], orFilters: [] };
+  const trimmed = q.trim();
+  if (trimmed === '') return { terms: [], orFilters: [] };
+  const terms = [trimmed];
+  return { terms, orFilters: terms.map(toOrFilter) };
 }
