@@ -75,6 +75,7 @@ class SupabaseClient:
         return {r[0] for r in rows}
 
     def truncate_recipes(self):
-        """Test-only helper."""
-        self.conn.execute("truncate table recipes")
+        """Test-only helper. CASCADE drops recipe_ingredients rows that FK
+        back to the truncated recipes."""
+        self.conn.execute("truncate table recipes cascade")
         self.conn.commit()

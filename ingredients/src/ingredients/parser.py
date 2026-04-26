@@ -208,12 +208,13 @@ _QUALIFIERS = ("fresh", "dried", "whole")
 
 
 def _try_count_noun(cleaned: str, raw: str) -> ParseResult | None:
-    """Match `<qty> [fresh|dried|whole]? <name_tokens>* <count_noun>` OR
-    `<qty> [fresh|dried|whole]? <count_noun> <name_tokens>+`.
+    """Match `<qty> [fresh|dried|whole]? <name_tokens>+ <count_noun>`.
 
-    The count noun must be in COUNT_NOUN_ALIASES. Strings with no count noun
-    abstain. Strings with no name (e.g. '1 egg white') also abstain — empty
-    names produce no useful structure.
+    The count noun must be in COUNT_NOUN_ALIASES and must sit at the tail.
+    Head-position placement (`1 leaf basil`) is uncommon enough to be
+    deferred past v1; such inputs abstain. Strings with no count noun and
+    strings whose count noun would leave an empty name (e.g. '1 egg white')
+    also abstain — empty names produce no useful structure.
     """
     qty = parse_quantity(cleaned)
     if qty is None:
