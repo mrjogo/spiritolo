@@ -105,6 +105,12 @@ class IngredientsDatabase:
                         parser_version,
                     ),
                 )
+        # psycopg3 conn.transaction() with autocommit=False opens a savepoint
+        # inside the auto-started outer transaction. Without an explicit
+        # commit, closing the connection rolls back everything — fine for
+        # tests that read from the same connection (read-your-own-writes),
+        # fatal for the worker which writes then closes. Commit per recipe.
+        self.conn.commit()
 
     def count_eval_rows(
         self, *, site: str | None, except_version: str | None,
