@@ -121,8 +121,27 @@ def _try_garnish_prefix(cleaned: str, raw: str) -> ParseResult | None:
     )
 
 
+_TOPUP_RE = re.compile(r"^top up with\s+(?P<name>.+)$", re.IGNORECASE)
+
+
+def _try_topup(cleaned: str, raw: str) -> ParseResult | None:
+    m = _TOPUP_RE.match(cleaned)
+    if not m:
+        return None
+    name = m.group("name").strip().lower()
+    if not name:
+        return None
+    return ParseResult(
+        raw_text=raw,
+        parse_status="parsed",
+        parser_rule="topup",
+        name=name,
+    )
+
+
 _RULES = [
     _try_garnish_prefix,
+    _try_topup,
 ]
 
 
