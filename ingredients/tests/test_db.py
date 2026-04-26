@@ -1,15 +1,38 @@
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import pytest
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
-requires_supabase = pytest.mark.skipif(
-    not os.environ.get("SUPABASE_DB_URL"),
-    reason="SUPABASE_DB_URL not set; skipping integration test",
-)
+_LOCAL_DB_HOSTS = {
+    "localhost",
+    "127.0.0.1",
+    "::1",
+    "host.docker.internal",
+    "192.168.65.254",  # IPv4 of host.docker.internal from devcontainer
+}
+
+
+def _db_url_is_safe_for_truncation() -> tuple[bool, str]:
+    url = os.environ.get("SUPABASE_DB_URL")
+    if not url:
+        return False, "SUPABASE_DB_URL not set; skipping integration test"
+    if os.environ.get("SPIRITOLO_TEST_ALLOW_REMOTE_DB") == "1":
+        return True, ""
+    host = (urlparse(url).hostname or "").lower()
+    if host in _LOCAL_DB_HOSTS:
+        return True, ""
+    return False, (
+        f"SUPABASE_DB_URL host {host!r} is not local; refusing to truncate. "
+        "Set SPIRITOLO_TEST_ALLOW_REMOTE_DB=1 to override."
+    )
+
+
+_db_safe, _db_skip_reason = _db_url_is_safe_for_truncation()
+requires_supabase = pytest.mark.skipif(not _db_safe, reason=_db_skip_reason)
 
 PARSER_VERSION_TEST = "v-test"
 
