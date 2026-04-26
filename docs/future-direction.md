@@ -1,5 +1,9 @@
 # Spiritolo — Future Direction
 
+## Status
+
+- **[B] Spirits taxonomy** — schema + initial seed landed. Design and content rules in [spirits-taxonomy.md](spirits-taxonomy.md).
+
 ## Vision
 
 A worldwide compendium of cocktail recipes — every recipe ever published online, with AI-powered substitutions, a graph of related recipes, and a data source for RecipeGF.
