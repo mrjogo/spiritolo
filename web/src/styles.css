@@ -95,3 +95,42 @@ a { color: #0a58ca; }
   background: #eee;
   border-radius: 3px;
 }
+
+.recipe-list__search {
+  position: relative;
+  margin-bottom: 1rem;
+}
+
+.recipe-list__search input[type='search'] {
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  font-size: 1rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.recipe-list__search-clear {
+  position: absolute;
+  top: 50%;
+  right: 0.5rem;
+  transform: translateY(-50%);
+  width: 1.75rem;
+  height: 1.75rem;
+  border: none;
+  background: #eee;
+  border-radius: 50%;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #444;
+}
+
+.recipe-list__search-clear:hover {
+  background: #ddd;
+}
+
+.recipe-list--loading {
+  opacity: 0.5;
+  transition: opacity 80ms ease-in;
+}
