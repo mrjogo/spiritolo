@@ -101,3 +101,42 @@ def parse_quantity(s: str) -> tuple[float, float | None, int] | None:
     a = _atom_to_float(m.group("a"))
     b = _atom_to_float(m.group("b")) if m.group("b") else None
     return a, b, m.end()
+
+
+_GARNISH_PREFIX_RE = re.compile(r"^garnish\s*:\s*(?P<name>.+)$", re.IGNORECASE)
+
+
+def _try_garnish_prefix(cleaned: str, raw: str) -> ParseResult | None:
+    m = _GARNISH_PREFIX_RE.match(cleaned)
+    if not m:
+        return None
+    name = m.group("name").strip().lower()
+    if not name:
+        return None
+    return ParseResult(
+        raw_text=raw,
+        parse_status="parsed",
+        parser_rule="garnish_prefix",
+        name=name,
+    )
+
+
+_RULES = [
+    _try_garnish_prefix,
+]
+
+
+def parse(raw: str, site: str | None = None) -> ParseResult:
+    """Apply the parser ladder to `raw`. Returns ParseResult; never raises.
+
+    `site` is informational only; rules may use it to dispatch quirks but
+    must not relax strictness based on it.
+    """
+    cleaned = pre_clean(raw)
+    if not cleaned:
+        return ParseResult(raw_text=raw, parse_status="unparseable")
+    for rule in _RULES:
+        result = rule(cleaned, raw)
+        if result is not None:
+            return result
+    return ParseResult(raw_text=raw, parse_status="unparseable")
