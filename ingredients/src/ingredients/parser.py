@@ -11,9 +11,22 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from ingredients.units import canonicalize_unit, canonicalize_count_noun
+from ingredients.units import canonicalize_unit, canonicalize_count_noun, UNIT_ALIASES
 
 PARSER_VERSION = "v1"
+
+# Pattern used to detect concatenated multi-ingredient rows in the candidate
+# name produced by _try_qty_unit. If the name contains an embedded quantity
+# followed by a known unit (e.g. "amaro3 oz ...") it's a concatenation artifact
+# and we must abstain rather than produce a garbled parse.
+# Built from the full UNIT_ALIASES table so it stays in sync automatically.
+# Sorted longest-first to avoid early truncation in alternation.
+_UNIT_ALTERNATION = "|".join(
+    re.escape(k) for k in sorted(UNIT_ALIASES, key=len, reverse=True)
+)
+_CONCAT_RE = re.compile(
+    rf"\d+\s*(?:{_UNIT_ALTERNATION})\b", re.IGNORECASE
+)
 
 
 @dataclass
@@ -174,6 +187,11 @@ def _try_qty_unit(cleaned: str, raw: str) -> ParseResult | None:
     name_part = rest[name_start:].lstrip().lower()
     name_part = re.sub(r"\s+", " ", name_part).strip()
     if not name_part:
+        return None
+    # Concatenated-row guard: if the candidate name contains an embedded
+    # quantity+unit token (e.g. "amaro3 oz lambrusco..." or "(1 1/2 tablespoons)
+    # st-germain..."), this is a scraper artifact and we must abstain.
+    if _CONCAT_RE.search(name_part):
         return None
     return ParseResult(
         raw_text=raw,
