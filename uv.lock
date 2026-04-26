@@ -5,6 +5,7 @@ requires-python = ">=3.11"
 [manifest]
 members = [
     "spiritolo-common",
+    "spiritolo-ingredients",
     "spiritolo-scraper",
 ]
 
@@ -813,6 +814,30 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
+]
+provides-extras = ["dev"]
+
+[[package]]
+name = "spiritolo-ingredients"
+version = "0.1.0"
+source = { editable = "ingredients" }
+dependencies = [
+    { name = "psycopg", extra = ["binary"] },
+    { name = "python-dotenv" },
+    { name = "spiritolo-common" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "spiritolo-common", editable = "common" },
 ]
 provides-extras = ["dev"]
 
