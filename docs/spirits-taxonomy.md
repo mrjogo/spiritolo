@@ -19,8 +19,6 @@ taxonomy_nodes (
   slug          text UNIQUE NOT NULL,         -- 'rye_whiskey', 'lemon', 'buffalo_trace_eagle_rare_10'
   display_name  text NOT NULL,                -- 'Rye Whiskey'
   role          text CHECK (role IN ('brand', 'expression')),  -- nullable; see Roles below
-  attributes    jsonb NOT NULL DEFAULT '{}',  -- ABV, region, mash_bill, age, vintage, alcoholic (bool), ...
-  curation      text NOT NULL DEFAULT 'pending_review', -- 'curated' | 'auto' | 'pending_review'
   created_at    timestamptz NOT NULL DEFAULT now()
 )
 
@@ -34,17 +32,23 @@ taxonomy_edges (
 -- Cycle prevention enforced at app level. Add a defensive trigger if needed.
 
 -- Free-text strings the [D] mapper resolves to a canonical node.
--- Same alias may have multiple rows pointing at different nodes; mapper picks via context + confidence.
+-- Same alias may have multiple rows pointing at different nodes; mapper picks via context.
 taxonomy_aliases (
   alias         text NOT NULL,
   node_id       bigint NOT NULL REFERENCES taxonomy_nodes(id) ON DELETE CASCADE,
-  source        text NOT NULL,                -- 'manual' | 'mapper_v1' | ...
-  confidence    real,
   PRIMARY KEY (alias, node_id)
 )
 ```
 
 Recursive CTEs (`WITH RECURSIVE`) traverse the DAG. Add a materialized closure table only if recursion becomes a hotspot — at expected node counts (low thousands), it won't.
+
+### Deferred until a consumer needs it
+
+These were considered and explicitly cut. Add when a real feature wants them — not preemptively:
+
+- **Hard-constraint flags on nodes** (`is_alcoholic`, `is_vegan_compatible`, `allergens`) — add as typed columns when the filter UX gets built. No generic `attributes` JSONB blob; junk drawers grow.
+- **`curation` column** (`'curated' | 'auto' | 'pending_review'`) — meaningful only once the [D] mapper auto-creates nodes.
+- **`source` / `confidence` on aliases** — same; until the mapper exists, every alias is manual.
 
 ## Roles
 
@@ -65,9 +69,8 @@ Adding a role requires a migration and a defensible reason. A candidate role mus
 Add a node when the concept is:
 
 - **Definitional or regulatory** — `whiskey`, `bourbon`, `rye_whiskey`, `london_dry_gin`, `single_malt_scotch`, `vermouth`, `amaro`.
-- **A brand or expression** (`role = 'brand'` / `'expression'`) — `buffalo_trace`, `eagle_rare_10`. Hand-curate the well-known; let the [D] mapper auto-create the long tail with `curation = 'pending_review'`.
+- **A brand or expression** (`role = 'brand'` / `'expression'`) — `buffalo_trace`, `eagle_rare_10`. Hand-curate the well-known; let the [D] mapper auto-create the long tail when it exists.
 - **A category whose children share substitution semantics** — `citrus` (parent of `lemon`, `lime`), `berries` (parent of `strawberry`, `raspberry`).
-- **A hard-constraint distinction** — alcoholic vs non-alcoholic, vegan-incompatible (honey, dairy), allergen-bearing. Prefer modeling as `attributes` flags over parent edges when one-bit.
 
 ## What does not belong as a node
 
@@ -76,7 +79,7 @@ Do not add a node for:
 - **Sensory descriptors** — smoky, rich, herbal, citrusy, bitter, dry, sweet.
 - **Style or occasion** — summer drink, holiday, after-dinner, brunch.
 - **Colloquial groupings** — brown liquor, white liquor, barrel-aged.
-- **Single-node properties** — proof, ABV, vintage, age statement, mash bill, region. These go in `attributes` JSONB on the node they describe.
+- **Single-node properties** — proof, ABV, vintage, age statement, mash bill, region. These describe one node and don't group; surface via the vector layer or a typed column when a real consumer wants them.
 
 ## Promotion rule
 
@@ -88,7 +91,7 @@ A soft grouping becomes a node **only when** a product surface (UI section, filt
 |---|---|
 | Resolve free-text ingredient → canonical ID | **Taxonomy** (deterministic alias lookup) |
 | Filter "all whiskeys" / "all bourbons" | **Taxonomy** |
-| Hard constraints (NA-only, vegan, allergen-free) | **Taxonomy** (`attributes` / `role`) |
+| Hard constraints (NA-only, vegan, allergen-free) | **Taxonomy** (typed columns added when needed) |
 | Browse / explore by category | **Taxonomy** |
 | Substitution candidate generation | **Vectors** |
 | "Similar drinks" | **Vectors** |
