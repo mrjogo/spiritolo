@@ -11,7 +11,7 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from ingredients.units import canonicalize_unit
+from ingredients.units import canonicalize_unit, canonicalize_count_noun
 
 PARSER_VERSION = "v1"
 
@@ -186,10 +186,62 @@ def _try_qty_unit(cleaned: str, raw: str) -> ParseResult | None:
     )
 
 
+_QUALIFIERS = ("fresh", "dried", "whole")
+
+
+def _try_count_noun(cleaned: str, raw: str) -> ParseResult | None:
+    """Match `<qty> [fresh|dried|whole]? <name_tokens>* <count_noun>` OR
+    `<qty> [fresh|dried|whole]? <count_noun> <name_tokens>+`.
+
+    The count noun must be in COUNT_NOUN_ALIASES. Strings with no count noun
+    abstain. Strings with no name (e.g. '1 egg white') also abstain — empty
+    names produce no useful structure.
+    """
+    qty = parse_quantity(cleaned)
+    if qty is None:
+        return None
+    amount, amount_max, qty_end = qty
+    rest = cleaned[qty_end:].lstrip().lower()
+    if not rest:
+        return None
+
+    tokens = rest.split()
+    # Strip a leading qualifier if present (drop it; modifier=None for v1).
+    if tokens and tokens[0] in _QUALIFIERS:
+        tokens = tokens[1:]
+    if not tokens:
+        return None
+
+    # Try count noun at end-of-string first (most common: '3 fresh basil leaves').
+    # Multi-word count nouns ('egg white') need a 2-token tail check.
+    for tail_words in (2, 1):
+        if len(tokens) < tail_words + 1:
+            continue
+        tail = " ".join(tokens[-tail_words:])
+        canon = canonicalize_count_noun(tail)
+        if canon is None:
+            continue
+        name_tokens = tokens[:-tail_words]
+        name_part = " ".join(name_tokens).strip()
+        if not name_part:
+            return None
+        return ParseResult(
+            raw_text=raw,
+            parse_status="parsed",
+            parser_rule="count_noun",
+            amount=amount,
+            amount_max=amount_max,
+            unit=canon,
+            name=name_part,
+        )
+    return None
+
+
 _RULES = [
     _try_garnish_prefix,
     _try_topup,
     _try_qty_unit,
+    _try_count_noun,
 ]
 
 
