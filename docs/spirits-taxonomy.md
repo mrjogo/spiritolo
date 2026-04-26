@@ -13,13 +13,12 @@ The taxonomy exists to do three things vectors are bad at: (1) deterministic ali
 Three tables, vanilla Postgres, no extensions. Works on Supabase as-is.
 
 ```sql
--- One row per concept: a category, a brand, an expression, a produce item.
+-- One row per concept: a category, a brand, an expression, a fresh ingredient.
 taxonomy_nodes (
   id            bigint PRIMARY KEY,
   slug          text UNIQUE NOT NULL,         -- 'rye_whiskey', 'lemon', 'buffalo_trace_eagle_rare_10'
   display_name  text NOT NULL,                -- 'Rye Whiskey'
-  kind          text NOT NULL,                -- 'product' | 'produce'
-  level         text,                         -- 'category' | 'type' | 'brand' | 'expression' (informational)
+  role          text CHECK (role IN ('brand', 'expression')),  -- nullable; see Roles below
   attributes    jsonb NOT NULL DEFAULT '{}',  -- ABV, region, mash_bill, age, vintage, alcoholic (bool), ...
   curation      text NOT NULL DEFAULT 'pending_review', -- 'curated' | 'auto' | 'pending_review'
   created_at    timestamptz NOT NULL DEFAULT now()
@@ -47,21 +46,28 @@ taxonomy_aliases (
 
 Recursive CTEs (`WITH RECURSIVE`) traverse the DAG. Add a materialized closure table only if recursion becomes a hotspot — at expected node counts (low thousands), it won't.
 
-### Naming
+## Roles
 
-- `products` (`kind = 'product'`) — manufactured, branded, packaged: spirits, liqueurs, vermouth, bitters, amari, NA spirits, tonic, sodas, bottled syrups.
-- `produce` (`kind = 'produce'`) — fresh / unbranded: citrus, herbs, eggs, dairy.
+A `role` marks a node's *role in the data model* — what kind of thing-in-the-schema it is, not what kind of substance it represents. Substance lives in the DAG. Soft groupings (smoky, brown liquor) belong to the vector layer.
 
-Both share the same DAG.
+Closed vocabulary, enforced by `CHECK`:
+
+| Role | Meaning |
+|---|---|
+| `brand` | Node represents a manufacturer's brand line (Buffalo Trace, Smirnoff). |
+| `expression` | Node represents a specific SKU / release (Eagle Rare 10, Smirnoff No. 21). |
+| `NULL` | Everything else — categories, types, fresh ingredients. |
+
+Adding a role requires a migration and a defensible reason. A candidate role must describe a node's *role in the schema*, never a sensory or stylistic property. If it describes how the node feels or groups by vibe, it's not a role.
 
 ## What belongs as a node
 
 Add a node when the concept is:
 
 - **Definitional or regulatory** — `whiskey`, `bourbon`, `rye_whiskey`, `london_dry_gin`, `single_malt_scotch`, `vermouth`, `amaro`.
-- **A brand or expression** — `buffalo_trace`, `eagle_rare_10`. Hand-curate the well-known; let the [D] mapper auto-create the long tail with `curation = 'pending_review'`.
-- **A produce category with rule-shaped substitution** — `citrus` (parent of `lemon`, `lime`), `berries` (parent of `strawberry`, `raspberry`).
-- **A hard-constraint distinction** — alcoholic vs non-alcoholic, vegan-incompatible (honey, dairy), allergen-bearing. Prefer modeling as `attributes`/`kind` flags over parent edges when one-bit.
+- **A brand or expression** (`role = 'brand'` / `'expression'`) — `buffalo_trace`, `eagle_rare_10`. Hand-curate the well-known; let the [D] mapper auto-create the long tail with `curation = 'pending_review'`.
+- **A category whose children share substitution semantics** — `citrus` (parent of `lemon`, `lime`), `berries` (parent of `strawberry`, `raspberry`).
+- **A hard-constraint distinction** — alcoholic vs non-alcoholic, vegan-incompatible (honey, dairy), allergen-bearing. Prefer modeling as `attributes` flags over parent edges when one-bit.
 
 ## What does not belong as a node
 
@@ -82,7 +88,7 @@ A soft grouping becomes a node **only when** a product surface (UI section, filt
 |---|---|
 | Resolve free-text ingredient → canonical ID | **Taxonomy** (deterministic alias lookup) |
 | Filter "all whiskeys" / "all bourbons" | **Taxonomy** |
-| Hard constraints (NA-only, vegan, allergen-free) | **Taxonomy** (`attributes` / `kind`) |
+| Hard constraints (NA-only, vegan, allergen-free) | **Taxonomy** (`attributes` / `role`) |
 | Browse / explore by category | **Taxonomy** |
 | Substitution candidate generation | **Vectors** |
 | "Similar drinks" | **Vectors** |
