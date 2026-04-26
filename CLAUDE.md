@@ -65,7 +65,7 @@ Stage CLIs (`fetch`, `classify`, `validate`, `extract`) share `--site` / `--limi
 
 DAG of canonical ingredients. **Read [docs/spirits-taxonomy.md](docs/spirits-taxonomy.md) before adding nodes** — the lean stance (taxonomy for definitional categories + hard constraints; vector layer for soft similarity) is load-bearing. Don't add sensory, stylistic, or colloquial nodes.
 
-Add by editing `supabase/migrations/20260426120100_seed_taxonomy.sql` and re-running `supabase db reset`.
+Add by editing `supabase/seed.sql` (local dev only — Supabase doesn't apply seed files to prod) and re-running `supabase db reset`.
 
 ## Web UI
 
