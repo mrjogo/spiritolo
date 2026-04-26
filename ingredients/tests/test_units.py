@@ -32,6 +32,36 @@ def test_canonicalize_unit_bartending():
     assert canonicalize_unit("pinch") == "pinch"
     assert canonicalize_unit("part") == "part"
     assert canonicalize_unit("parts") == "part"
+    assert canonicalize_unit("shot") == "shot"
+    assert canonicalize_unit("shots") == "shot"
+    assert canonicalize_unit("bottle") == "bottle"
+    assert canonicalize_unit("Bottles") == "bottle"
+    assert canonicalize_unit("bunch") == "bunch"
+    assert canonicalize_unit("bunches") == "bunch"
+
+
+def test_canonicalize_unit_volume_extended():
+    assert canonicalize_unit("pint") == "pint"
+    assert canonicalize_unit("pints") == "pint"
+    assert canonicalize_unit("pt") == "pint"
+    assert canonicalize_unit("quart") == "quart"
+    assert canonicalize_unit("quarts") == "quart"
+    assert canonicalize_unit("qt") == "quart"
+    assert canonicalize_unit("milliliter") == "ml"
+    assert canonicalize_unit("Milliliters") == "ml"
+
+
+def test_canonicalize_unit_weight():
+    assert canonicalize_unit("g") == "g"
+    assert canonicalize_unit("gram") == "g"
+    assert canonicalize_unit("grams") == "g"
+    assert canonicalize_unit("kg") == "kg"
+    assert canonicalize_unit("kilogram") == "kg"
+    assert canonicalize_unit("kilograms") == "kg"
+    assert canonicalize_unit("lb") == "lb"
+    assert canonicalize_unit("lbs") == "lb"
+    assert canonicalize_unit("pound") == "lb"
+    assert canonicalize_unit("Pounds") == "lb"
 
 
 def test_canonicalize_unit_unknown_returns_none():

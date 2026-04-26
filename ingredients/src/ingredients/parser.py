@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from ingredients.units import canonicalize_unit, canonicalize_count_noun, UNIT_ALIASES
 
-PARSER_VERSION = "v1"
+PARSER_VERSION = "v2"
 
 # Pattern used to detect concatenated multi-ingredient rows in the candidate
 # name produced by _try_qty_unit. If the name contains an embedded quantity

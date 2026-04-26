@@ -12,12 +12,19 @@ UNIT_ALIASES: dict[str, str] = {
     "oz": "oz", "oz.": "oz", "ounce": "oz", "ounces": "oz",
     "fl oz": "oz", "fl. oz.": "oz", "fl oz.": "oz",
     "fluid ounce": "oz", "fluid ounces": "oz",
-    "ml": "ml", "ml.": "ml",
+    "ml": "ml", "ml.": "ml", "milliliter": "ml", "milliliters": "ml",
     "cl": "cl",
     "l": "l", "liter": "l", "liters": "l", "litre": "l", "litres": "l",
     "tsp": "tsp", "tsp.": "tsp", "teaspoon": "tsp", "teaspoons": "tsp",
     "tbsp": "tbsp", "tbsp.": "tbsp", "tablespoon": "tbsp", "tablespoons": "tbsp",
     "cup": "cup", "cups": "cup",
+    "pint": "pint", "pints": "pint", "pt": "pint", "pt.": "pint",
+    "quart": "quart", "quarts": "quart", "qt": "quart", "qt.": "quart",
+    # weight
+    "g": "g", "g.": "g", "gram": "g", "grams": "g",
+    "kg": "kg", "kg.": "kg", "kilogram": "kg", "kilograms": "kg",
+    "lb": "lb", "lb.": "lb", "lbs": "lb", "lbs.": "lb",
+    "pound": "lb", "pounds": "lb",
     # bartending counts treated as units
     "dash": "dash", "dashes": "dash",
     "drop": "drop", "drops": "drop",
@@ -27,6 +34,12 @@ UNIT_ALIASES: dict[str, str] = {
     "part": "part", "parts": "part",
     "jigger": "jigger", "jiggers": "jigger",
     "pony": "pony", "ponies": "pony",
+    "shot": "shot", "shots": "shot",
+    # container counts — volume is context-dependent (wine bottle ≠ beer
+    # bottle); downstream consumers must resolve the canonical volume from
+    # the name, not from the unit alone.
+    "bottle": "bottle", "bottles": "bottle",
+    "bunch": "bunch", "bunches": "bunch",
 }
 
 # Surface form -> canonical count noun. Same lookup discipline.

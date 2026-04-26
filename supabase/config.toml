@@ -64,7 +64,7 @@ enabled = true
 # Supports glob patterns relative to supabase directory: "./seeds/*.sql"
 # recipes.sql is excluded: it's a pg_dump COPY-from-stdin file, which the
 # Supabase CLI's Go-based seed runner can't process. Apply it via psql:
-#   psql "<db-url>" -v ON_ERROR_STOP=1 -f supabase/seeds/recipes.sql
+#   psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/seeds/recipes.sql
 sql_paths = ["./seeds/taxonomy_nodes.sql"]
 
 [db.network_restrictions]
