@@ -21,15 +21,15 @@ Run `cd scraper && uv run …` and `cd web && npm …` from the repo root.
 
 **Supabase runs on the Mac host, not the devcontainer** (DooD vs `supabase start`'s bind mounts). Host setup: `brew install supabase/tap/supabase && supabase start`. Studio at http://localhost:54323.
 
-Devcontainer `.env`: `SUPABASE_DB_URL=postgresql://postgres:postgres@host.docker.internal:54322/postgres`.
+Devcontainer `.env`: `SUPABASE_DB_URL=postgresql://postgres:postgres@host.docker.internal:54322/postgres`. App code (psycopg, JS clients, browser) connects fine via this URL — glibc's resolver returns the IPv4 address (`192.168.65.254`) and there's no IPv6 record to trip over.
 
-**Migrations from the devcontainer require the IPv4 host** — `host.docker.internal` resolves IPv6-only and isn't routable:
+**The `supabase` CLI is the exception.** Its Go-based resolver picks up an IPv6 form of `host.docker.internal` that isn't routable from the container, so commands that talk to the DB (`db reset`, `migration list`, etc.) need the IPv4 literal:
 
 ```bash
 supabase db reset --db-url "postgresql://postgres:postgres@192.168.65.254:54322/postgres" --yes
 ```
 
-The trailing `tls error` is misleading — migrations succeed. Verify with a `select`.
+The trailing `tls error (server refused TLS connection)` is misleading — migrations succeed. Verify with a `select`.
 
 URL classifier needs ollama: `ollama pull qwen3:14b`.
 
@@ -66,6 +66,35 @@ Stage CLIs (`fetch`, `classify`, `validate`, `extract`) share `--site` / `--limi
 DAG of canonical ingredients. **Read [docs/spirits-taxonomy.md](docs/spirits-taxonomy.md) before adding nodes** — the lean stance (taxonomy for definitional categories + hard constraints; vector layer for soft similarity) is load-bearing. Don't add sensory, stylistic, or colloquial nodes.
 
 Add by editing `supabase/seed.sql` (local dev only — Supabase doesn't apply seed files to prod) and re-running `supabase db reset`.
+
+## Ingredient Parser
+
+`ingredients/` is a Zone-2 worker that reads `recipes` from Supabase, parses each `jsonld.recipeIngredient` string with strict abstain discipline, and writes rows to `recipe_ingredients`. It depends on the shared `common/` package, not on `scraper/`.
+
+**Versioning:** `PARSER_VERSION` lives in [parser.py](ingredients/src/ingredients/parser.py). Bump it whenever any parser rule changes (including unit-table edits). Rows carry the version they were parsed under.
+
+**Typical usage (from repo root):**
+
+```bash
+# Main run — parse every recipe lacking a row at the current PARSER_VERSION.
+cd ingredients && uv run python -m ingredients.cli
+
+# Scoped to one site, with a row cap.
+cd ingredients && uv run python -m ingredients.cli --site punch --limit 200
+
+# Dry-run preview, no DB writes.
+cd ingredients && uv run python -m ingredients.cli --dry-run
+
+# Run the eval set; no DB writes. Use during rule iteration.
+cd ingredients && uv run python -m ingredients.cli --review
+
+# After bumping PARSER_VERSION, re-parse everything left at the old version.
+cd ingredients && uv run python -m ingredients.cli --reset --except-version v1 --yes
+```
+
+The eval set is `ingredients/src/ingredients/eval_set.py`. Add a new should-parse-as-X case whenever you teach the parser a new pattern; add a should-abstain case whenever you find an over-match.
+
+**Common, scraper, ingredients packages.** `common/` holds shared utilities (`supabase_client`, `progress`, `summary`, `cli_common`); both `scraper/` (Zone 1) and `ingredients/` (Zone 2) depend on it via the root-level uv workspace.
 
 ## Web UI
 
