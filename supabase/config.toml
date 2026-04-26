@@ -62,7 +62,10 @@ schema_paths = []
 enabled = true
 # Specifies an ordered list of seed files to load during db reset.
 # Supports glob patterns relative to supabase directory: "./seeds/*.sql"
-sql_paths = ["./seeds/*.sql"]
+# recipes.sql is excluded: it's a pg_dump COPY-from-stdin file, which the
+# Supabase CLI's Go-based seed runner can't process. Apply it via psql:
+#   psql "<db-url>" -v ON_ERROR_STOP=1 -f supabase/seeds/recipes.sql
+sql_paths = ["./seeds/taxonomy_nodes.sql"]
 
 [db.network_restrictions]
 # Enable management of network restrictions.
