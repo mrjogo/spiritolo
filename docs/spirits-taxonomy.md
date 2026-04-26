@@ -42,14 +42,6 @@ taxonomy_aliases (
 
 Recursive CTEs (`WITH RECURSIVE`) traverse the DAG. Add a materialized closure table only if recursion becomes a hotspot — at expected node counts (low thousands), it won't.
 
-### Deferred until a consumer needs it
-
-These were considered and explicitly cut. Add when a real feature wants them — not preemptively:
-
-- **Hard-constraint flags on nodes** (`is_alcoholic`, `is_vegan_compatible`, `allergens`) — add as typed columns when the filter UX gets built. No generic `attributes` JSONB blob; junk drawers grow.
-- **`curation` column** (`'curated' | 'auto' | 'pending_review'`) — meaningful only once the [D] mapper auto-creates nodes.
-- **`source` / `confidence` on aliases** — same; until the mapper exists, every alias is manual.
-
 ## Roles
 
 A `role` marks a node's *role in the data model* — what kind of thing-in-the-schema it is, not what kind of substance it represents. Substance lives in the DAG. Soft groupings (smoky, brown liquor) belong to the vector layer.
