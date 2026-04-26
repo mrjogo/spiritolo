@@ -35,10 +35,10 @@ def test_garnish_prefix_empty_name_abstains():
     assert r.parse_status == "unparseable"
 
 
-def test_no_garnish_prefix_leaves_unparseable_for_now():
-    """Other rules don't exist yet; non-matching strings stay unparseable."""
+def test_no_garnish_prefix_does_not_match_qty_unit():
+    """garnish_prefix must not fire on a qty+unit string."""
     r = parse("1 oz gin")
-    assert r.parse_status == "unparseable"
+    assert r.parser_rule != "garnish_prefix"
 
 
 def test_raw_text_preserved_on_parse():

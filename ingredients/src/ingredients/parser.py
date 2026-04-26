@@ -11,6 +11,8 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
+from ingredients.units import canonicalize_unit
+
 PARSER_VERSION = "v1"
 
 
@@ -139,9 +141,55 @@ def _try_topup(cleaned: str, raw: str) -> ParseResult | None:
     )
 
 
+def _try_qty_unit(cleaned: str, raw: str) -> ParseResult | None:
+    qty = parse_quantity(cleaned)
+    if qty is None:
+        return None
+    amount, amount_max, qty_end = qty
+    rest = cleaned[qty_end:]
+    if not rest.startswith(" "):
+        return None
+    rest = rest.lstrip()
+    if not rest:
+        return None
+    # Greedy match the longest unit alias that prefixes the remaining text.
+    # Multi-word aliases (e.g. 'fluid ounce', 'fl oz') must be tried before
+    # single-word aliases.
+    unit_canon = None
+    name_start = -1
+    for alias_len_words in (3, 2, 1):
+        tokens = rest.split(" ", alias_len_words)
+        if len(tokens) <= alias_len_words:
+            continue
+        candidate_alias = " ".join(tokens[:alias_len_words])
+        canon = canonicalize_unit(candidate_alias)
+        if canon is None:
+            continue
+        # Prefer the longest matching alias by trying alias_len_words=3 first.
+        unit_canon = canon
+        name_start = len(candidate_alias)
+        break
+    if unit_canon is None:
+        return None
+    name_part = rest[name_start:].lstrip().lower()
+    name_part = re.sub(r"\s+", " ", name_part).strip()
+    if not name_part:
+        return None
+    return ParseResult(
+        raw_text=raw,
+        parse_status="parsed",
+        parser_rule="qty_unit",
+        amount=amount,
+        amount_max=amount_max,
+        unit=unit_canon,
+        name=name_part,
+    )
+
+
 _RULES = [
     _try_garnish_prefix,
     _try_topup,
+    _try_qty_unit,
 ]
 
 
