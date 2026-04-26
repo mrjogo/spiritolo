@@ -2,7 +2,7 @@
 
 ## Status
 
-- **[B] Spirits taxonomy** — schema + initial seed landed. Design and content rules in [spirits-taxonomy.md](spirits-taxonomy.md).
+- **Completed** [A], [B], [C]
 
 ## Vision
 
