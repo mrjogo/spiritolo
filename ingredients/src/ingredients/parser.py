@@ -64,3 +64,40 @@ def pre_clean(s: str) -> str:
     while s and s[0] in _TRIM_PUNCT:
         s = s[1:].lstrip()
     return s
+
+
+# Atomic numeric token: integer, decimal, fraction, or mixed number.
+# Mixed and fraction must come BEFORE plain integer in alternations.
+# Fraction denominators are [1-9]\d* — forbids zero (avoids divide-by-zero
+# downstream) and forbids leading-zero denominators that wouldn't be valid.
+_NUM_ATOM = r"(?:\d+\s+\d+/[1-9]\d*|\d+/[1-9]\d*|\d+(?:\.\d+)?)"
+_QTY_RE = re.compile(rf"^(?P<a>{_NUM_ATOM})(?:\s*(?:to|-)\s*(?P<b>{_NUM_ATOM}))?")
+
+
+def _atom_to_float(token: str) -> float:
+    token = token.strip()
+    if " " in token:
+        whole, frac = token.split(None, 1)
+        num, den = frac.split("/")
+        return float(whole) + float(num) / float(den)
+    if "/" in token:
+        num, den = token.split("/")
+        return float(num) / float(den)
+    return float(token)
+
+
+def parse_quantity(s: str) -> tuple[float, float | None, int] | None:
+    """Match a leading quantity in s.
+
+    Returns (amount, amount_max, end_index) where end_index is the position
+    in s immediately after the matched quantity. Returns None when s does
+    not start with a recognizable quantity.
+
+    amount_max is non-None only for ranges ('1/2 to 3/4', '1-2').
+    """
+    m = _QTY_RE.match(s)
+    if not m:
+        return None
+    a = _atom_to_float(m.group("a"))
+    b = _atom_to_float(m.group("b")) if m.group("b") else None
+    return a, b, m.end()
