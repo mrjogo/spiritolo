@@ -115,6 +115,14 @@ cd scraper && uv run python -m scraper.src.extract --limit 10
 
 **Local Supabase Studio:** http://localhost:54323 (on the Mac host).
 
+## Spirits Taxonomy
+
+Three Supabase tables (`taxonomy_nodes`, `taxonomy_edges`, `taxonomy_aliases`) form a multi-parent DAG of canonical ingredients. Recipes resolve free-text ingredients to node IDs via aliases; the DAG enables "all whiskeys" / "all citrus"-style queries.
+
+Design and content rules: [docs/spirits-taxonomy.md](docs/spirits-taxonomy.md). The lean stance — taxonomy for definitional categories and hard constraints, vector layer for soft similarity — is load-bearing; read it before adding nodes.
+
+To add nodes or aliases, edit `supabase/migrations/20260426120100_seed_taxonomy.sql` and re-apply with `supabase db reset` (see the JSON-LD Extractor section for the host/IP gotchas). Definitional categories can be added freely; brands and expressions should be hand-curated only for the well-known — the long tail is the future [D] mapper's job.
+
 ## Validate CLI
 
 `scraper/src/validate.py` runs `validate()` + `classify_drink_scored()` on cached HTML and writes `validate_html_runs` + `classify_drink_runs` rows. Fetch performs the same evaluations inline at fetch time, so a run here is only needed to re-evaluate older pages after a version bump or prompt change — the work queue surfaces exactly those.
