@@ -65,15 +65,16 @@ def test_canonicalize_unit_weight():
 
 
 def test_canonicalize_unit_unknown_returns_none():
-    assert canonicalize_unit("handful") is None
+    assert canonicalize_unit("glug") is None
     assert canonicalize_unit("") is None
+    # `bourbon` is an ingredient (BARE_INGREDIENT), not a unit.
     assert canonicalize_unit("bourbon") is None
 
 
 def test_is_unit_alias():
     assert is_unit_alias("oz")
     assert is_unit_alias("OUNCES")
-    assert not is_unit_alias("handful")
+    assert not is_unit_alias("glug")
 
 
 def test_canonicalize_count_noun():

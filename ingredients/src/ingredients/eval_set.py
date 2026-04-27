@@ -296,7 +296,8 @@ _ABSTAIN_CASES: list[EvalCase] = [
     # sphere*, etc.) are picked up by the no_qty_known_noun rule and moved
     # to the parse cases above. The remaining abstains here are rows with
     # neither a leading qty nor a recognized noun anchor.
-    EvalCase("Few tablespoons honey (optional)", "marthastewart", expect_status="unparseable"),
+    # v7: `honey` is now a known bare-ingredient noun, so this row parses
+    # via no_qty_known_noun with the full prep phrase preserved as name.
 ]
 
 EVAL_CASES: list[EvalCase] = _PARSE_CASES + _ABSTAIN_CASES

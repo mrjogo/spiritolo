@@ -20,7 +20,7 @@ from ingredients.units import (
     UNIT_ALIASES,
 )
 
-PARSER_VERSION = "v6"
+PARSER_VERSION = "v7"
 
 # Pattern used to detect concatenated multi-ingredient rows in the candidate
 # name produced by _try_qty_unit. If the name contains an embedded quantity
@@ -266,6 +266,8 @@ _QUALIFIERS = (
     # (`Crushed ice`, `Chopped chocolate`, `Sliced strawberries`,
     # `Freshly grated nutmeg`, `Chilled orange soda`).
     "crushed", "chopped", "sliced", "freshly", "chilled",
+    "frozen", "candied", "pickled", "toasted", "sugared", "grated",
+    "hulled", "pitted", "seedless", "finely", "lightly",
 )
 
 # Qualifiers that sit between qty and unit (`1 heaping tablespoon`,
@@ -453,6 +455,9 @@ def _try_qty_annotated_name(cleaned: str, raw: str) -> ParseResult | None:
 _LEXICAL_QTY_HEADS = (
     "pinch", "pinches", "dash", "dashes", "splash", "splashes",
     "drop", "drops", "sprinkle", "sprinkles", "grind", "grinds",
+    "handful", "handfuls", "knob", "knobs",
+    "dropper", "droppers", "dropperful", "dropperfuls",
+    "barspoon", "barspoons",
 )
 
 

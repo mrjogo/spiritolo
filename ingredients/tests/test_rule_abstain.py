@@ -13,18 +13,18 @@ from ingredients.parser import parse
 ABSTAIN_CASES = [
     # foodandwine concatenated bug — multiple ingredients glued together.
     "0.5 oz Santoni Amaro3 oz Lambrusco Del Emilia Rosé1 oz club soda",
-    # Reverse format (name first, qty after) — too ambiguous for v1.
+    # Reverse format (name first, qty after) — name doesn't anchor on a
+    # known noun, no leading qty, no lexical qty word.
     "D'Usse VSOP: 30 ml",
-    "Peychaud Bitters: 2 dashes",
-    # Quantity but unrecognized unit and no recognized noun anchor.
-    "Few tablespoons honey (optional)",  # 'few' isn't numeric
     # Empty / whitespace.
     "",
     "   ",
-    # v5 note: rows like `Ice`, `Float Whipping cream`, `Salt, to rim`,
-    # `Lemon wedge, for rimming`, `Coconut ice sphere*`, and
-    # `Dash of Angostura bitters` parse via the new no_qty_known_noun /
-    # lexical_qty rules. They moved to the parse cases.
+    # v7 note: as the bare-ingredient vocab grew (bitters, honey, the
+    # spirits family, juice, etc.), several previously-abstain rows now
+    # parse via no_qty_known_noun. That's intentional — preserving the
+    # full prep phrase as name is more useful than abstaining. Examples
+    # that moved out of this list: `Peychaud Bitters: 2 dashes`,
+    # `Few tablespoons honey (optional)`, `Ice`, `Coconut ice sphere*`.
 ]
 
 
