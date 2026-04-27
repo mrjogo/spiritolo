@@ -31,6 +31,14 @@ supabase db reset --db-url "postgresql://postgres:postgres@192.168.65.254:54322/
 
 The trailing `tls error (server refused TLS connection)` is misleading — migrations succeed. Verify with a `select`.
 
+**Test DB.** DB-integration tests (in `ingredients/tests/test_db.py`, et al) run against `TEST_DB_URL` — a *separate* Postgres database from `SUPABASE_DB_URL` — so `pytest` can `TRUNCATE … CASCADE` freely without nuking the dev data. Add this to `.env`:
+
+```
+TEST_DB_URL=postgresql://postgres:postgres@host.docker.internal:54322/spiritolo_test
+```
+
+The `ingredients` conftest auto-creates the database if missing and applies any new `supabase/migrations/*.sql` files on session start (tracked in a `_test_db_migrations` table). With `TEST_DB_URL` unset, DB tests skip cleanly. The conftest refuses to run if `TEST_DB_URL` equals `SUPABASE_DB_URL` or points at the default `postgres` database.
+
 URL classifier needs ollama: `ollama pull qwen3:14b`.
 
 ## Data model

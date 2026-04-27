@@ -5,14 +5,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from scraper.src.cli_common import (
+from spiritolo_common.cli_common import (
     add_reset_args, confirm_reset, describe_reset_scope,
 )
 from scraper.src.db import Database
-from scraper.src.progress import make_progress
+from spiritolo_common.progress import make_progress
 from scraper.src.structured import find_recipe
-from scraper.src.summary import print_summary
-from scraper.src.supabase_client import SupabaseClient
+from spiritolo_common.summary import print_summary
+from spiritolo_common.supabase_client import SupabaseClient
 
 EXTRACTOR_VERSION = "v1"
 """Bumped when the extractor's JSON-LD parsing or field derivation changes.
@@ -78,7 +78,7 @@ def extract_pages(
 ) -> dict[str, Counter]:
     """Process the extractor work queue. Returns per-site Counter keyed by
     outcome ('extracted' / 'no_recipe' / 'html_missing') — same shape as the
-    validate CLI, so scraper.src.summary.print_summary renders both uniformly.
+    validate CLI, so spiritolo_common.summary.print_summary renders both uniformly.
 
     Supabase is the source of truth for 'has this page been extracted' —
     its `recipes` table can be wiped independently of scraper.db, and when

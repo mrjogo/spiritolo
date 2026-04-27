@@ -20,7 +20,7 @@ FIXTURES = Path(__file__).parent / "fixtures" / "jsonld"
 
 @pytest.fixture
 def isolated_supabase():
-    from scraper.src.supabase_client import SupabaseClient
+    from spiritolo_common.supabase_client import SupabaseClient
     c = SupabaseClient()
     c.truncate_recipes()
     yield c

@@ -1,0 +1,27 @@
+[project]
+name = "spiritolo-ingredients"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "spiritolo-common",
+    "psycopg[binary]>=3.2",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv.sources]
+spiritolo-common = { workspace = true }

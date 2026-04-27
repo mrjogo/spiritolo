@@ -11,7 +11,7 @@ def _env_url() -> str:
     if not url:
         # Lazy-load .env at the repo root; the extractor normally does this itself, but
         # allow direct use of this module for smoke checks.
-        load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
+        load_dotenv(Path(__file__).resolve().parent.parent.parent.parent / ".env")
         url = os.environ.get("SUPABASE_DB_URL")
     if not url:
         raise RuntimeError("SUPABASE_DB_URL is not set. Run `supabase status` and add it to .env.")
@@ -75,6 +75,7 @@ class SupabaseClient:
         return {r[0] for r in rows}
 
     def truncate_recipes(self):
-        """Test-only helper."""
-        self.conn.execute("truncate table recipes")
+        """Test-only helper. CASCADE drops recipe_ingredients rows that FK
+        back to the truncated recipes."""
+        self.conn.execute("truncate table recipes cascade")
         self.conn.commit()

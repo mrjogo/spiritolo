@@ -18,13 +18,13 @@ from typing import Awaitable, Callable
 from ollama import AsyncClient
 
 from scraper.src.classify_prompt import PROMPT_VERSION
-from scraper.src.cli_common import (
+from spiritolo_common.cli_common import (
     add_reset_args, confirm_reset, describe_reset_scope,
 )
 from scraper.src.db import Database
 from scraper.src.ollama_client import ClassificationResult, classify_url
-from scraper.src.progress import make_progress
-from scraper.src.summary import print_summary
+from spiritolo_common.progress import make_progress
+from spiritolo_common.summary import print_summary
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
