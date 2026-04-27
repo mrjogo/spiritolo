@@ -60,9 +60,10 @@ def test_fetch_pages_marks_recipe(tmp_db, tmp_path, sample_recipe_html):
     }
     mock_client.fetch.return_value = sample_recipe_html
 
-    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+    changes, paused = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
 
-    assert results["Recipe"] == 1
+    assert changes["testsite"]["Recipe"] == 1
+    assert paused == []
     row = db.conn.execute("SELECT status FROM pages WHERE url = ?", ("https://example.com/recipes/margarita",)).fetchone()
     assert row["status"] == "Recipe"
     db.close()
@@ -211,9 +212,9 @@ def test_fetch_pages_marks_blocked(tmp_db, tmp_path, sample_blocked_html):
     }
     mock_client.fetch.return_value = sample_blocked_html
 
-    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+    changes, _ = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
 
-    assert results["blocked"] == 1
+    assert changes["testsite"]["blocked"] == 1
     row = db.conn.execute("SELECT status FROM pages WHERE url = ?", ("https://example.com/recipes/margarita",)).fetchone()
     assert row["status"] == "blocked"
     db.close()
@@ -232,9 +233,10 @@ def test_fetch_pages_handles_network_error(tmp_db, tmp_path):
     }
     mock_client.fetch.side_effect = Exception("Connection timeout")
 
-    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+    changes, _ = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
 
-    assert results["errors"] == 1
+    # Per-site bucketing: each network exception bumps the site's "error" count.
+    assert changes["testsite"]["error"] == 1
     row = db.conn.execute("SELECT attempts FROM pages WHERE url = ?", ("https://example.com/recipes/margarita",)).fetchone()
     assert row["attempts"] == 1
     db.close()
@@ -255,9 +257,9 @@ def test_fetch_pages_respects_limit(tmp_db, tmp_path, sample_recipe_html):
     }
     mock_client.fetch.return_value = sample_recipe_html
 
-    results = fetch_pages(db, mock_client, html_dir=tmp_path, limit=3, delay=0)
+    changes, _ = fetch_pages(db, mock_client, html_dir=tmp_path, limit=3, delay=0)
 
-    assert results["Recipe"] == 3
+    assert changes["testsite"]["Recipe"] == 3
     pending = db.get_pending()
     assert len(pending) == 7
     db.close()
@@ -278,7 +280,7 @@ def test_fetch_pages_only_fetches_likely_drink_recipe(tmp_db, tmp_path, sample_d
     }
     mock_client.fetch.return_value = sample_drink_recipe_html
 
-    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+    fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
 
     assert mock_client.fetch.call_count == 1
     mock_client.fetch.assert_called_once_with("https://example.com/recipes/margarita")
@@ -308,9 +310,9 @@ def test_fetch_pages_circuit_breaker_pauses_site(tmp_db, tmp_path, sample_blocke
     }
     mock_client.fetch.return_value = sample_blocked_html
 
-    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+    _changes, paused = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
 
-    assert "badsite" in results.get("paused_sites", [])
+    assert "badsite" in paused
     # Good site should still have been attempted
     assert mock_client.fetch.call_count >= 1
     db.close()
@@ -414,7 +416,7 @@ def test_fetch_pages_aborts_on_preflight_auth_error(tmp_db, tmp_path, capsys):
     mock_client = MagicMock()
     mock_client.get_account.side_effect = AuthError("Invalid API key")
 
-    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+    result = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
 
     # fetch() should never have been called
     mock_client.fetch.assert_not_called()
@@ -426,7 +428,7 @@ def test_fetch_pages_aborts_on_preflight_auth_error(tmp_db, tmp_path, capsys):
     assert row["status"] == "pending"
     captured = capsys.readouterr()
     assert "ABORTED" in captured.out or "AuthError" in captured.out
-    assert results == {"blocked": 0, "errors": 0, "paused_sites": []}
+    assert result == ({}, [])
     db.close()
 
 
@@ -440,12 +442,12 @@ def test_fetch_pages_aborts_on_preflight_scraperapi_error(tmp_db, tmp_path, caps
     mock_client = MagicMock()
     mock_client.get_account.side_effect = ScraperAPIError("/account returned 500")
 
-    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+    result = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
 
     mock_client.fetch.assert_not_called()
     captured = capsys.readouterr()
     assert "ABORTED" in captured.out or "500" in captured.out
-    assert results == {"blocked": 0, "errors": 0, "paused_sites": []}
+    assert result == ({}, [])
     db.close()
 
 
@@ -460,10 +462,10 @@ def test_fetch_pages_parallel_happy_path(tmp_db, tmp_path, make_mock_client, sam
     mock_client = make_mock_client(concurrency=3)
     mock_client.fetch.return_value = sample_recipe_html
 
-    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+    changes, _ = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
 
     assert mock_client.fetch.call_count == 5
-    assert results.get("Recipe", 0) == 5
+    assert changes["testsite"]["Recipe"] == 5
     for url in urls:
         row = db.conn.execute(
             "SELECT status FROM pages WHERE url = ?", (url,)
@@ -497,7 +499,7 @@ def test_fetch_pages_aborts_on_quota_mid_run(tmp_db, tmp_path, make_mock_client,
     mock_client = make_mock_client(concurrency=1)  # sequential to keep ordering deterministic
     mock_client.fetch.side_effect = fake_fetch
 
-    results = fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
+    fetch_pages(db, mock_client, html_dir=tmp_path, delay=0)
 
     captured = capsys.readouterr()
     assert "ABORTED" in captured.out

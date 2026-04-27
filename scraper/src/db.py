@@ -6,6 +6,16 @@ from pathlib import Path
 
 MAX_ATTEMPTS = 3
 
+
+class DatabaseNotMigratedError(RuntimeError):
+    """Raised when opening a DB whose schema doesn't match what ``migrate()``
+    would produce.
+
+    The constructor never mutates the database — callers must run
+    ``python -m scraper.src.db migrate --db <path>`` (or call ``migrate(path)``
+    programmatically) before opening it.
+    """
+
 CREATE_TABLE = """
 CREATE TABLE IF NOT EXISTS pages (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -112,93 +122,229 @@ CREATE_EVAL_RUN_INDEXES = [
 ]
 
 
+def _create_schema(conn: sqlite3.Connection) -> None:
+    """Apply every CREATE statement that defines the modern schema.
+
+    Used by ``migrate()`` against the on-disk DB and by
+    ``_expected_signature()`` against an in-memory DB to derive the
+    structural target. Anything that mutates schema must go in here (or in
+    ``_apply_legacy_migrations`` for one-shot fix-ups) — otherwise the
+    in-memory expected signature won't include it and DBs will be flagged
+    as drifted.
+    """
+    conn.execute(CREATE_TABLE)
+    for idx in CREATE_INDEXES:
+        conn.execute(idx)
+    conn.execute(CREATE_PIPELINE_RUNS_TABLE)
+    conn.execute(CREATE_CLASSIFY_URL_RUNS_TABLE)
+    conn.execute(CREATE_VALIDATE_HTML_RUNS_TABLE)
+    conn.execute(CREATE_CLASSIFY_DRINK_RUNS_TABLE)
+    conn.execute(CREATE_EXTRACT_RUNS_TABLE)
+    for idx in CREATE_EVAL_RUN_INDEXES:
+        conn.execute(idx)
+    conn.commit()
+
+
+def migrate(db_path: str | Path) -> None:
+    """Bring the SQLite DB at ``db_path`` to the current schema.
+
+    Creates the file and parent directory if missing. Idempotent: applies
+    the CREATE TABLE / CREATE INDEX statements (no-ops on a current DB) and
+    the one-shot legacy column fix-ups in ``_apply_legacy_migrations``.
+
+    This is the *only* place that mutates schema. ``Database.__init__``
+    opens DBs read-structure-only and refuses to run if the live structure
+    doesn't match what ``migrate()`` would produce.
+    """
+    Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.row_factory = sqlite3.Row
+        _create_schema(conn)
+        _apply_legacy_migrations(conn)
+    finally:
+        conn.close()
+
+
+# Canonical, structural representation of a SQLite schema. We compare these
+# tuples element-by-element rather than hashing — equal tuples mean equal
+# schema, and the first divergence is the diff to show in the error message.
+_SchemaSignature = tuple[str, ...]
+
+
+def _schema_signature(conn: sqlite3.Connection) -> _SchemaSignature:
+    """Stable, ordered description of every user-defined table & index.
+
+    Built from PRAGMA introspection (not ``sqlite_master.sql``) because the
+    stored CREATE text varies by code path — a column added via ALTER ADD
+    leaves a different SQL string than the same column declared in CREATE,
+    even though the live structure is identical.
+
+    Comparing two signatures answers "would migrate() produce this DB?"
+    without anyone having to maintain a version constant.
+    """
+    parts: list[str] = []
+
+    table_names = sorted(
+        r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+        )
+    )
+    for t in table_names:
+        parts.append(f"table {t}")
+        # PRAGMA returns rows in column order: (cid, name, type, notnull,
+        # dflt_value, pk). One signature line per column — including its
+        # position — so a one-column change diffs as one line, not a whole
+        # block.
+        for pos, c in enumerate(conn.execute(f'PRAGMA table_info("{t}")')):
+            parts.append(
+                f"  {t}.col[{pos}] {c[1]} type={c[2]} notnull={c[3]} "
+                f"dflt={c[4]!r} pk={c[5]}"
+            )
+
+    # User-defined indexes only (sql IS NOT NULL filters out the auto-created
+    # PRIMARY KEY / UNIQUE indexes — those are already encoded in table_info).
+    # Tuple-ify rows so sorted() works regardless of the connection's
+    # row_factory (Database sets it to sqlite3.Row, which is unorderable).
+    idx_rows = sorted(
+        (r[0], r[1]) for r in conn.execute(
+            "SELECT name, tbl_name FROM sqlite_master "
+            "WHERE type = 'index' AND sql IS NOT NULL"
+        )
+    )
+    for name, tbl in idx_rows:
+        cols = [c[2] for c in conn.execute(f'PRAGMA index_info("{name}")')]
+        unique = next(
+            (r[2] for r in conn.execute(f'PRAGMA index_list("{tbl}")') if r[1] == name),
+            0,
+        )
+        parts.append(f"index {name} on {tbl}({','.join(cols)}) unique={unique}")
+
+    return tuple(parts)
+
+
+_expected_signature_cache: _SchemaSignature | None = None
+
+
+def _expected_signature() -> _SchemaSignature:
+    """Signature of a freshly-migrated DB. Computed once per process by
+    running ``_create_schema`` against an in-memory DB and snapshotting it,
+    so runtime cost is paid on the first ``Database()`` open per process."""
+    global _expected_signature_cache
+    if _expected_signature_cache is None:
+        with sqlite3.connect(":memory:") as c:
+            _create_schema(c)
+            _expected_signature_cache = _schema_signature(c)
+    return _expected_signature_cache
+
+
+def _signature_diff(actual: _SchemaSignature, expected: _SchemaSignature) -> str:
+    """Human-readable rundown of which schema parts are missing/unexpected.
+    Used to make the DatabaseNotMigratedError message actionable."""
+    actual_set = set(actual)
+    expected_set = set(expected)
+    missing = sorted(expected_set - actual_set)
+    extra = sorted(actual_set - expected_set)
+    lines: list[str] = []
+    if missing:
+        lines.append("Missing or wrong shape:")
+        lines.extend(f"  - {m}" for m in missing)
+    if extra:
+        lines.append("Unexpected (not produced by migrate):")
+        lines.extend(f"  + {e}" for e in extra)
+    return "\n".join(lines) if lines else "(no differences — bug in _schema_signature?)"
+
+
+def _apply_legacy_migrations(conn: sqlite3.Connection) -> None:
+    """One-shot fix-ups for DBs created before the modern schema. Each step
+    is idempotent — on a fresh DB (just created by the CREATE TABLE block in
+    ``migrate()``) every check short-circuits."""
+    cols = {row["name"] for row in conn.execute("PRAGMA table_info(pages)")}
+    if "disabled_reason" not in cols:
+        conn.execute("ALTER TABLE pages ADD COLUMN disabled_reason TEXT")
+        conn.commit()
+    if "error" in cols and "fetch_error" not in cols:
+        # Narrow the column to its current meaning: "last fetch exception".
+        # Validate reasons (which historically shared this column) moved
+        # to validate_html_runs.reason, so clear them on non-failed rows.
+        # Re-running validate re-populates those reasons in the eval table.
+        conn.execute("ALTER TABLE pages RENAME COLUMN error TO fetch_error")
+        conn.execute("UPDATE pages SET fetch_error = NULL WHERE status != 'failed'")
+        conn.commit()
+    if "validated_at" in cols:
+        # Replaced by validate_html_runs — work queue now joins against
+        # the presence of an eval row, not this timestamp.
+        conn.execute("ALTER TABLE pages DROP COLUMN validated_at")
+        conn.commit()
+    # Legacy `classifications` table was superseded by `classify_url_runs`.
+    conn.execute("DROP TABLE IF EXISTS classifications")
+    conn.commit()
+    _migrate_extract_columns(conn, cols)
+
+
+def _migrate_extract_columns(conn: sqlite3.Connection, cols: set[str]) -> None:
+    """One-shot: backfill extract_runs from pages.extracted_at /
+    extract_error, then drop those columns. Preserves "we already
+    extracted this" signal so re-running extract after migration
+    doesn't redo every Supabase UPSERT."""
+    if "extracted_at" not in cols and "extract_error" not in cols:
+        return
+    if "extracted_at" in cols:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO extract_runs
+                (page_id, run_id, outcome, error, extractor_version, evaluated_at)
+            SELECT id, NULL, 'extracted', NULL, 'legacy', extracted_at
+            FROM pages WHERE extracted_at IS NOT NULL
+            """
+        )
+    if "extract_error" in cols:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO extract_runs
+                (page_id, run_id, outcome, error, extractor_version, evaluated_at)
+            SELECT id, NULL,
+                   CASE extract_error
+                       WHEN 'no_recipe' THEN 'no_recipe'
+                       WHEN 'html_file_missing' THEN 'html_missing'
+                       ELSE 'legacy_error'
+                   END,
+                   CASE WHEN extract_error IN ('no_recipe', 'html_file_missing')
+                        THEN NULL ELSE extract_error END,
+                   'legacy',
+                   ''
+            FROM pages WHERE extract_error IS NOT NULL
+            """
+        )
+    if "extracted_at" in cols:
+        conn.execute("ALTER TABLE pages DROP COLUMN extracted_at")
+    if "extract_error" in cols:
+        conn.execute("ALTER TABLE pages DROP COLUMN extract_error")
+    conn.commit()
+
+
 class Database:
     def __init__(self, db_path: str | Path):
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        path = Path(db_path)
+        if not path.exists():
+            raise DatabaseNotMigratedError(
+                f"No SQLite database at {path}. Create it with:\n"
+                f"  cd scraper && uv run python -m scraper.src.db migrate --db {path}"
+            )
+        self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self._lock = threading.RLock()
-        with self._lock:
-            self.conn.execute(CREATE_TABLE)
-            for idx in CREATE_INDEXES:
-                self.conn.execute(idx)
-            self.conn.commit()
-            self.conn.execute(CREATE_PIPELINE_RUNS_TABLE)
-            self.conn.execute(CREATE_CLASSIFY_URL_RUNS_TABLE)
-            self.conn.execute(CREATE_VALIDATE_HTML_RUNS_TABLE)
-            self.conn.execute(CREATE_CLASSIFY_DRINK_RUNS_TABLE)
-            self.conn.execute(CREATE_EXTRACT_RUNS_TABLE)
-            for idx in CREATE_EVAL_RUN_INDEXES:
-                self.conn.execute(idx)
-            self.conn.commit()
-            self._migrate()
-
-    def _migrate(self):
-        cols = {row["name"] for row in self.conn.execute("PRAGMA table_info(pages)")}
-        if "disabled_reason" not in cols:
-            self.conn.execute("ALTER TABLE pages ADD COLUMN disabled_reason TEXT")
-            self.conn.commit()
-        # Legacy schema cleanup — idempotent. Each of these ALTERs is a
-        # one-shot for older DBs; new DBs already ship with the target shape.
-        if "error" in cols and "fetch_error" not in cols:
-            # Narrow the column to its current meaning: "last fetch exception".
-            # Validate reasons (which historically shared this column) moved
-            # to validate_html_runs.reason, so clear them on non-failed rows.
-            # Re-running validate re-populates those reasons in the eval table.
-            self.conn.execute("ALTER TABLE pages RENAME COLUMN error TO fetch_error")
-            self.conn.execute("UPDATE pages SET fetch_error = NULL WHERE status != 'failed'")
-            self.conn.commit()
-        if "validated_at" in cols:
-            # Replaced by validate_html_runs — work queue now joins against
-            # the presence of an eval row, not this timestamp.
-            self.conn.execute("ALTER TABLE pages DROP COLUMN validated_at")
-            self.conn.commit()
-        # Legacy `classifications` table was superseded by `classify_url_runs`.
-        self.conn.execute("DROP TABLE IF EXISTS classifications")
-        self.conn.commit()
-        self._migrate_extract_columns(cols)
-
-    def _migrate_extract_columns(self, cols: set[str]) -> None:
-        """One-shot: backfill extract_runs from pages.extracted_at /
-        extract_error, then drop those columns. Preserves "we already
-        extracted this" signal so re-running extract after migration
-        doesn't redo every Supabase UPSERT."""
-        if "extracted_at" not in cols and "extract_error" not in cols:
-            return
-        # Successful extractions.
-        if "extracted_at" in cols:
-            self.conn.execute(
-                """
-                INSERT OR IGNORE INTO extract_runs
-                    (page_id, run_id, outcome, error, extractor_version, evaluated_at)
-                SELECT id, NULL, 'extracted', NULL, 'legacy', extracted_at
-                FROM pages WHERE extracted_at IS NOT NULL
-                """
+        actual = _schema_signature(self.conn)
+        expected = _expected_signature()
+        if actual != expected:
+            self.conn.close()
+            raise DatabaseNotMigratedError(
+                f"Schema at {path} doesn't match what migrate() would produce.\n"
+                f"{_signature_diff(actual, expected)}\n"
+                f"Run:\n"
+                f"  cd scraper && uv run python -m scraper.src.db migrate --db {path}"
             )
-        # Errored extractions — the legacy extract_error text was one of a few
-        # known sentinels. Map them so future re-runs can filter cleanly.
-        if "extract_error" in cols:
-            self.conn.execute(
-                """
-                INSERT OR IGNORE INTO extract_runs
-                    (page_id, run_id, outcome, error, extractor_version, evaluated_at)
-                SELECT id, NULL,
-                       CASE extract_error
-                           WHEN 'no_recipe' THEN 'no_recipe'
-                           WHEN 'html_file_missing' THEN 'html_missing'
-                           ELSE 'legacy_error'
-                       END,
-                       CASE WHEN extract_error IN ('no_recipe', 'html_file_missing')
-                            THEN NULL ELSE extract_error END,
-                       'legacy',
-                       ''
-                FROM pages WHERE extract_error IS NOT NULL
-                """
-            )
-        if "extracted_at" in cols:
-            self.conn.execute("ALTER TABLE pages DROP COLUMN extracted_at")
-        if "extract_error" in cols:
-            self.conn.execute("ALTER TABLE pages DROP COLUMN extract_error")
-        self.conn.commit()
 
     def close(self):
         with self._lock:
@@ -849,3 +995,52 @@ class Database:
 
     def clear_classify_url_runs(self, site: str | None = None) -> int:
         return self.clear_eval_rows("classify_url_runs", site=site)
+
+
+if __name__ == "__main__":
+    import argparse
+
+    # Match the DEFAULT_DB_PATH used by fetch.py / discover.py / etc.: the
+    # repo-root data/ dir, not scraper/data/. db.py is at scraper/src/db.py,
+    # so .parent.parent.parent is the repo root.
+    _DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "scraper.db"
+
+    parser = argparse.ArgumentParser(
+        description="Manage the scraper SQLite database schema."
+    )
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    p_migrate = sub.add_parser(
+        "migrate",
+        help="Create the DB if missing and bring its schema current. Idempotent.",
+    )
+    p_migrate.add_argument(
+        "--db", default=str(_DEFAULT_DB_PATH),
+        help=f"Path to the SQLite database (default: {_DEFAULT_DB_PATH}).",
+    )
+
+    p_status = sub.add_parser(
+        "status",
+        help="Compare the DB's schema against what migrate() would produce.",
+    )
+    p_status.add_argument("--db", default=str(_DEFAULT_DB_PATH))
+
+    args = parser.parse_args()
+
+    if args.command == "migrate":
+        migrate(args.db)
+        print(f"Migrated {args.db}.")
+    elif args.command == "status":
+        path = Path(args.db)
+        if not path.exists():
+            print(f"{path}: does not exist")
+            raise SystemExit(1)
+        with sqlite3.connect(path) as c:
+            actual = _schema_signature(c)
+        expected = _expected_signature()
+        if actual == expected:
+            print(f"{path}: schema matches.")
+        else:
+            print(f"{path}: schema does NOT match.")
+            print(_signature_diff(actual, expected))
+            raise SystemExit(1)
