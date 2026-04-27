@@ -79,10 +79,19 @@ def _validate_test_db_url() -> str | None:
 
 @pytest.fixture(scope="session")
 def test_db_url() -> str:
-    """Validated TEST_DB_URL. Tests requesting it skip when unset."""
+    """Validated TEST_DB_URL. Tests requesting it fail when unset.
+
+    DB-integration tests must fail loud rather than skip — silent skips
+    hide gaps in coverage and let CI claim a green run that exercised
+    nothing. Pure-Python tests don't take this fixture and are unaffected.
+    """
     url = _validate_test_db_url()
     if url is None:
-        pytest.skip("TEST_DB_URL not set; skipping DB-integration tests")
+        pytest.fail(
+            "TEST_DB_URL is not set. DB-integration tests require a separate "
+            "test database; see CLAUDE.md for the one-line .env setup.",
+            pytrace=False,
+        )
     return url
 
 
