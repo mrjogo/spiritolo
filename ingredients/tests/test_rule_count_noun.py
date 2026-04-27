@@ -1,9 +1,9 @@
 from ingredients.parser import parse
 
 
-def _assert_parsed(r, *, amount, unit, name):
+def _assert_parsed(r, *, amount, unit, name, rule="count_noun"):
     assert r.parse_status == "parsed", f"unexpected unparseable: {r}"
-    assert r.parser_rule == "count_noun", f"wrong rule: {r.parser_rule}"
+    assert r.parser_rule == rule, f"wrong rule: {r.parser_rule}"
     assert r.amount == amount
     assert r.unit == unit
     assert r.name == name
@@ -19,21 +19,22 @@ def test_count_noun_no_qualifier():
                    amount=4.0, unit="cube", name="sugar")
 
 
-def test_dried_qualifier_with_no_real_count_noun_abstains():
-    """'2 dried Star anise' has no count noun -> unparseable."""
-    r = parse("2 dried Star anise")
-    assert r.parse_status == "unparseable"
+def test_dried_star_anise_parses_via_qty_known_noun():
+    """v3: `star anise` is a known noun, qualifier stripped → name=star anise."""
+    _assert_parsed(parse("2 dried Star anise"), rule="qty_known_noun",
+                   amount=2.0, unit=None, name="star anise")
 
 
-def test_pineapple_not_a_count_noun_abstains():
-    r = parse("1 whole Pineapple")
-    assert r.parse_status == "unparseable"
+def test_whole_pineapple_parses_via_qty_known_noun():
+    """v3: `pineapple` is a known noun, qualifier stripped → name=pineapple."""
+    _assert_parsed(parse("1 whole Pineapple"), rule="qty_known_noun",
+                   amount=1.0, unit=None, name="pineapple")
 
 
-def test_egg_white_with_no_name_abstains():
-    """'1 egg white' would parse to empty name; we abstain rather than store."""
-    r = parse("1 egg white")
-    assert r.parse_status == "unparseable"
+def test_egg_white_parses_via_qty_known_noun():
+    """'1 egg white' is a known bare-ingredient noun; v3 emits it as the name."""
+    _assert_parsed(parse("1 egg white"), rule="qty_known_noun",
+                   amount=1.0, unit=None, name="egg white")
 
 
 def test_sprig_qualifier():

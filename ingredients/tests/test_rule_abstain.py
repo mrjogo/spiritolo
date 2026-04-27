@@ -16,14 +16,13 @@ ABSTAIN_CASES = [
     # Reverse format (name first, qty after) — too ambiguous for v1.
     "D'Usse VSOP: 30 ml",
     "Peychaud Bitters: 2 dashes",
-    # Multiple parenthesized equivalent volumes — which to use?
-    "1 (375ml) bottle (1 1/2 cups) rye whiskey or blended scotch",
+    # qty_unit's concat-row guard catches this: rest starts with `ounce`
+    # (a unit alias) but the candidate name contains an embedded `<n> tablespoons`,
+    # so the row is treated as scraper concat noise. R2 also abstains because
+    # the rest leads with a unit alias.
     "3/4 ounce (1 1/2 tablespoons) St-Germain elderflower liqueur",
     # Footnote artifact — liquor.com convention.
     "Coconut ice sphere*",
-    # Bare bottle/can phrasing — "1 12-oz. can ginger beer" has structure
-    # we're not going to attempt in v1.
-    "1 12-oz. can ginger beer",
     # No quantity, no recognized prefix.
     "Ice",
     "Float Whipping cream",
@@ -31,7 +30,6 @@ ABSTAIN_CASES = [
     "Salt, to rim (optional)",
     "Lemon wedge, for rimming",
     # Quantity but unrecognized unit and no count noun.
-    "1 squeeze fresh lime juice",
     "Few tablespoons honey (optional)",  # 'few' isn't numeric
     "Large pinch salt",
     "Dash of Angostura bitters",  # leading word 'Dash' but no qty before it

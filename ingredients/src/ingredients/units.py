@@ -30,16 +30,19 @@ UNIT_ALIASES: dict[str, str] = {
     "drop": "drop", "drops": "drop",
     "splash": "splash", "splashes": "splash",
     "barspoon": "barspoon", "barspoons": "barspoon",
+    "bar spoon": "barspoon", "bar spoons": "barspoon",
     "pinch": "pinch", "pinches": "pinch",
     "part": "part", "parts": "part",
     "jigger": "jigger", "jiggers": "jigger",
     "pony": "pony", "ponies": "pony",
     "shot": "shot", "shots": "shot",
+    "squeeze": "squeeze", "squeezes": "squeeze",
     # container counts — volume is context-dependent (wine bottle ≠ beer
     # bottle); downstream consumers must resolve the canonical volume from
     # the name, not from the unit alone.
     "bottle": "bottle", "bottles": "bottle",
     "bunch": "bunch", "bunches": "bunch",
+    "can": "can", "cans": "can",
 }
 
 # Surface form -> canonical count noun. Same lookup discipline.
@@ -56,6 +59,29 @@ COUNT_NOUN_ALIASES: dict[str, str] = {
     "egg yolk": "egg yolk", "egg yolks": "egg yolk",
     "egg": "egg", "eggs": "egg",
     "twist": "twist", "twists": "twist",
+    # citrus — `1 lemon, sliced` / `1 orange half-wheel` / etc.
+    "lemon": "lemon", "lemons": "lemon",
+    "lime": "lime", "limes": "lime",
+    "orange": "orange", "oranges": "orange",
+    # garlic / spice / produce count nouns (head: `4 cardamom pods`,
+    # `1 vanilla bean`, `4 maraschino cherries`, `1.5 cloves garlic`).
+    "clove": "clove", "cloves": "clove",
+    "pod": "pod", "pods": "pod",
+    "bean": "bean", "beans": "bean",
+    "cherry": "cherry", "cherries": "cherry",
+    "star anise": "star anise",
+    # serving counts
+    "scoop": "scoop", "scoops": "scoop",
+    # bare-ingredient nouns (no separate count word). Recognized by the
+    # qty_known_noun rule so `1 lemon` / `1 banana` / `1 star anise` parse
+    # as amount=N, unit=None, name=<canonical>.
+    "banana": "banana", "bananas": "banana",
+    "pineapple": "pineapple", "pineapples": "pineapple",
+    "apple": "apple", "apples": "apple",
+    "pear": "pear", "pears": "pear",
+    "peach": "peach", "peaches": "peach",
+    "plum": "plum", "plums": "plum",
+    "strawberry": "strawberry", "strawberries": "strawberry",
 }
 
 

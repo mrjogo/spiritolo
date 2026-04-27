@@ -33,6 +33,17 @@ def test_pre_clean_nfkc_normalizes():
     assert pre_clean(nbsp_input) == "1 oz gin"
 
 
+def test_pre_clean_decodes_html_entities():
+    # &frasl; (U+2044 fraction slash) → / via the existing slash-replace step.
+    assert pre_clean("1&frasl;2 oz gin") == "1/2 oz gin"
+    # Numeric entity for fraction slash.
+    assert pre_clean("1&#8260;2 oz gin") == "1/2 oz gin"
+    # &amp; should not break later steps.
+    assert pre_clean("1 oz Smith &amp; Cross rum") == "1 oz Smith & Cross rum"
+    # No entities present → unchanged.
+    assert pre_clean("1 oz gin") == "1 oz gin"
+
+
 def test_parse_result_default_shape():
     r = ParseResult(raw_text="x", parse_status="unparseable")
     assert r.raw_text == "x"

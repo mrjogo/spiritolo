@@ -65,7 +65,6 @@ def test_canonicalize_unit_weight():
 
 
 def test_canonicalize_unit_unknown_returns_none():
-    assert canonicalize_unit("squeeze") is None
     assert canonicalize_unit("handful") is None
     assert canonicalize_unit("") is None
     assert canonicalize_unit("bourbon") is None
@@ -74,7 +73,7 @@ def test_canonicalize_unit_unknown_returns_none():
 def test_is_unit_alias():
     assert is_unit_alias("oz")
     assert is_unit_alias("OUNCES")
-    assert not is_unit_alias("squeeze")
+    assert not is_unit_alias("handful")
 
 
 def test_canonicalize_count_noun():
@@ -85,6 +84,28 @@ def test_canonicalize_count_noun():
     assert canonicalize_count_noun("cubes") == "cube"
     assert canonicalize_count_noun("egg white") == "egg white"
     assert canonicalize_count_noun("sprigs") == "sprig"
+    # citrus + new produce/spice heads added in v3.
+    assert canonicalize_count_noun("lemon") == "lemon"
+    assert canonicalize_count_noun("Limes") == "lime"
+    assert canonicalize_count_noun("oranges") == "orange"
+    assert canonicalize_count_noun("clove") == "clove"
+    assert canonicalize_count_noun("cloves") == "clove"
+    assert canonicalize_count_noun("pod") == "pod"
+    assert canonicalize_count_noun("pods") == "pod"
+    assert canonicalize_count_noun("bean") == "bean"
+    assert canonicalize_count_noun("beans") == "bean"
+    assert canonicalize_count_noun("cherry") == "cherry"
+    assert canonicalize_count_noun("cherries") == "cherry"
+    assert canonicalize_count_noun("scoops") == "scoop"
+
+
+def test_canonicalize_unit_bar_spoon_alias():
+    # Two-word alias for the existing single-word `barspoon` canonical.
+    assert canonicalize_unit("bar spoon") == "barspoon"
+    assert canonicalize_unit("bar spoons") == "barspoon"
+    # Both canonical and `can` (container) seen alongside.
+    assert canonicalize_unit("can") == "can"
+    assert canonicalize_unit("cans") == "can"
 
 
 def test_canonicalize_count_noun_unknown_returns_none():

@@ -69,7 +69,7 @@ def test_name_lowercased_whitespace_collapsed():
 
 def test_unknown_unit_abstains():
     """If the unit token isn't in the table, qty_unit must abstain."""
-    r = parse("1 squeeze fresh lime juice")
+    r = parse("1 glug fresh lime juice")  # 'glug' is not in UNIT_ALIASES
     assert r.parse_status == "unparseable"
 
 

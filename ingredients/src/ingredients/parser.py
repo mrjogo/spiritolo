@@ -7,13 +7,14 @@ parser ladder. Bump PARSER_VERSION whenever any rule's behavior changes
 
 from __future__ import annotations
 
+import html
 import re
 import unicodedata
 from dataclasses import dataclass
 
 from ingredients.units import canonicalize_unit, canonicalize_count_noun, UNIT_ALIASES
 
-PARSER_VERSION = "v2"
+PARSER_VERSION = "v3"
 
 # Pattern used to detect concatenated multi-ingredient rows in the candidate
 # name produced by _try_qty_unit. If the name contains an embedded quantity
@@ -61,6 +62,10 @@ def pre_clean(s: str) -> str:
     """
     if s is None:
         return ""
+    # Decode HTML entities first (`1&frasl;2` → `1⁄2`, `&amp;` → `&`, etc.)
+    # so downstream fraction/whitespace rules see real characters.
+    if "&" in s:
+        s = html.unescape(s)
     # Replace unicode fraction chars with ASCII fractions BEFORE NFKC,
     # because NFKC expands e.g. ½ (U+00BD) → 1⁄2 (U+2044 fraction slash).
     for u, ascii_frac in _UNICODE_FRACTIONS.items():
@@ -204,17 +209,32 @@ def _try_qty_unit(cleaned: str, raw: str) -> ParseResult | None:
     )
 
 
-_QUALIFIERS = ("fresh", "dried", "whole")
+_QUALIFIERS = (
+    "fresh", "dried", "whole",
+    # size / ripeness adjectives that recipe writers stack between qty and noun
+    # (`1 large lemon`, `2 ripe peaches`, `3 small strawberries`).
+    "large", "small", "medium", "ripe", "thin",
+    # color modifiers seen in the histogram (`4 black tea bags`, `4 green olives`).
+    "black", "green",
+)
+
+_PAREN_RE = re.compile(r"\([^)]*\)")
+# Hyphen-attached size annotation seen on container rows
+# (`1-ounce`, `750-ml`, `12-inch`). The qty regex already grabbed the leading
+# digits, so this is what's *left* on the rest after qty extraction.
+_HYPHEN_SIZE_RE = re.compile(
+    r"\b\d+[ -](?:ounce|oz|ml|cl|l|inch|cm|mm|gram|g|kg|pound|lb|pint|quart)\b",
+    re.IGNORECASE,
+)
 
 
 def _try_count_noun(cleaned: str, raw: str) -> ParseResult | None:
-    """Match `<qty> [fresh|dried|whole]? <name_tokens>+ <count_noun>`.
+    """Match `<qty> [qualifier]? <name_tokens>+ <count_noun>` (tail position)
+    or `<qty> [qualifier]? <count_noun> <name_tokens>+` (head position).
 
-    The count noun must be in COUNT_NOUN_ALIASES and must sit at the tail.
-    Head-position placement (`1 leaf basil`) is uncommon enough to be
-    deferred past v1; such inputs abstain. Strings with no count noun and
-    strings whose count noun would leave an empty name (e.g. '1 egg white')
-    also abstain — empty names produce no useful structure.
+    Tail wins when both ends would match. Strings whose count noun would
+    leave an empty name (e.g. '1 egg white') still abstain — empty names
+    produce no useful structure.
     """
     qty = parse_quantity(cleaned)
     if qty is None:
@@ -224,11 +244,25 @@ def _try_count_noun(cleaned: str, raw: str) -> ParseResult | None:
     if not rest:
         return None
 
+    # Annotated rows (parens or hyphenated container size) belong to
+    # qty_annotated_name. Without this gate, bare-ingredient nouns we put in
+    # COUNT_NOUN_ALIASES (strawberry, lemon, banana) mis-fire on rows like
+    # `1/2 (16-ounce) bag frozen strawberries`, claiming `strawberries`
+    # as the count noun when the *bag* is the real container.
+    if "(" in rest or _HYPHEN_SIZE_RE.search(rest):
+        return None
+
     tokens = rest.split()
     # Strip a leading qualifier if present (drop it; modifier=None for v1).
     if tokens and tokens[0] in _QUALIFIERS:
         tokens = tokens[1:]
     if not tokens:
+        return None
+
+    # Empty-name guard: if the full remaining text canonicalizes as a count
+    # noun (`1 egg white`, `1 lemons`), we'd produce an empty name regardless
+    # of which end the count noun sits at — abstain rather than emit junk.
+    if canonicalize_count_noun(" ".join(tokens)) is not None:
         return None
 
     # Try count noun at end-of-string first (most common: '3 fresh basil leaves').
@@ -253,7 +287,109 @@ def _try_count_noun(cleaned: str, raw: str) -> ParseResult | None:
             unit=canon,
             name=name_part,
         )
+
+    # Head-position fallback: `<qty> <count_noun> <name_tokens>+`
+    # (e.g. `1.5 cloves garlic`, `3 scoop vanilla ice cream`,
+    # `1 orange half-wheel`). Tail check above already declined.
+    for head_words in (2, 1):
+        if len(tokens) < head_words + 1:
+            continue
+        head = " ".join(tokens[:head_words])
+        canon = canonicalize_count_noun(head)
+        if canon is None:
+            continue
+        name_part = " ".join(tokens[head_words:]).strip()
+        if not name_part:
+            return None
+        return ParseResult(
+            raw_text=raw,
+            parse_status="parsed",
+            parser_rule="count_noun",
+            amount=amount,
+            amount_max=amount_max,
+            unit=canon,
+            name=name_part,
+        )
     return None
+
+
+def _try_qty_known_noun(cleaned: str, raw: str) -> ParseResult | None:
+    """Match `<qty> [qualifier]? <known_noun>` where the noun is the
+    entire remaining phrase. Emits unit=None, name=<canonical>.
+
+    Single source of truth: COUNT_NOUN_ALIASES (same list count_noun uses).
+    Fires when count_noun's empty-name guard would otherwise abstain
+    (`1 lemon`, `1 banana`, `1 star anise`, `1 egg white`).
+    """
+    qty = parse_quantity(cleaned)
+    if qty is None:
+        return None
+    amount, amount_max, qty_end = qty
+    rest = cleaned[qty_end:].lstrip().lower()
+    if not rest:
+        return None
+    tokens = rest.split()
+    if tokens and tokens[0] in _QUALIFIERS:
+        tokens = tokens[1:]
+    if not tokens:
+        return None
+    canon = canonicalize_count_noun(" ".join(tokens))
+    if canon is None:
+        return None
+    return ParseResult(
+        raw_text=raw,
+        parse_status="parsed",
+        parser_rule="qty_known_noun",
+        amount=amount,
+        amount_max=amount_max,
+        unit=None,
+        name=canon,
+    )
+
+
+def _try_qty_annotated_name(cleaned: str, raw: str) -> ParseResult | None:
+    """Catch-all for `<qty> <messy_phrase>` where the phrase carries
+    container/prep annotation (parens, commas, hyphenated size). Emits
+    unit=None, name=<full rest> so the annotation is preserved verbatim.
+
+    Discipline: only fires when there's an annotation signal, and only
+    when a paren-aware concat-row check passes (so true multi-ingredient
+    junk like `0.5 oz Amaro3 oz Lambrusco` still abstains).
+    """
+    qty = parse_quantity(cleaned)
+    if qty is None:
+        return None
+    amount, amount_max, qty_end = qty
+    rest = cleaned[qty_end:].lstrip()
+    if not rest:
+        return None
+    has_signal = (
+        "(" in rest or "," in rest or _HYPHEN_SIZE_RE.search(rest) is not None
+    )
+    if not has_signal:
+        return None
+    # If rest starts with a known unit alias, qty_unit was the rule responsible
+    # — and if it didn't claim the row, the input was malformed (concat guard,
+    # empty name, etc.). Don't shove the unit into the name as a consolation.
+    rest_lower = rest.lower()
+    leading = rest_lower.split(" ", 3)
+    for n in (3, 2, 1):
+        if len(leading) > n and canonicalize_unit(" ".join(leading[:n])):
+            return None
+    # Concat-row guard, but treat parenthesized text as benign annotation
+    # rather than a smuggled second ingredient.
+    no_parens = _PAREN_RE.sub(" ", rest).lower()
+    if _CONCAT_RE.search(no_parens):
+        return None
+    return ParseResult(
+        raw_text=raw,
+        parse_status="parsed",
+        parser_rule="qty_annotated_name",
+        amount=amount,
+        amount_max=amount_max,
+        unit=None,
+        name=rest.lower(),
+    )
 
 
 _RULES = [
@@ -261,6 +397,8 @@ _RULES = [
     _try_topup,
     _try_qty_unit,
     _try_count_noun,
+    _try_qty_known_noun,
+    _try_qty_annotated_name,
 ]
 
 
