@@ -20,7 +20,7 @@ from ingredients.units import (
     UNIT_ALIASES,
 )
 
-PARSER_VERSION = "v7"
+PARSER_VERSION = "v8"
 
 # Pattern used to detect concatenated multi-ingredient rows in the candidate
 # name produced by _try_qty_unit. If the name contains an embedded quantity
@@ -386,9 +386,26 @@ def _try_qty_known_noun(cleaned: str, raw: str) -> ParseResult | None:
         tokens = tokens[1:]
     if not tokens:
         return None
-    canon = canonicalize_qty_noun(" ".join(tokens))
-    if canon is None:
-        return None
+    full_text = " ".join(tokens)
+    canon = canonicalize_qty_noun(full_text)
+    name_to_emit: str
+    if canon is not None:
+        # Whole row IS the noun (`1 lemon`, `1 egg white`, `1 star anise`).
+        name_to_emit = canon
+    else:
+        # Sub-span fallback: when the rest is `<modifier> <noun>` and only
+        # the noun (last 1-2 tokens) is in the dict — `4 maraschino cherries`,
+        # `4 juniper berries`, `1 navel orange` — emit the full text as
+        # name so the modifier survives. unit stays "each" because the
+        # last-token canonical isn't a measurement word (count_noun's
+        # tail check would have fired first if it were).
+        last_2 = " ".join(tokens[-2:]) if len(tokens) >= 2 else None
+        last_1 = tokens[-1]
+        if (last_2 and canonicalize_qty_noun(last_2) is not None) \
+                or canonicalize_qty_noun(last_1) is not None:
+            name_to_emit = full_text
+        else:
+            return None
     return ParseResult(
         raw_text=raw,
         parse_status="parsed",
@@ -396,7 +413,7 @@ def _try_qty_known_noun(cleaned: str, raw: str) -> ParseResult | None:
         amount=amount,
         amount_max=amount_max,
         unit="each",
-        name=canon,
+        name=name_to_emit,
     )
 
 

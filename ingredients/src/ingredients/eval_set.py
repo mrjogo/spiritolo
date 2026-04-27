@@ -113,9 +113,13 @@ _PARSE_CASES: list[EvalCase] = [
     EvalCase("2 small basil leaves", "thekitchn",
              expect_status="parsed", expect_rule="count_noun",
              expect_amount=2.0, expect_unit="leaf", expect_name="basil"),
+    # v8: cherry/berry are whole-ingredient names, not measurement words.
+    # qty_known_noun's sub-span fallback emits unit="each", name preserves
+    # the modifier ("maraschino").
     EvalCase("4 maraschino cherries", "punch",
-             expect_status="parsed", expect_rule="count_noun",
-             expect_amount=4.0, expect_unit="cherry", expect_name="maraschino"),
+             expect_status="parsed", expect_rule="qty_known_noun",
+             expect_amount=4.0, expect_unit="each",
+             expect_name="maraschino cherries"),
     EvalCase("1 vanilla bean", "seriouseats",
              expect_status="parsed", expect_rule="count_noun",
              expect_amount=1.0, expect_unit="bean", expect_name="vanilla"),

@@ -78,28 +78,32 @@ def test_is_unit_alias():
 
 
 def test_canonicalize_count_noun():
+    # Form/measurement words — these *do* go into the unit field.
     assert canonicalize_count_noun("leaf") == "leaf"
     assert canonicalize_count_noun("leaves") == "leaf"
     assert canonicalize_count_noun("Slice") == "slice"
     assert canonicalize_count_noun("wedges") == "wedge"
     assert canonicalize_count_noun("cubes") == "cube"
-    assert canonicalize_count_noun("egg white") == "egg white"
     assert canonicalize_count_noun("sprigs") == "sprig"
-    # New produce/spice count nouns added in v3.
     assert canonicalize_count_noun("clove") == "clove"
     assert canonicalize_count_noun("cloves") == "clove"
     assert canonicalize_count_noun("pod") == "pod"
     assert canonicalize_count_noun("pods") == "pod"
     assert canonicalize_count_noun("bean") == "bean"
     assert canonicalize_count_noun("beans") == "bean"
-    assert canonicalize_count_noun("cherry") == "cherry"
-    assert canonicalize_count_noun("cherries") == "cherry"
     assert canonicalize_count_noun("scoops") == "scoop"
-    # v6: citrus + bare-ingredient countables moved to INGREDIENT_COUNTABLES
-    # so they no longer populate the unit field. count_noun rule rejects them.
+    # Whole-ingredient nouns are *not* count nouns. They never populate
+    # the unit field. (lemon/orange/banana moved out in v6, then in v8
+    # cherry/berry/egg/peppercorn/star anise joined them.)
     assert canonicalize_count_noun("lemon") is None
     assert canonicalize_count_noun("orange") is None
     assert canonicalize_count_noun("banana") is None
+    assert canonicalize_count_noun("cherry") is None
+    assert canonicalize_count_noun("berry") is None
+    assert canonicalize_count_noun("egg") is None
+    assert canonicalize_count_noun("egg white") is None
+    assert canonicalize_count_noun("peppercorn") is None
+    assert canonicalize_count_noun("star anise") is None
 
 
 def test_canonicalize_qty_noun_unions_count_and_ingredient():

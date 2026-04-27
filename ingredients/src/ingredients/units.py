@@ -74,16 +74,14 @@ COUNT_NOUN_ALIASES: dict[str, str] = {
     "sprig": "sprig", "sprigs": "sprig",
     "piece": "piece", "pieces": "piece",
     "twist": "twist", "twists": "twist",
-    "egg": "egg", "eggs": "egg",
-    "egg white": "egg white", "egg whites": "egg white",
-    "egg yolk": "egg yolk", "egg yolks": "egg yolk",
-    # garlic / spice / produce count nouns (head: `4 cardamom pods`,
-    # `1 vanilla bean`, `4 maraschino cherries`, `1.5 cloves garlic`).
+    # plant-part count nouns (head: `4 cardamom pods`, `1 vanilla bean`,
+    # `1.5 cloves garlic`). These describe a *part* of the ingredient
+    # (clove, pod, bean = structural pieces) so they ARE measurement-shaped.
+    # Whole-fruit names (cherry, berry, peppercorn, egg) are different —
+    # they live in INGREDIENT_COUNTABLES and emit unit="each".
     "clove": "clove", "cloves": "clove",
     "pod": "pod", "pods": "pod",
     "bean": "bean", "beans": "bean",
-    "cherry": "cherry", "cherries": "cherry",
-    "berry": "berry", "berries": "berry",
     # serving counts and forms
     "scoop": "scoop", "scoops": "scoop",
     "strip": "strip", "strips": "strip",
@@ -92,7 +90,6 @@ COUNT_NOUN_ALIASES: dict[str, str] = {
     "disc": "disc", "discs": "disc", "disk": "disc", "disks": "disc",
     "coin": "coin", "coins": "coin",
     "quarter": "quarter", "quarters": "quarter",
-    "peppercorn": "peppercorn", "peppercorns": "peppercorn",
     "chunk": "chunk", "chunks": "chunk",
     "ring": "ring", "rings": "ring",
     "segment": "segment", "segments": "segment",
@@ -100,6 +97,11 @@ COUNT_NOUN_ALIASES: dict[str, str] = {
     "half": "half", "halves": "half",
     # `springs` is a corpus typo for `sprigs` (`2 springs cilantro`).
     "spring": "sprig", "springs": "sprig",
+    # NOTE: `cherry`, `berry`, `egg`, `egg white`, `egg yolk`, `peppercorn`,
+    # and `star anise` are *whole-ingredient names* and live in
+    # INGREDIENT_COUNTABLES, not here. Keeping them out of COUNT_NOUN
+    # ensures count_noun's tail/head match never emits `unit=cherry` or
+    # `unit=egg` — qty_known_noun handles them with unit="each".
     # parts-of-fruit (`1 lemon zest`, `2 orange peels`, `1 lime seed`).
     "zest": "zest",
     "peel": "peel", "peels": "peel",
@@ -110,8 +112,6 @@ COUNT_NOUN_ALIASES: dict[str, str] = {
     "can": "can", "cans": "can",
     "bunch": "bunch", "bunches": "bunch",
     "bag": "bag", "bags": "bag",
-    # multi-word: `2 dried Star anise` parses as amount=2, name="star anise".
-    "star anise": "star anise",
 }
 
 
@@ -144,6 +144,13 @@ INGREDIENT_COUNTABLES: dict[str, str] = {
     "grape": "grape", "grapes": "grape",
     "blueberry": "blueberry", "blueberries": "blueberry",
     "cranberry": "cranberry", "cranberries": "cranberry",
+    "cherry": "cherry", "cherries": "cherry",
+    "berry": "berry", "berries": "berry",
+    "egg": "egg", "eggs": "egg",
+    "egg white": "egg white", "egg whites": "egg white",
+    "egg yolk": "egg yolk", "egg yolks": "egg yolk",
+    "peppercorn": "peppercorn", "peppercorns": "peppercorn",
+    "star anise": "star anise",
     "raisin": "raisin", "raisins": "raisin",
     "chile": "chile", "chiles": "chile",
     "chili": "chile", "chilis": "chile", "chilies": "chile",
