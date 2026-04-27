@@ -8,6 +8,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from spiritolo_common.progress import make_progress
 from spiritolo_common.summary import print_summary
 
 from scraper.src.classify_drink import SCORER_VERSION, classify_drink_scored
@@ -114,6 +115,7 @@ def fetch_pages(
             "workers": n_workers, "delay": delay, "force_site": force_site,
         },
     )
+    progress = make_progress(total=total)
 
     def process_one(row: dict) -> None:
         if shutdown.is_set():
@@ -124,7 +126,8 @@ def fetch_pages(
         status_before = row["status"]
         content_type_before = row["content_type"]
 
-        # Circuit breaker check (skip if --force-site)
+        # Circuit breaker check (skip if --force-site). Pause is a notable
+        # event — print it inline (it's rare and otherwise invisible).
         if page_site != force_site:
             with state_lock:
                 if page_site in paused_sites:
@@ -134,13 +137,14 @@ def fetch_pages(
                 with state_lock:
                     if page_site not in paused_sites:
                         paused_sites.add(page_site)
+                        # Newline first so the inline notice doesn't collide
+                        # with the in-progress \r progress line.
                         print(
-                            f"[{page_site}] PAUSED — >{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% "
+                            f"\n[{page_site}] PAUSED — "
+                            f">{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% "
                             f"of last {CIRCUIT_BREAKER_WINDOW} pages failed validation"
                         )
                 return
-
-        print(f"[{page_site}] — {url}")
 
         try:
             html = client.fetch(url)
@@ -151,7 +155,6 @@ def fetch_pages(
             db.mark_failed(url, str(e))
             with state_lock:
                 bump(page_site, "error")
-            print(f"  ERROR: {e}")
             if delay > 0:
                 time.sleep(delay)
             return
@@ -163,12 +166,10 @@ def fetch_pages(
             db.mark_blocked(url, html_path=rel_path)
             with state_lock:
                 bump(page_site, "blocked")
-            print(f"  BLOCKED: {result.reason}")
         else:
             db.mark_content(url, result.status, html_path=rel_path)
             with state_lock:
                 bump(page_site, result.status)
-            print(f"  {result.status}: {result.reason}")
 
         # Record the validate + classify_drink evaluations into the same
         # eval tables the standalone validate CLI uses, so both entry points
@@ -207,7 +208,8 @@ def fetch_pages(
                     if page_site not in paused_sites:
                         paused_sites.add(page_site)
                         print(
-                            f"[{page_site}] PAUSED — >{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% "
+                            f"\n[{page_site}] PAUSED — "
+                            f">{CIRCUIT_BREAKER_THRESHOLD*100:.0f}% "
                             f"of last {CIRCUIT_BREAKER_WINDOW} pages failed validation"
                         )
 
@@ -216,6 +218,7 @@ def fetch_pages(
 
     executor = ThreadPoolExecutor(max_workers=n_workers)
     abort_message: str | None = None
+    done = 0
     try:
         futures = [executor.submit(process_one, row) for row in pending]
         for f in as_completed(futures):
@@ -223,8 +226,10 @@ def fetch_pages(
                 f.result()
             except (QuotaExhaustedError, AuthError) as e:
                 shutdown.set()
-                abort_message = f"ABORTED: {type(e).__name__}: {e}"
+                abort_message = f"\nABORTED: {type(e).__name__}: {e}"
                 break
+            done += 1
+            progress(done)
     finally:
         executor.shutdown(wait=True, cancel_futures=True)
 
@@ -286,11 +291,5 @@ if __name__ == "__main__":
     print_summary("Fetch", changes)
     if paused:
         print(f"Paused (circuit breaker): {', '.join(paused)}")
-
-    stats = db.get_stats()
-    print("\n--- Overall ---")
-    for site_name, counts in stats.items():
-        parts = [f"{status}: {count}" for status, count in counts.items()]
-        print(f"  {site_name}: {', '.join(parts)}")
 
     db.close()
