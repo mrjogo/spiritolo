@@ -1,55 +1,9 @@
-import os
-from pathlib import Path
-from urllib.parse import urlparse
-
-import pytest
-from dotenv import load_dotenv
-
-load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
-
-_LOCAL_DB_HOSTS = {
-    "localhost",
-    "127.0.0.1",
-    "::1",
-    "host.docker.internal",
-    "192.168.65.254",  # IPv4 of host.docker.internal from devcontainer
-}
-
-
-def _db_url_is_safe_for_truncation() -> tuple[bool, str]:
-    url = os.environ.get("SUPABASE_DB_URL")
-    if not url:
-        return False, "SUPABASE_DB_URL not set; skipping integration test"
-    if os.environ.get("SPIRITOLO_TEST_ALLOW_REMOTE_DB") == "1":
-        return True, ""
-    host = (urlparse(url).hostname or "").lower()
-    if host in _LOCAL_DB_HOSTS:
-        return True, ""
-    return False, (
-        f"SUPABASE_DB_URL host {host!r} is not local; refusing to truncate. "
-        "Set SPIRITOLO_TEST_ALLOW_REMOTE_DB=1 to override."
-    )
-
-
-_db_safe, _db_skip_reason = _db_url_is_safe_for_truncation()
-requires_supabase = pytest.mark.skipif(not _db_safe, reason=_db_skip_reason)
+# DB-integration tests use the `isolated_db` fixture defined in conftest.py,
+# which routes through TEST_DB_URL (a *separate* DB from SUPABASE_DB_URL) and
+# auto-applies migrations on session start. Tests skip cleanly when
+# TEST_DB_URL is unset.
 
 PARSER_VERSION_TEST = "v-test"
-
-
-@pytest.fixture
-def isolated_db():
-    """Truncate recipes + recipe_ingredients, yield a Database, clean up after."""
-    from ingredients.db import IngredientsDatabase
-    db = IngredientsDatabase()
-    db.conn.execute("truncate table recipe_ingredients cascade")
-    db.conn.execute("truncate table recipes cascade")
-    db.conn.commit()
-    yield db
-    db.conn.execute("truncate table recipe_ingredients cascade")
-    db.conn.execute("truncate table recipes cascade")
-    db.conn.commit()
-    db.close()
 
 
 def _seed_recipe(db, *, source_url, site, jsonld):
@@ -68,7 +22,6 @@ def _seed_recipe(db, *, source_url, site, jsonld):
     ).fetchone()[0]
 
 
-@requires_supabase
 def test_work_queue_returns_recipes_lacking_current_version_parse(isolated_db):
     db = isolated_db
     rid = _seed_recipe(db, source_url="https://example.com/r1", site="punch",
@@ -81,7 +34,6 @@ def test_work_queue_returns_recipes_lacking_current_version_parse(isolated_db):
     assert queue[0]["recipe_ingredient"] == ["2 oz gin", "1 oz lime"]
 
 
-@requires_supabase
 def test_work_queue_skips_recipes_with_current_version_parse(isolated_db):
     db = isolated_db
     rid = _seed_recipe(db, source_url="https://example.com/r2", site="punch",
@@ -99,7 +51,6 @@ def test_work_queue_skips_recipes_with_current_version_parse(isolated_db):
     assert queue == []
 
 
-@requires_supabase
 def test_work_queue_returns_recipe_with_old_version_parse(isolated_db):
     db = isolated_db
     rid = _seed_recipe(db, source_url="https://example.com/r3", site="punch",
@@ -118,7 +69,6 @@ def test_work_queue_returns_recipe_with_old_version_parse(isolated_db):
     assert queue[0]["id"] == rid
 
 
-@requires_supabase
 def test_write_replaces_existing_rows_for_recipe(isolated_db):
     db = isolated_db
     rid = _seed_recipe(db, source_url="https://example.com/r4", site="punch",
@@ -148,7 +98,6 @@ def test_write_replaces_existing_rows_for_recipe(isolated_db):
     assert rows == [("new", PARSER_VERSION_TEST)]
 
 
-@requires_supabase
 def test_count_eval_rows_filters(isolated_db):
     db = isolated_db
     rid = _seed_recipe(db, source_url="https://example.com/r5", site="punch",
@@ -169,7 +118,6 @@ def test_count_eval_rows_filters(isolated_db):
     assert db.count_eval_rows(site=None, except_version="v1", older_than=None) == 1
 
 
-@requires_supabase
 def test_clear_eval_rows_returns_deleted_count(isolated_db):
     db = isolated_db
     rid = _seed_recipe(db, source_url="https://example.com/r6", site="punch",
