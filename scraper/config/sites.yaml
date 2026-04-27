@@ -17,9 +17,10 @@ sites:
 - name: bonappetit
   domain: bonappetit.com
   sitemap_url: https://www.bonappetit.com/sitemap.xml
-- name: nytcooking
-  domain: cooking.nytimes.com
-  sitemap_url: https://www.nytimes.com/sitemaps/new/cooking.xml.gz
+# Redirects without login (not sure how search indexing works)
+# - name: nytcooking
+#   domain: cooking.nytimes.com
+#   sitemap_url: https://www.nytimes.com/sitemaps/new/cooking.xml.gz
 - name: foodnetwork
   domain: foodnetwork.com
   sitemap_url: https://www.foodnetwork.com/sitemaps/sitemap_food_index.xml
