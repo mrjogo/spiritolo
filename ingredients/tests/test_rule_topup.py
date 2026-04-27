@@ -30,5 +30,8 @@ def test_topup_empty_name_abstains():
 
 
 def test_topup_does_not_match_just_top():
+    """`Topping: cherries` shouldn't trigger the topup rule — it may now
+    parse via no_qty_known_noun (cherries is a known noun) but never via
+    topup."""
     r = parse("Topping: cherries")
-    assert r.parse_status == "unparseable"
+    assert r.parser_rule != "topup"

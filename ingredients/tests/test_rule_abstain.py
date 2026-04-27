@@ -16,21 +16,15 @@ ABSTAIN_CASES = [
     # Reverse format (name first, qty after) — too ambiguous for v1.
     "D'Usse VSOP: 30 ml",
     "Peychaud Bitters: 2 dashes",
-    # Footnote artifact — liquor.com convention.
-    "Coconut ice sphere*",
-    # No quantity, no recognized prefix.
-    "Ice",
-    "Float Whipping cream",
-    "Hard apple cider, to top",
-    "Salt, to rim (optional)",
-    "Lemon wedge, for rimming",
-    # Quantity but unrecognized unit and no count noun.
+    # Quantity but unrecognized unit and no recognized noun anchor.
     "Few tablespoons honey (optional)",  # 'few' isn't numeric
-    "Large pinch salt",
-    "Dash of Angostura bitters",  # leading word 'Dash' but no qty before it
     # Empty / whitespace.
     "",
     "   ",
+    # v5 note: rows like `Ice`, `Float Whipping cream`, `Salt, to rim`,
+    # `Lemon wedge, for rimming`, `Coconut ice sphere*`, and
+    # `Dash of Angostura bitters` parse via the new no_qty_known_noun /
+    # lexical_qty rules. They moved to the parse cases.
 ]
 
 

@@ -12,9 +12,14 @@ import re
 import unicodedata
 from dataclasses import dataclass
 
-from ingredients.units import canonicalize_unit, canonicalize_count_noun, UNIT_ALIASES
+from ingredients.units import (
+    canonicalize_unit,
+    canonicalize_count_noun,
+    canonicalize_known_noun,
+    UNIT_ALIASES,
+)
 
-PARSER_VERSION = "v4"
+PARSER_VERSION = "v5"
 
 # Pattern used to detect concatenated multi-ingredient rows in the candidate
 # name produced by _try_qty_unit. If the name contains an embedded quantity
@@ -25,8 +30,12 @@ PARSER_VERSION = "v4"
 _UNIT_ALTERNATION = "|".join(
     re.escape(k) for k in sorted(UNIT_ALIASES, key=len, reverse=True)
 )
+# Concat-row guard: a *letter* directly followed by `<digit>+ <unit>` is the
+# scraper-artifact giveaway (`Amaro3 oz Lambrusco`, `Rosé1 oz club soda`).
+# Plain `<digit>+ <unit>` without a leading letter is a legitimate annotation
+# (`750 ml bottle of vodka`, `(approximately 1 1/2 cups)`) and must not fire.
 _CONCAT_RE = re.compile(
-    rf"\d+\s*(?:{_UNIT_ALTERNATION})\b", re.IGNORECASE
+    rf"[a-zA-Z]\d+\s*(?:{_UNIT_ALTERNATION})\b", re.IGNORECASE
 )
 _PAREN_RE = re.compile(r"\([^)]*\)")
 # Hyphen-attached size annotation seen on container rows
@@ -61,6 +70,18 @@ _UNICODE_FRACTIONS = {
 
 _TRIM_PUNCT = ",.;:"
 
+# Common units that recipe writers may glue to a qty with a hyphen
+# (`1/2-ounce`, `1-pound`). Conservative whitelist: real volume/weight
+# units, not annotation-only ones like `inch`/`cm` (which describe a
+# different attribute, e.g. wheel thickness, not the row's quantity).
+_HYPHEN_QTY_UNIT_RE = re.compile(
+    r"^(\d+(?:\.\d+)?(?:/\d+)?(?:\s+\d+/\d+)?)-"
+    r"(?=(?:ounces?|oz|milliliters?|ml|cl|liters?|litres?|"
+    r"teaspoons?|tsp|tablespoons?|tbsp|cups?|"
+    r"pints?|quarts?|gallons?|pounds?|lbs?|grams?|kilograms?|kg|g)\b)",
+    re.IGNORECASE,
+)
+
 
 def pre_clean(s: str) -> str:
     """Normalize a raw ingredient string for downstream rule matching.
@@ -85,6 +106,11 @@ def pre_clean(s: str) -> str:
     s = s.replace("⁄", "/")
     # Collapse all whitespace runs to single space; strip outer.
     s = re.sub(r"\s+", " ", s).strip()
+    # Normalize hyphen-attached qty+unit (`1/2-ounce gin` → `1/2 ounce gin`).
+    # Only fires when the string starts with `<numeric>-<unit-alias>` — so
+    # `1 750-ml bottle …` is left alone (the leading qty is `1`, then a
+    # space, not a dash).
+    s = _HYPHEN_QTY_UNIT_RE.sub(r"\1 ", s)
     # Strip trailing junk punctuation.
     while s and s[-1] in _TRIM_PUNCT:
         s = s[:-1].rstrip()
@@ -99,7 +125,8 @@ def pre_clean(s: str) -> str:
 # Fraction denominators are [1-9]\d* — forbids zero (avoids divide-by-zero
 # downstream) and forbids leading-zero denominators that wouldn't be valid.
 _NUM_ATOM = r"(?:\d+\s+\d+/[1-9]\d*|\d+/[1-9]\d*|\d+(?:\.\d+)?)"
-_QTY_RE = re.compile(rf"^(?P<a>{_NUM_ATOM})(?:\s*(?:to|-)\s*(?P<b>{_NUM_ATOM}))?")
+# Range separators: `to`, `or`, or hyphen (`1-2`, `1 to 2`, `3 or 4`).
+_QTY_RE = re.compile(rf"^(?P<a>{_NUM_ATOM})(?:\s*(?:to|or|-)\s*(?P<b>{_NUM_ATOM}))?")
 
 
 def _atom_to_float(token: str) -> float:
@@ -178,6 +205,14 @@ def _try_qty_unit(cleaned: str, raw: str) -> ParseResult | None:
     rest = rest.lstrip()
     if not rest:
         return None
+    # Strip a leading unit-position qualifier (`1 heaping tablespoon`,
+    # `1 scant cup`). The qualifier only modifies the magnitude of the
+    # unit; v1 doesn't surface it (modifier=None).
+    leading_word = rest.split(" ", 1)[0].lower()
+    if leading_word in _UNIT_QUALIFIERS:
+        rest = rest.split(" ", 1)[1].lstrip() if " " in rest else ""
+        if not rest:
+            return None
     # Greedy match the longest unit alias that prefixes the remaining text.
     # Multi-word aliases (e.g. 'fluid ounce', 'fl oz') must be tried before
     # single-word aliases.
@@ -226,7 +261,16 @@ _QUALIFIERS = (
     "large", "small", "medium", "ripe", "thin",
     # color modifiers seen in the histogram (`4 black tea bags`, `4 green olives`).
     "black", "green",
+    # preparation adjectives that don't change ingredient identity
+    # (`Crushed ice`, `Chopped chocolate`, `Sliced strawberries`,
+    # `Freshly grated nutmeg`, `Chilled orange soda`).
+    "crushed", "chopped", "sliced", "freshly", "chilled",
 )
+
+# Qualifiers that sit between qty and unit (`1 heaping tablespoon`,
+# `1 scant cup`, `1 mounded teaspoon`). Distinct from `_QUALIFIERS`,
+# which sits between qty and noun.
+_UNIT_QUALIFIERS = ("heaping", "scant", "mounded")
 
 
 def _try_count_noun(cleaned: str, raw: str) -> ParseResult | None:
@@ -393,6 +437,94 @@ def _try_qty_annotated_name(cleaned: str, raw: str) -> ParseResult | None:
     )
 
 
+# Lexical-qty heads — words that act as a qty *and* an imprecise unit when
+# they sit at the start of a no-numeric-qty row (`Pinch X`, `Splash X`,
+# `Dash X`). Subset of UNIT_ALIASES. Multi-word entries (`bar spoon`) are
+# omitted; the head detection only checks 1- and 2-token spans.
+_LEXICAL_QTY_HEADS = (
+    "pinch", "pinches", "dash", "dashes", "splash", "splashes",
+    "drop", "drops", "sprinkle", "sprinkles", "grind", "grinds",
+)
+
+
+def _try_lexical_qty(cleaned: str, raw: str) -> ParseResult | None:
+    """Match `<lexical_qty> <name>` for rows with no numeric qty
+    (`Pinch ground cinnamon`, `Splash lemon-lime soda`, `Dash bitters`).
+    Emits amount=None, unit=<canon>, name=<rest>.
+    """
+    if parse_quantity(cleaned) is not None:
+        return None
+    tokens = cleaned.split()
+    if not tokens:
+        return None
+    head = tokens[0].lower()
+    if head not in _LEXICAL_QTY_HEADS:
+        return None
+    canon = canonicalize_unit(head)
+    if canon is None:
+        return None
+    name = " ".join(tokens[1:]).strip().lower()
+    # `Pinch of salt` / `Splash of lime juice` — drop the connector "of".
+    if name.startswith("of "):
+        name = name[3:].strip()
+    if not name:
+        return None
+    return ParseResult(
+        raw_text=raw,
+        parse_status="parsed",
+        parser_rule="lexical_qty",
+        amount=None,
+        amount_max=None,
+        unit=canon,
+        name=name,
+    )
+
+
+def _try_no_qty_known_noun(cleaned: str, raw: str) -> ParseResult | None:
+    """Match a no-qty row whose first 1-3 tokens (after stripping a leading
+    qualifier) include a known noun. Emits amount=None, unit=None,
+    name=<full cleaned text> so the prep/garnish phrase is preserved.
+
+    Recovers `Ice`, `Crushed ice`, `Lemon wheels, for garnish`,
+    `Soda water`, `Mint sprigs, for garnish` — anything no-qty that
+    anchors on a recognized ingredient noun.
+    """
+    if parse_quantity(cleaned) is not None:
+        return None
+    cleaned_lower = cleaned.lower()
+    # Token list with punctuation stripped, so `lemon,` matches `lemon`.
+    tokens = [t for t in re.split(r"[^\w'’\-]+", cleaned_lower) if t]
+    if not tokens:
+        return None
+    # Strip a leading noun-qualifier (fresh/large/crushed/etc.).
+    if tokens[0] in _QUALIFIERS:
+        tokens = tokens[1:]
+    if not tokens:
+        return None
+    # Look for a known noun in the first 3 tokens, as 1-word or 2-word spans.
+    head_window = tokens[:3]
+    found = False
+    for n in (2, 1):
+        for start in range(len(head_window) - n + 1):
+            span = " ".join(head_window[start : start + n])
+            if canonicalize_known_noun(span) is not None:
+                found = True
+                break
+        if found:
+            break
+    if not found:
+        return None
+    return ParseResult(
+        raw_text=raw,
+        parse_status="parsed",
+        parser_rule="no_qty_known_noun",
+        amount=None,
+        amount_max=None,
+        unit=None,
+        name=cleaned_lower,
+    )
+
+
 _RULES = [
     _try_garnish_prefix,
     _try_topup,
@@ -400,6 +532,8 @@ _RULES = [
     _try_count_noun,
     _try_qty_known_noun,
     _try_qty_annotated_name,
+    _try_lexical_qty,
+    _try_no_qty_known_noun,
 ]
 
 

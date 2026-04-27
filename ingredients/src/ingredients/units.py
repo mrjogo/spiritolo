@@ -43,6 +43,12 @@ UNIT_ALIASES: dict[str, str] = {
     "bottle": "bottle", "bottles": "bottle",
     "bunch": "bunch", "bunches": "bunch",
     "can": "can", "cans": "can",
+    "bag": "bag", "bags": "bag",
+    "gallon": "gallon", "gallons": "gallon",
+    "swath": "swath", "swaths": "swath",
+    # imprecise bartending counts (`2 grind black pepper`, `1 sprinkle salt`)
+    "grind": "grind", "grinds": "grind",
+    "sprinkle": "sprinkle", "sprinkles": "sprinkle",
 }
 
 # Surface form -> canonical count noun. Same lookup discipline.
@@ -72,6 +78,7 @@ COUNT_NOUN_ALIASES: dict[str, str] = {
     "star anise": "star anise",
     # serving counts
     "scoop": "scoop", "scoops": "scoop",
+    "strip": "strip", "strips": "strip",
     # bare-ingredient nouns (no separate count word). Recognized by the
     # qty_known_noun rule so `1 lemon` / `1 banana` / `1 star anise` parse
     # as amount=N, unit=None, name=<canonical>.
@@ -82,6 +89,47 @@ COUNT_NOUN_ALIASES: dict[str, str] = {
     "peach": "peach", "peaches": "peach",
     "plum": "plum", "plums": "plum",
     "strawberry": "strawberry", "strawberries": "strawberry",
+    "raspberry": "raspberry", "raspberries": "raspberry",
+    "blackberry": "blackberry", "blackberries": "blackberry",
+    "berry": "berry", "berries": "berry",
+    "jalapeño": "jalapeño", "jalapeños": "jalapeño",
+    "jalapeno": "jalapeño", "jalapenos": "jalapeño",
+    "cardamom": "cardamom",
+}
+
+
+# Mass-noun bare ingredients — recognized only by no_qty_known_noun (they
+# anchor `Ice`, `Crushed ice`, `Soda water`, `Lemon-lime soda`, etc.).
+# Deliberately *not* in COUNT_NOUN_ALIASES because they'd mis-fire as
+# tail-position count nouns (`3 scoop Vanilla ice cream` would resolve
+# to unit=cream, name="scoop vanilla ice"; `… 1 oz club soda` at the
+# end of a concat row would resolve to unit="club soda" and swallow
+# the genuine multi-ingredient artifact).
+BARE_INGREDIENT_ALIASES: dict[str, str] = {
+    "ice": "ice",
+    "salt": "salt",
+    "sugar": "sugar",
+    "pepper": "pepper",
+    "mint": "mint",
+    "nutmeg": "nutmeg",
+    "cinnamon": "cinnamon",
+    "cream": "cream",
+    "milk": "milk",
+    "syrup": "syrup",
+    "zest": "zest",
+    "peel": "peel",
+    "seed": "seed", "seeds": "seed",
+    "soda water": "soda water",
+    "club soda": "club soda",
+    "tonic water": "tonic water",
+    "ginger ale": "ginger ale",
+    "ginger beer": "ginger beer",
+    "sparkling water": "sparkling water",
+    "simple syrup": "simple syrup",
+    "lime juice": "lime juice",
+    "lemon juice": "lemon juice",
+    "orange juice": "orange juice",
+    "lemon-lime soda": "lemon-lime soda",
 }
 
 
@@ -103,3 +151,15 @@ def is_unit_alias(surface: str) -> bool:
 
 def is_count_noun_alias(surface: str) -> bool:
     return canonicalize_count_noun(surface) is not None
+
+
+def canonicalize_known_noun(surface: str) -> str | None:
+    """Canonical form of any known noun — true count nouns *or* mass-noun
+    bare ingredients. Used by the no_qty_known_noun rule so that anchors
+    like `Ice`, `Crushed ice`, and `Soda water` are recognized while
+    keeping COUNT_NOUN_ALIASES tight enough that they don't mis-fire as
+    tail-position count nouns in qty-bearing rows."""
+    if not surface:
+        return None
+    key = surface.lower()
+    return COUNT_NOUN_ALIASES.get(key) or BARE_INGREDIENT_ALIASES.get(key)

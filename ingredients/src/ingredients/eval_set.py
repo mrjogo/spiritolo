@@ -206,6 +206,84 @@ _PARSE_CASES: list[EvalCase] = [
              expect_status="parsed", expect_rule="qty_unit",
              expect_amount=0.75, expect_unit="oz",
              expect_name="(1 1/2 tablespoons) st-germain elderflower liqueur"),
+    # v5: hyphen-attached qty+unit normalized in pre_clean.
+    EvalCase("1/2-ounce dry vermouth", "thekitchn",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=0.5, expect_unit="oz", expect_name="dry vermouth"),
+    EvalCase("1-ounce vodka", "punch",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=1.0, expect_unit="oz", expect_name="vodka"),
+    # v5: `or` range separator.
+    EvalCase("3 or 4 dashes hot sauce", "foodandwine",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=3.0, expect_amount_max=4.0,
+             expect_unit="dash", expect_name="hot sauce"),
+    # v5: heaping/scant/mounded qualifier between qty and unit.
+    EvalCase("1 heaping tablespoon instant coffee granules", "seriouseats",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=1.0, expect_unit="tbsp",
+             expect_name="instant coffee granules"),
+    EvalCase("1 mounded teaspoon sweet barbecue sauce", "foodnetwork",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=1.0, expect_unit="tsp",
+             expect_name="sweet barbecue sauce"),
+    # v5: vocab additions — berries, jalapeño, units bag/gallon/swath/grind.
+    EvalCase("4 fresh raspberries", "foodandwine",
+             expect_status="parsed", expect_rule="qty_known_noun",
+             expect_amount=4.0, expect_unit=None, expect_name="raspberry"),
+    EvalCase("12 small jalapeños", "seriouseats",
+             expect_status="parsed", expect_rule="qty_known_noun",
+             expect_amount=12.0, expect_unit=None, expect_name="jalapeño"),
+    EvalCase("3 bags green tea", "thekitchn",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=3.0, expect_unit="bag", expect_name="green tea"),
+    EvalCase("1 gallon apple cider", "foodandwine",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=1.0, expect_unit="gallon", expect_name="apple cider"),
+    EvalCase("2 grind black pepper", "diffordsguide",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=2.0, expect_unit="grind", expect_name="black pepper"),
+    EvalCase("1 swath Lemon peel", "diffordsguide",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=1.0, expect_unit="swath", expect_name="lemon peel"),
+    EvalCase("12 strips crisp cooked bacon", "foodnetwork",
+             expect_status="parsed", expect_rule="count_noun",
+             expect_amount=12.0, expect_unit="strip",
+             expect_name="crisp cooked bacon"),
+    # v5: rule A — no_qty_known_noun preserves cleaned phrase as name.
+    EvalCase("Ice", "thekitchn",
+             expect_status="parsed", expect_rule="no_qty_known_noun",
+             expect_amount=None, expect_unit=None, expect_name="ice"),
+    EvalCase("Crushed ice", "punch",
+             expect_status="parsed", expect_rule="no_qty_known_noun",
+             expect_amount=None, expect_unit=None, expect_name="crushed ice"),
+    EvalCase("Lemon wheels, for garnish", "foodandwine",
+             expect_status="parsed", expect_rule="no_qty_known_noun",
+             expect_amount=None, expect_unit=None,
+             expect_name="lemon wheels, for garnish"),
+    EvalCase("Soda water", "punch",
+             expect_status="parsed", expect_rule="no_qty_known_noun",
+             expect_amount=None, expect_unit=None, expect_name="soda water"),
+    EvalCase("Fresh mint sprigs, for garnish", "thekitchn",
+             expect_status="parsed", expect_rule="no_qty_known_noun",
+             expect_amount=None, expect_unit=None,
+             expect_name="fresh mint sprigs, for garnish"),
+    # v5: rule C — lexical-qty heads (`Pinch X`, `Splash X`, `Dash X`).
+    EvalCase("Pinch ground cinnamon", "punch",
+             expect_status="parsed", expect_rule="lexical_qty",
+             expect_amount=None, expect_unit="pinch",
+             expect_name="ground cinnamon"),
+    EvalCase("Pinch of salt", "marthastewart",
+             expect_status="parsed", expect_rule="lexical_qty",
+             expect_amount=None, expect_unit="pinch", expect_name="salt"),
+    EvalCase("Splash lemon-lime soda", "diffordsguide",
+             expect_status="parsed", expect_rule="lexical_qty",
+             expect_amount=None, expect_unit="splash",
+             expect_name="lemon-lime soda"),
+    EvalCase("Dash pure vanilla extract", "seriouseats",
+             expect_status="parsed", expect_rule="lexical_qty",
+             expect_amount=None, expect_unit="dash",
+             expect_name="pure vanilla extract"),
 ]
 
 # Should-abstain cases (kept in sync with test_rule_abstain.py).
@@ -213,11 +291,10 @@ _ABSTAIN_CASES: list[EvalCase] = [
     EvalCase("0.5 oz Santoni Amaro3 oz Lambrusco Del Emilia Rosé1 oz club soda",
              "foodandwine", expect_status="unparseable"),
     EvalCase("D'Usse VSOP: 30 ml", "foodandwine", expect_status="unparseable"),
-    # v3: heavily-annotated bottle row is no longer abstained — qty_annotated_name
-    # preserves the full bracket text in the name. The genuine concat-row case
-    # (`0.5 oz Amaro3 oz Lambrusco`) is still caught by qty_unit's concat guard.
-    EvalCase("Coconut ice sphere*", "liquor", expect_status="unparseable"),
-    EvalCase("Ice", "thekitchn", expect_status="unparseable"),
+    # v5: most no-qty rows that anchor on a known noun (Ice, Coconut ice
+    # sphere*, etc.) are picked up by the no_qty_known_noun rule and moved
+    # to the parse cases above. The remaining abstains here are rows with
+    # neither a leading qty nor a recognized noun anchor.
     EvalCase("Few tablespoons honey (optional)", "marthastewart", expect_status="unparseable"),
 ]
 
