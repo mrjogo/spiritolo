@@ -189,6 +189,23 @@ _PARSE_CASES: list[EvalCase] = [
              expect_status="parsed", expect_rule="qty_unit",
              expect_amount=1.0, expect_unit="squeeze",
              expect_name="fresh lime juice"),
+    # v4: qty_unit's concat guard now ignores parenthesized text — recipe
+    # ratios inside parens (`(3 parts sugar to 4 parts ginger juice)`) used
+    # to false-trip the digit+unit pattern.
+    EvalCase("3/4 ounce rich ginger syrup (3 parts sugar to 4 parts ginger juice)",
+             "punch",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=0.75, expect_unit="oz",
+             expect_name="rich ginger syrup (3 parts sugar to 4 parts ginger juice)"),
+    EvalCase("8 ounces crushed ice (about 1 cup)", "seriouseats",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=8.0, expect_unit="oz",
+             expect_name="crushed ice (about 1 cup)"),
+    EvalCase("3/4 ounce (1 1/2 tablespoons) St-Germain elderflower liqueur",
+             "foodandwine",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=0.75, expect_unit="oz",
+             expect_name="(1 1/2 tablespoons) st-germain elderflower liqueur"),
 ]
 
 # Should-abstain cases (kept in sync with test_rule_abstain.py).

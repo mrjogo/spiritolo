@@ -16,11 +16,6 @@ ABSTAIN_CASES = [
     # Reverse format (name first, qty after) — too ambiguous for v1.
     "D'Usse VSOP: 30 ml",
     "Peychaud Bitters: 2 dashes",
-    # qty_unit's concat-row guard catches this: rest starts with `ounce`
-    # (a unit alias) but the candidate name contains an embedded `<n> tablespoons`,
-    # so the row is treated as scraper concat noise. R2 also abstains because
-    # the rest leads with a unit alias.
-    "3/4 ounce (1 1/2 tablespoons) St-Germain elderflower liqueur",
     # Footnote artifact — liquor.com convention.
     "Coconut ice sphere*",
     # No quantity, no recognized prefix.

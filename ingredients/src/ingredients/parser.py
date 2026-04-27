@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from ingredients.units import canonicalize_unit, canonicalize_count_noun, UNIT_ALIASES
 
-PARSER_VERSION = "v3"
+PARSER_VERSION = "v4"
 
 # Pattern used to detect concatenated multi-ingredient rows in the candidate
 # name produced by _try_qty_unit. If the name contains an embedded quantity
@@ -27,6 +27,14 @@ _UNIT_ALTERNATION = "|".join(
 )
 _CONCAT_RE = re.compile(
     rf"\d+\s*(?:{_UNIT_ALTERNATION})\b", re.IGNORECASE
+)
+_PAREN_RE = re.compile(r"\([^)]*\)")
+# Hyphen-attached size annotation seen on container rows
+# (`1-ounce`, `750-ml`, `12-inch`). The qty regex already grabbed the leading
+# digits, so this is what's *left* on the rest after qty extraction.
+_HYPHEN_SIZE_RE = re.compile(
+    r"\b\d+[ -](?:ounce|oz|ml|cl|l|inch|cm|mm|gram|g|kg|pound|lb|pint|quart)\b",
+    re.IGNORECASE,
 )
 
 
@@ -194,9 +202,11 @@ def _try_qty_unit(cleaned: str, raw: str) -> ParseResult | None:
     if not name_part:
         return None
     # Concatenated-row guard: if the candidate name contains an embedded
-    # quantity+unit token (e.g. "amaro3 oz lambrusco..." or "(1 1/2 tablespoons)
-    # st-germain..."), this is a scraper artifact and we must abstain.
-    if _CONCAT_RE.search(name_part):
+    # quantity+unit token (e.g. "amaro3 oz lambrusco..."), it's a scraper
+    # artifact and we must abstain. Parenthesized text is treated as benign
+    # annotation (`(3 parts sugar to 4 parts ginger juice)` is a recipe
+    # ratio inside one ingredient, not a smuggled second ingredient).
+    if _CONCAT_RE.search(_PAREN_RE.sub(" ", name_part)):
         return None
     return ParseResult(
         raw_text=raw,
@@ -216,15 +226,6 @@ _QUALIFIERS = (
     "large", "small", "medium", "ripe", "thin",
     # color modifiers seen in the histogram (`4 black tea bags`, `4 green olives`).
     "black", "green",
-)
-
-_PAREN_RE = re.compile(r"\([^)]*\)")
-# Hyphen-attached size annotation seen on container rows
-# (`1-ounce`, `750-ml`, `12-inch`). The qty regex already grabbed the leading
-# digits, so this is what's *left* on the rest after qty extraction.
-_HYPHEN_SIZE_RE = re.compile(
-    r"\b\d+[ -](?:ounce|oz|ml|cl|l|inch|cm|mm|gram|g|kg|pound|lb|pint|quart)\b",
-    re.IGNORECASE,
 )
 
 
