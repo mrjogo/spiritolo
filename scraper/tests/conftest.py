@@ -1,10 +1,39 @@
+from pathlib import Path
+
 import pytest
+
+from scraper.src.db import migrate
+
+
+# Tripwire: tests must never run against the real scraper.db. The path
+# resolution here mirrors the DEFAULT_DB_PATH definitions in fetch.py /
+# discover.py / etc. — repo-root data/scraper.db. We assert against this in
+# `tmp_db` so a future fixture refactor that points at the wrong path fails
+# loudly instead of silently mutating the dev DB (we got bitten by this on
+# the Supabase side; mirroring the safeguard pattern from
+# ingredients/tests/conftest.py).
+_REAL_SCRAPER_DB = (
+    Path(__file__).resolve().parent.parent.parent / "data" / "scraper.db"
+).resolve()
 
 
 @pytest.fixture
 def tmp_db(tmp_path):
-    """Yield a path to a temporary SQLite database file."""
-    return tmp_path / "test_scraper.db"
+    """Yield a path to a freshly migrated temporary SQLite database file.
+
+    ``Database(path)`` no longer auto-migrates — it refuses to open a DB
+    whose schema doesn't match ``migrate()``'s output. This fixture runs
+    ``migrate()`` against a tmp path so tests open the DB cleanly.
+    """
+    path = tmp_path / "test_scraper.db"
+    if path.resolve() == _REAL_SCRAPER_DB:
+        pytest.fail(
+            f"tmp_db resolved to the real scraper.db at {_REAL_SCRAPER_DB}. "
+            "Refusing to migrate or mutate the dev database from a test.",
+            pytrace=False,
+        )
+    migrate(path)
+    return path
 
 
 @pytest.fixture

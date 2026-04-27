@@ -1,6 +1,14 @@
 import threading
 
-from scraper.src.db import Database
+import pytest
+
+from scraper.src.db import (
+    Database,
+    DatabaseNotMigratedError,
+    _expected_signature,
+    _schema_signature,
+    migrate,
+)
 
 
 def test_init_creates_table(tmp_db):
@@ -625,12 +633,13 @@ def test_get_pending_excludes_disabled(tmp_db):
     db.close()
 
 
-def test_migrate_adds_disabled_reason_to_existing_db(tmp_db):
-    """An existing DB that predates the disabled_reason column should be migrated
-    in place on Database() init — verifies _migrate() runs ALTER TABLE."""
+def test_migrate_adds_disabled_reason_to_existing_db(tmp_path):
+    """An existing DB that predates the disabled_reason column gets the column
+    added when migrate() runs. Verifies the legacy ALTER TABLE step."""
     import sqlite3
 
-    conn = sqlite3.connect(tmp_db)
+    db_path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_path)
     conn.execute(
         """
         CREATE TABLE pages (
@@ -655,7 +664,8 @@ def test_migrate_adds_disabled_reason_to_existing_db(tmp_db):
     conn.commit()
     conn.close()
 
-    db = Database(tmp_db)
+    migrate(db_path)
+    db = Database(db_path)
     columns = [r[1] for r in db.conn.execute("PRAGMA table_info(pages)").fetchall()]
     assert "disabled_reason" in columns
     row = db.conn.execute("SELECT disabled_reason FROM pages").fetchone()
@@ -732,14 +742,15 @@ def test_extract_runs_table_exists(tmp_db):
     db.close()
 
 
-def test_legacy_pages_columns_are_migrated_on_open(tmp_db):
-    """Opening an older DB with legacy `error` + `validated_at` columns:
-    drops validated_at, renames error to fetch_error, and narrows fetch_error
-    to status='failed' rows only (other rows' legacy text was really a
-    validate reason — that moves to validate_html_runs.reason on next run).
-    Migration is idempotent across re-opens."""
+def test_legacy_pages_columns_are_migrated_by_migrate(tmp_path):
+    """Running migrate() on an older DB with legacy `error` + `validated_at`
+    columns: drops validated_at, renames error to fetch_error, and narrows
+    fetch_error to status='failed' rows only (other rows' legacy text was
+    really a validate reason — that moves to validate_html_runs.reason on
+    next run). migrate() is idempotent across re-runs."""
     import sqlite3
-    conn = sqlite3.connect(tmp_db)
+    db_path = tmp_path / "legacy.db"
+    conn = sqlite3.connect(db_path)
     conn.execute("""
         CREATE TABLE pages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -766,7 +777,8 @@ def test_legacy_pages_columns_are_migrated_on_open(tmp_db):
     conn.commit()
     conn.close()
 
-    db = Database(tmp_db)
+    migrate(db_path)
+    db = Database(db_path)
     cols = {row["name"] for row in db.conn.execute("PRAGMA table_info(pages)")}
     assert "validated_at" not in cols
     assert "error" not in cols
@@ -778,34 +790,138 @@ def test_legacy_pages_columns_are_migrated_on_open(tmp_db):
     assert rows["https://e.com/blocked"]["fetch_error"] is None
     db.close()
 
-    # Re-open is idempotent — no error, same shape.
-    db = Database(tmp_db)
+    # Re-running migrate is idempotent — same shape, no error.
+    migrate(db_path)
+    db = Database(db_path)
     cols = {row["name"] for row in db.conn.execute("PRAGMA table_info(pages)")}
     assert "validated_at" not in cols
     assert "fetch_error" in cols
     db.close()
 
 
-def test_legacy_classifications_table_is_dropped_on_open(tmp_db):
+def test_legacy_classifications_table_is_dropped_by_migrate(tmp_path):
     """Pre-existing `classifications` tables from the previous schema are
-    dropped on first open. `classify_url_runs` is the only classification
+    dropped by migrate(). `classify_url_runs` is the only classification
     storage the codebase knows about now."""
-    db = Database(tmp_db)
-    # Simulate a legacy DB by creating the old table ourselves.
-    db.conn.execute(
+    import sqlite3
+
+    db_path = tmp_path / "legacy.db"
+    # Build a DB with the modern schema, then graft on the legacy table to
+    # simulate a DB that pre-dates the cleanup. migrate() should drop it.
+    migrate(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
         "CREATE TABLE classifications (id INTEGER PRIMARY KEY, page_id INTEGER, "
         "label TEXT, model TEXT, prompt_version TEXT, raw_response TEXT, "
         "latency_ms INTEGER, created_at TEXT)"
     )
-    db.conn.commit()
-    db.close()
+    conn.commit()
+    conn.close()
 
-    db = Database(tmp_db)
+    migrate(db_path)
+    db = Database(db_path)
     exists = db.conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='classifications'"
     ).fetchone()
     assert exists is None
     db.close()
+
+
+def test_init_refuses_missing_db(tmp_path):
+    """Database() must not silently create a DB file. If the path doesn't
+    exist, init raises so the user runs migrate explicitly."""
+    missing = tmp_path / "does-not-exist.db"
+    with pytest.raises(DatabaseNotMigratedError):
+        Database(missing)
+    # No file should have been created as a side effect.
+    assert not missing.exists()
+
+
+def test_init_refuses_empty_db(tmp_path):
+    """A DB with no tables fails the structural signature check. Catches the
+    case where someone hand-creates a SQLite file or forgets migrate()."""
+    import sqlite3
+
+    db_path = tmp_path / "raw.db"
+    sqlite3.connect(db_path).close()  # creates an empty DB with no tables
+    with pytest.raises(DatabaseNotMigratedError) as exc_info:
+        Database(db_path)
+    # The error message names what's missing — actionable for the user.
+    assert "Missing or wrong shape" in str(exc_info.value)
+
+
+def test_init_refuses_drifted_schema(tmp_path):
+    """A DB whose tables differ from migrate()'s output is rejected. Mimics
+    a hand-edit / aborted migration / future schema bump that hasn't been
+    run yet."""
+    import sqlite3
+
+    db_path = tmp_path / "drifted.db"
+    migrate(db_path)
+    # Add an unexpected column to pages — the signature comparison should
+    # catch this even though all the expected tables/indexes are present.
+    with sqlite3.connect(db_path) as c:
+        c.execute("ALTER TABLE pages ADD COLUMN bogus_extra TEXT")
+    with pytest.raises(DatabaseNotMigratedError):
+        Database(db_path)
+
+
+def test_migrate_matches_expected_signature(tmp_path):
+    """A fresh migrate() produces exactly the structure Database() expects."""
+    db_path = tmp_path / "fresh.db"
+    migrate(db_path)
+    with __import__("sqlite3").connect(db_path) as c:
+        assert _schema_signature(c) == _expected_signature()
+    Database(db_path).close()  # opens cleanly
+
+
+def test_migrate_is_idempotent(tmp_path):
+    """Running migrate() on an already-migrated DB is a no-op."""
+    db_path = tmp_path / "fresh.db"
+    migrate(db_path)
+    migrate(db_path)
+    db = Database(db_path)
+    db.close()
+
+
+def test_legacy_migrated_db_signature_matches_fresh(tmp_path):
+    """The whole point of the fingerprint approach: a DB that arrived at the
+    current schema via the legacy migration path (CREATE old + ALTER) must
+    produce the same signature as a DB that was CREATEd fresh. If this test
+    breaks, ALTER TABLE leaves a column attribute SQLite reports differently
+    than the corresponding fresh CREATE — and that's a real correctness bug
+    in `_apply_legacy_migrations`."""
+    import sqlite3
+
+    legacy_path = tmp_path / "legacy.db"
+    fresh_path = tmp_path / "fresh.db"
+
+    # Build a legacy-shaped DB (old `error` column, `validated_at`, no
+    # `disabled_reason`) and migrate it.
+    conn = sqlite3.connect(legacy_path)
+    conn.execute("""
+        CREATE TABLE pages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            site TEXT NOT NULL,
+            url TEXT NOT NULL UNIQUE,
+            status TEXT NOT NULL DEFAULT 'pending',
+            content_type TEXT,
+            sitemap_source TEXT,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            discovered_at TEXT NOT NULL,
+            fetched_at TEXT,
+            error TEXT,
+            html_path TEXT,
+            validated_at TEXT
+        )
+    """)
+    conn.commit()
+    conn.close()
+    migrate(legacy_path)
+    migrate(fresh_path)
+
+    with sqlite3.connect(legacy_path) as c1, sqlite3.connect(fresh_path) as c2:
+        assert _schema_signature(c1) == _schema_signature(c2)
 
 
 # ---------------------------------------------------------------------------
