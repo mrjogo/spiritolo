@@ -82,9 +82,9 @@ def test_full_pipeline(tmp_db, tmp_path):
     db.set_content_type("https://example.com/recipes/mojito", "likely_drink_recipe")
 
     # Fetch
-    results = fetch_pages(db, client, html_dir=tmp_path, delay=0)
-    assert results["Recipe"] == 1
-    assert results["blocked"] == 1
+    changes, _ = fetch_pages(db, client, html_dir=tmp_path, delay=0)
+    assert changes["testsite"]["Recipe"] == 1
+    assert changes["testsite"]["blocked"] == 1
 
     # Verify state
     stats = db.get_stats()

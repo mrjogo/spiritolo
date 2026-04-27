@@ -2,10 +2,13 @@ import argparse
 import hashlib
 import threading
 import time
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 from dotenv import load_dotenv
+
+from spiritolo_common.summary import print_summary
 
 from scraper.src.classify_drink import SCORER_VERSION, classify_drink_scored
 from scraper.src.client import ScraperAPIClient, ScraperAPIError, AuthError, QuotaExhaustedError
@@ -53,15 +56,27 @@ def fetch_pages(
     content_type: str | None = "likely_drink_recipe",
     delay: float = 0.0,
     workers: int | None = None,
-) -> dict:
+) -> tuple[dict[str, Counter], list[str]]:
+    """Fetch pending pages and return ``(per_site_changes, paused_sites)``.
+
+    ``per_site_changes`` is the same shape every other stage CLI returns —
+    ``dict[str, Counter]`` keyed by site, with categories like the JSON-LD
+    ``@type`` of the fetched page (Recipe, NewsArticle, …), ``blocked``
+    (validator rejection), or ``error`` (network/HTTP failure). Renders via
+    ``spiritolo_common.summary.print_summary``.
+
+    ``paused_sites`` is reported separately because it isn't a count — it's
+    a side-effect (circuit-breaker tripped). Returned for tests / pipeline
+    bookkeeping; the per-site PAUSED line is also logged inline as it fires.
+    """
     try:
         account = client.get_account()
     except AuthError as e:
         print(f"ABORTED: AuthError: {e}")
-        return {"blocked": 0, "errors": 0, "paused_sites": []}
+        return {}, []
     except ScraperAPIError as e:
         print(f"ABORTED: {e}")
-        return {"blocked": 0, "errors": 0, "paused_sites": []}
+        return {}, []
     remaining = account["requestLimit"] - account["requestCount"]
     concurrency = account["concurrencyLimit"]
     print(
@@ -71,9 +86,14 @@ def fetch_pages(
 
     pending = db.get_pending(site=site or force_site, limit=limit, content_type=content_type)
     paused_sites: set[str] = set()
-    results: dict = {"blocked": 0, "errors": 0, "paused_sites": []}
+    changes: dict[str, Counter] = {}
     state_lock = threading.Lock()
     shutdown = threading.Event()
+
+    def bump(site_name: str, category: str) -> None:
+        # Caller already holds state_lock when needed for the surrounding
+        # mutation; the dict.setdefault path is a single C-level op.
+        changes.setdefault(site_name, Counter())[category] += 1
 
     n_workers = workers if workers is not None else concurrency
     if workers is not None and workers > concurrency:
@@ -84,8 +104,7 @@ def fetch_pages(
 
     total = len(pending)
     if total == 0:
-        results["paused_sites"] = []
-        return results
+        return changes, []
 
     run_id = db.start_run(
         stage="fetch",
@@ -131,7 +150,7 @@ def fetch_pages(
         except Exception as e:
             db.mark_failed(url, str(e))
             with state_lock:
-                results["errors"] += 1
+                bump(page_site, "error")
             print(f"  ERROR: {e}")
             if delay > 0:
                 time.sleep(delay)
@@ -143,12 +162,12 @@ def fetch_pages(
         if result.status == "blocked":
             db.mark_blocked(url, html_path=rel_path)
             with state_lock:
-                results["blocked"] += 1
+                bump(page_site, "blocked")
             print(f"  BLOCKED: {result.reason}")
         else:
             db.mark_content(url, result.status, html_path=rel_path)
             with state_lock:
-                results[result.status] = results.get(result.status, 0) + 1
+                bump(page_site, result.status)
             print(f"  {result.status}: {result.reason}")
 
         # Record the validate + classify_drink evaluations into the same
@@ -213,9 +232,15 @@ def fetch_pages(
         print(abort_message)
 
     with state_lock:
-        results["paused_sites"] = list(paused_sites)
-    db.finish_run(run_id, summary=results)
-    return results
+        paused = sorted(paused_sites)
+    db.finish_run(
+        run_id,
+        summary={
+            "per_site": {s: dict(c) for s, c in changes.items()},
+            "paused_sites": paused,
+        },
+    )
+    return changes, paused
 
 
 if __name__ == "__main__":
@@ -247,7 +272,7 @@ if __name__ == "__main__":
     db = Database(DEFAULT_DB_PATH)
     client = ScraperAPIClient()
 
-    results = fetch_pages(
+    changes, paused = fetch_pages(
         db,
         client,
         site=args.site,
@@ -258,14 +283,9 @@ if __name__ == "__main__":
         delay=args.delay,
     )
 
-    print("\n--- Results ---")
-    print(f"Blocked:    {results['blocked']}")
-    print(f"Errors:     {results['errors']}")
-    other = {k: v for k, v in results.items() if k not in ("blocked", "errors", "paused_sites") and v}
-    for status, count in sorted(other.items()):
-        print(f"{status + ':':12s}{count}")
-    if results["paused_sites"]:
-        print(f"Paused:     {', '.join(results['paused_sites'])}")
+    print_summary("Fetch", changes)
+    if paused:
+        print(f"Paused (circuit breaker): {', '.join(paused)}")
 
     stats = db.get_stats()
     print("\n--- Overall ---")
