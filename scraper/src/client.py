@@ -60,3 +60,17 @@ class ScraperAPIClient:
                 f"/account returned {resp.status_code}: {resp.text[:200]}"
             )
         return resp.json()
+
+    def url_cost(self, url: str, country_code: str = "us") -> int:
+        resp = requests.get(
+            "https://api.scraperapi.com/account/urlcost",
+            params={"api_key": self.api_key, "url": url, "country_code": country_code},
+            timeout=30,
+        )
+        if resp.status_code == 401:
+            raise AuthError(f"Invalid API key (urlcost endpoint): {resp.text[:200]}")
+        if resp.status_code != 200:
+            raise ScraperAPIError(
+                f"/account/urlcost returned {resp.status_code}: {resp.text[:200]}"
+            )
+        return resp.json()["credits"]

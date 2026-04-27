@@ -38,6 +38,56 @@ def save_html(html_dir: Path, site_name: str, filename: str, html: str) -> str:
     return f"{site_name}/{filename}"
 
 
+def estimate_credits(
+    client: ScraperAPIClient, pending: list[dict]
+) -> list[tuple[str, int, int | None]]:
+    """Return ``[(site, pending_count, credits_per_req)]`` sorted by site name.
+
+    Probes ``/account/urlcost`` once per site (cost is per-domain on
+    ScraperAPI, so a single sample URL is representative). ``credits_per_req``
+    is ``None`` if the probe failed."""
+    by_site: dict[str, list[dict]] = {}
+    for row in pending:
+        by_site.setdefault(row["site"], []).append(row)
+
+    def probe(item: tuple[str, list[dict]]) -> tuple[str, int, int | None]:
+        site, rows = item
+        try:
+            cost = client.url_cost(rows[0]["url"])
+        except ScraperAPIError:
+            cost = None
+        return site, len(rows), cost
+
+    with ThreadPoolExecutor(max_workers=min(8, len(by_site))) as ex:
+        results = list(ex.map(probe, by_site.items()))
+    results.sort(key=lambda r: r[0])
+    return results
+
+
+def print_preflight(
+    estimates: list[tuple[str, int, int | None]], remaining: int
+) -> int:
+    """Render the per-site preflight table, return total estimated credits."""
+    print("\nPreflight cost estimate:")
+    print(f"  {'site':<16} {'pending':>9} {'cred/req':>9} {'estimated':>11}")
+    total = 0
+    for site, count, cost in estimates:
+        if cost is None:
+            cost_str = "?"
+            row_str = "?"
+        else:
+            row_total = count * cost
+            total += row_total
+            cost_str = str(cost)
+            row_str = f"{row_total:,}"
+        print(f"  {site:<16} {count:>9,} {cost_str:>9} {row_str:>11}")
+    print(f"  {'':<16} {'':>9} {'total':>9} {total:>11,}")
+    print(f"  account remaining: {remaining:,}")
+    if total > remaining:
+        print(f"  WARNING: estimate exceeds remaining credits by {total - remaining:,}")
+    return total
+
+
 def check_circuit_breaker(recent_statuses: list[str]) -> bool:
     n = len(recent_statuses)
     if n < CIRCUIT_BREAKER_WINDOW:
@@ -57,6 +107,7 @@ def fetch_pages(
     content_type: str | None = "likely_drink_recipe",
     delay: float = 0.0,
     workers: int | None = None,
+    confirm: bool = False,
 ) -> tuple[dict[str, Counter], list[str]]:
     """Fetch pending pages and return ``(per_site_changes, paused_sites)``.
 
@@ -106,6 +157,14 @@ def fetch_pages(
     total = len(pending)
     if total == 0:
         return changes, []
+
+    if confirm:
+        estimates = estimate_credits(client, pending)
+        print_preflight(estimates, remaining)
+        answer = input("\nProceed? [y/N]: ").strip().lower()
+        if answer not in ("y", "yes"):
+            print("Aborted.")
+            return changes, []
 
     run_id = db.start_run(
         stage="fetch",
@@ -270,6 +329,12 @@ if __name__ == "__main__":
         default=0.0,
         help="Delay in seconds between fetches per worker (default: 0.0 — ScraperAPI's concurrency limit governs rate)",
     )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="Skip preflight confirmation prompt",
+    )
     args = parser.parse_args()
     content_type = None if args.content_type == "any" else args.content_type
 
@@ -286,6 +351,7 @@ if __name__ == "__main__":
         content_type=content_type,
         workers=args.workers,
         delay=args.delay,
+        confirm=not args.yes,
     )
 
     print_summary("Fetch", changes)
