@@ -15,11 +15,12 @@ from dataclasses import dataclass
 from ingredients.units import (
     canonicalize_unit,
     canonicalize_count_noun,
+    canonicalize_qty_noun,
     canonicalize_known_noun,
     UNIT_ALIASES,
 )
 
-PARSER_VERSION = "v5"
+PARSER_VERSION = "v6"
 
 # Pattern used to detect concatenated multi-ingredient rows in the candidate
 # name produced by _try_qty_unit. If the name contains an embedded quantity
@@ -289,25 +290,26 @@ def _try_count_noun(cleaned: str, raw: str) -> ParseResult | None:
     if not rest:
         return None
 
-    # Annotated rows (parens or hyphenated container size) belong to
-    # qty_annotated_name. Without this gate, bare-ingredient nouns we put in
-    # COUNT_NOUN_ALIASES (strawberry, lemon, banana) mis-fire on rows like
-    # `1/2 (16-ounce) bag frozen strawberries`, claiming `strawberries`
-    # as the count noun when the *bag* is the real container.
-    if "(" in rest or _HYPHEN_SIZE_RE.search(rest):
+    # Annotated rows (parens, hyphenated container size, or comma-suffix
+    # prep notes) belong to qty_annotated_name. Without these gates,
+    # comma-suffix rows like `8 lemon wheels, for garnish` lose the tail
+    # match (the comma sticks to `wheels,`) and head-position fires on
+    # `lemon` instead — yielding the inverted unit=lemon, name="wheels…".
+    if "(" in rest or "," in rest or _HYPHEN_SIZE_RE.search(rest):
         return None
 
     tokens = rest.split()
-    # Strip a leading qualifier if present (drop it; modifier=None for v1).
-    if tokens and tokens[0] in _QUALIFIERS:
+    # Strip leading qualifiers — repeatedly, so `2 freshly sliced pears`
+    # peels off both `freshly` and `sliced` before the noun match.
+    while tokens and tokens[0] in _QUALIFIERS:
         tokens = tokens[1:]
     if not tokens:
         return None
 
-    # Empty-name guard: if the full remaining text canonicalizes as a count
-    # noun (`1 egg white`, `1 lemons`), we'd produce an empty name regardless
-    # of which end the count noun sits at — abstain rather than emit junk.
-    if canonicalize_count_noun(" ".join(tokens)) is not None:
+    # Empty-name guard: if the full remaining text canonicalizes as a
+    # known *qty* noun (`1 egg white`, `1 lemon`), we'd produce an empty
+    # name. Abstain so qty_known_noun can pick it up with name=<canonical>.
+    if canonicalize_qty_noun(" ".join(tokens)) is not None:
         return None
 
     # Try count noun at end-of-string first (most common: '3 fresh basil leaves').
@@ -360,9 +362,13 @@ def _try_count_noun(cleaned: str, raw: str) -> ParseResult | None:
 
 def _try_qty_known_noun(cleaned: str, raw: str) -> ParseResult | None:
     """Match `<qty> [qualifier]? <known_noun>` where the noun is the
-    entire remaining phrase. Emits unit=None, name=<canonical>.
+    entire remaining phrase. Emits unit="each", name=<canonical>.
 
-    Single source of truth: COUNT_NOUN_ALIASES (same list count_noun uses).
+    `each` is the count-of-whole-items unit — semantically equivalent
+    to "1 (one) lemon" rather than "1 oz lemon" or "1 wedge lemon".
+    Distinct from `unit=None` (used for unstructured rows in
+    qty_annotated_name where we don't know the unit).
+
     Fires when count_noun's empty-name guard would otherwise abstain
     (`1 lemon`, `1 banana`, `1 star anise`, `1 egg white`).
     """
@@ -374,11 +380,11 @@ def _try_qty_known_noun(cleaned: str, raw: str) -> ParseResult | None:
     if not rest:
         return None
     tokens = rest.split()
-    if tokens and tokens[0] in _QUALIFIERS:
+    while tokens and tokens[0] in _QUALIFIERS:
         tokens = tokens[1:]
     if not tokens:
         return None
-    canon = canonicalize_count_noun(" ".join(tokens))
+    canon = canonicalize_qty_noun(" ".join(tokens))
     if canon is None:
         return None
     return ParseResult(
@@ -387,7 +393,7 @@ def _try_qty_known_noun(cleaned: str, raw: str) -> ParseResult | None:
         parser_rule="qty_known_noun",
         amount=amount,
         amount_max=amount_max,
-        unit=None,
+        unit="each",
         name=canon,
     )
 
@@ -409,7 +415,10 @@ def _try_qty_annotated_name(cleaned: str, raw: str) -> ParseResult | None:
     if not rest:
         return None
     has_signal = (
-        "(" in rest or "," in rest or _HYPHEN_SIZE_RE.search(rest) is not None
+        "(" in rest
+        or "," in rest
+        or "-" in rest
+        or _HYPHEN_SIZE_RE.search(rest) is not None
     )
     if not has_signal:
         return None

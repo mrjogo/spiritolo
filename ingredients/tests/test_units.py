@@ -84,10 +84,7 @@ def test_canonicalize_count_noun():
     assert canonicalize_count_noun("cubes") == "cube"
     assert canonicalize_count_noun("egg white") == "egg white"
     assert canonicalize_count_noun("sprigs") == "sprig"
-    # citrus + new produce/spice heads added in v3.
-    assert canonicalize_count_noun("lemon") == "lemon"
-    assert canonicalize_count_noun("Limes") == "lime"
-    assert canonicalize_count_noun("oranges") == "orange"
+    # New produce/spice count nouns added in v3.
     assert canonicalize_count_noun("clove") == "clove"
     assert canonicalize_count_noun("cloves") == "clove"
     assert canonicalize_count_noun("pod") == "pod"
@@ -97,6 +94,25 @@ def test_canonicalize_count_noun():
     assert canonicalize_count_noun("cherry") == "cherry"
     assert canonicalize_count_noun("cherries") == "cherry"
     assert canonicalize_count_noun("scoops") == "scoop"
+    # v6: citrus + bare-ingredient countables moved to INGREDIENT_COUNTABLES
+    # so they no longer populate the unit field. count_noun rule rejects them.
+    assert canonicalize_count_noun("lemon") is None
+    assert canonicalize_count_noun("orange") is None
+    assert canonicalize_count_noun("banana") is None
+
+
+def test_canonicalize_qty_noun_unions_count_and_ingredient():
+    from ingredients.units import canonicalize_qty_noun
+    # True count nouns:
+    assert canonicalize_qty_noun("wedge") == "wedge"
+    assert canonicalize_qty_noun("egg white") == "egg white"
+    # Countable ingredients:
+    assert canonicalize_qty_noun("lemon") == "lemon"
+    assert canonicalize_qty_noun("Limes") == "lime"
+    assert canonicalize_qty_noun("oranges") == "orange"
+    # Mass nouns are *not* in the qty noun set:
+    assert canonicalize_qty_noun("ice") is None
+    assert canonicalize_qty_noun("salt") is None
 
 
 def test_canonicalize_unit_bar_spoon_alias():

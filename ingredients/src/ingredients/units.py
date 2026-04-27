@@ -52,6 +52,11 @@ UNIT_ALIASES: dict[str, str] = {
 }
 
 # Surface form -> canonical count noun. Same lookup discipline.
+# True measurement count nouns. The parser populates the `unit` field
+# *only* with values from this dict (or UNIT_ALIASES). If a word doesn't
+# describe a measurement of an ingredient — like `lemon` or `banana` —
+# it does not belong here, even if it's countable. Bare-ingredient
+# countables go in INGREDIENT_COUNTABLES below.
 COUNT_NOUN_ALIASES: dict[str, str] = {
     "leaf": "leaf", "leaves": "leaf",
     "slice": "slice", "slices": "slice",
@@ -61,27 +66,43 @@ COUNT_NOUN_ALIASES: dict[str, str] = {
     "cube": "cube", "cubes": "cube",
     "sprig": "sprig", "sprigs": "sprig",
     "piece": "piece", "pieces": "piece",
+    "twist": "twist", "twists": "twist",
+    "egg": "egg", "eggs": "egg",
     "egg white": "egg white", "egg whites": "egg white",
     "egg yolk": "egg yolk", "egg yolks": "egg yolk",
-    "egg": "egg", "eggs": "egg",
-    "twist": "twist", "twists": "twist",
-    # citrus — `1 lemon, sliced` / `1 orange half-wheel` / etc.
-    "lemon": "lemon", "lemons": "lemon",
-    "lime": "lime", "limes": "lime",
-    "orange": "orange", "oranges": "orange",
     # garlic / spice / produce count nouns (head: `4 cardamom pods`,
     # `1 vanilla bean`, `4 maraschino cherries`, `1.5 cloves garlic`).
     "clove": "clove", "cloves": "clove",
     "pod": "pod", "pods": "pod",
     "bean": "bean", "beans": "bean",
     "cherry": "cherry", "cherries": "cherry",
-    "star anise": "star anise",
-    # serving counts
+    # serving counts and forms
     "scoop": "scoop", "scoops": "scoop",
     "strip": "strip", "strips": "strip",
-    # bare-ingredient nouns (no separate count word). Recognized by the
-    # qty_known_noun rule so `1 lemon` / `1 banana` / `1 star anise` parse
-    # as amount=N, unit=None, name=<canonical>.
+    # parts-of-fruit (`1 lemon zest`, `2 orange peels`, `1 lime seed`).
+    "zest": "zest",
+    "peel": "peel", "peels": "peel",
+    "seed": "seed", "seeds": "seed",
+    # containers — also in UNIT_ALIASES so `1 bottle wine` (head)
+    # *and* `2 wine bottles` (tail) both parse.
+    "bottle": "bottle", "bottles": "bottle",
+    "can": "can", "cans": "can",
+    "bunch": "bunch", "bunches": "bunch",
+    "bag": "bag", "bags": "bag",
+    # multi-word: `2 dried Star anise` parses as amount=2, name="star anise".
+    "star anise": "star anise",
+}
+
+
+# Countable ingredient nouns — `1 lemon`, `2 limes`, `4 raspberries`,
+# `1 jalapeño`. They stand alone as the ingredient: qty_known_noun emits
+# them with unit="each" (the count is a count of whole items, not a
+# measurement word like `oz` or `wedge`), name=<canonical>. Kept apart
+# from COUNT_NOUN_ALIASES so count_noun's tail/head match doesn't
+# mis-fire — e.g. `5 cubes pineapple` resolves to unit=cube,
+# name=pineapple rather than the inverted unit=pineapple, name=cubes
+# we'd get if pineapple were here.
+INGREDIENT_COUNTABLES: dict[str, str] = {
     "banana": "banana", "bananas": "banana",
     "pineapple": "pineapple", "pineapples": "pineapple",
     "apple": "apple", "apples": "apple",
@@ -92,6 +113,9 @@ COUNT_NOUN_ALIASES: dict[str, str] = {
     "raspberry": "raspberry", "raspberries": "raspberry",
     "blackberry": "blackberry", "blackberries": "blackberry",
     "berry": "berry", "berries": "berry",
+    "lemon": "lemon", "lemons": "lemon",
+    "lime": "lime", "limes": "lime",
+    "orange": "orange", "oranges": "orange",
     "jalapeño": "jalapeño", "jalapeños": "jalapeño",
     "jalapeno": "jalapeño", "jalapenos": "jalapeño",
     "cardamom": "cardamom",
@@ -116,9 +140,6 @@ BARE_INGREDIENT_ALIASES: dict[str, str] = {
     "cream": "cream",
     "milk": "milk",
     "syrup": "syrup",
-    "zest": "zest",
-    "peel": "peel",
-    "seed": "seed", "seeds": "seed",
     "soda water": "soda water",
     "club soda": "club soda",
     "tonic water": "tonic water",
@@ -153,13 +174,27 @@ def is_count_noun_alias(surface: str) -> bool:
     return canonicalize_count_noun(surface) is not None
 
 
-def canonicalize_known_noun(surface: str) -> str | None:
-    """Canonical form of any known noun — true count nouns *or* mass-noun
-    bare ingredients. Used by the no_qty_known_noun rule so that anchors
-    like `Ice`, `Crushed ice`, and `Soda water` are recognized while
-    keeping COUNT_NOUN_ALIASES tight enough that they don't mis-fire as
-    tail-position count nouns in qty-bearing rows."""
+def canonicalize_qty_noun(surface: str) -> str | None:
+    """Canonical form of any noun that can stand as the ingredient in a
+    qty-bearing row — true count nouns plus countable ingredients
+    (`1 lemon`, `2 cardamom pods`, `1 egg white`). Excludes mass-noun
+    bare ingredients (`ice`, `salt`) which only appear in no-qty rows."""
     if not surface:
         return None
     key = surface.lower()
-    return COUNT_NOUN_ALIASES.get(key) or BARE_INGREDIENT_ALIASES.get(key)
+    return COUNT_NOUN_ALIASES.get(key) or INGREDIENT_COUNTABLES.get(key)
+
+
+def canonicalize_known_noun(surface: str) -> str | None:
+    """Canonical form of any known noun — count nouns, countable
+    ingredients, or mass-noun bare ingredients. Used by no_qty_known_noun
+    so anchors like `Ice`, `Crushed ice`, `Soda water`, `Lemon wheels`,
+    and `Pineapple chunks` all match."""
+    if not surface:
+        return None
+    key = surface.lower()
+    return (
+        COUNT_NOUN_ALIASES.get(key)
+        or INGREDIENT_COUNTABLES.get(key)
+        or BARE_INGREDIENT_ALIASES.get(key)
+    )

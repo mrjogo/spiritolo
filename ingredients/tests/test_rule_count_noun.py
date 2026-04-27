@@ -22,19 +22,19 @@ def test_count_noun_no_qualifier():
 def test_dried_star_anise_parses_via_qty_known_noun():
     """v3: `star anise` is a known noun, qualifier stripped → name=star anise."""
     _assert_parsed(parse("2 dried Star anise"), rule="qty_known_noun",
-                   amount=2.0, unit=None, name="star anise")
+                   amount=2.0, unit="each", name="star anise")
 
 
 def test_whole_pineapple_parses_via_qty_known_noun():
     """v3: `pineapple` is a known noun, qualifier stripped → name=pineapple."""
     _assert_parsed(parse("1 whole Pineapple"), rule="qty_known_noun",
-                   amount=1.0, unit=None, name="pineapple")
+                   amount=1.0, unit="each", name="pineapple")
 
 
 def test_egg_white_parses_via_qty_known_noun():
     """'1 egg white' is a known bare-ingredient noun; v3 emits it as the name."""
     _assert_parsed(parse("1 egg white"), rule="qty_known_noun",
-                   amount=1.0, unit=None, name="egg white")
+                   amount=1.0, unit="each", name="egg white")
 
 
 def test_sprig_qualifier():
