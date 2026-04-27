@@ -50,6 +50,23 @@ _HYPHEN_SIZE_RE = re.compile(
 
 @dataclass
 class ParseResult:
+    """Structured parse of one ingredient string.
+
+    `unit` value space (see units.py for full taxonomy):
+      - volume/weight: oz, ml, cup, tsp, tbsp, pint, quart, gallon, lb,
+        g, kg, … (UNIT_ALIASES canonicals).
+      - imprecise bartending: dash, splash, pinch, drop, jigger, shot,
+        squeeze, barspoon, grind, sprinkle, handful, knob, dropper, …
+      - containers: bottle, can, bag, bunch.
+      - form/piece: wedge, slice, leaf, sprig, cube, wheel, twist, peel,
+        zest, stick, clove, pod, bean, chunk, quarter, half, coin, disc,
+        ring, segment, spear, stalk, sheet, strip, scoop, piece, …
+        (COUNT_NOUN_ALIASES canonicals).
+      - the literal string "each" — count-of-whole-items sentinel
+        (qty_known_noun rule, e.g. `1 lemon` → unit="each").
+      - None — used by qty_annotated_name (annotated row, unit unknown),
+        no_qty_known_noun (no qty → no unit), topup, garnish_prefix.
+    """
     raw_text: str
     parse_status: str  # 'parsed' | 'unparseable'
     parser_rule: str | None = None

@@ -104,35 +104,6 @@ The eval set is `ingredients/src/ingredients/eval_set.py`. Add a new should-pars
 
 **Common, scraper, ingredients packages.** `common/` holds shared utilities (`supabase_client`, `progress`, `summary`, `cli_common`); both `scraper/` (Zone 1) and `ingredients/` (Zone 2) depend on it via the root-level uv workspace.
 
-## Ingredient Parser
-
-`ingredients/` is a Zone-2 worker that reads `recipes` from Supabase, parses each `jsonld.recipeIngredient` string with strict abstain discipline, and writes rows to `recipe_ingredients`. It depends on the shared `common/` package, not on `scraper/`.
-
-**Versioning:** `PARSER_VERSION` lives in [parser.py](ingredients/src/ingredients/parser.py). Bump it whenever any parser rule changes (including unit-table edits). Rows carry the version they were parsed under.
-
-**Typical usage (from repo root):**
-
-```bash
-# Main run — parse every recipe lacking a row at the current PARSER_VERSION.
-cd ingredients && uv run python -m ingredients.cli
-
-# Scoped to one site, with a row cap.
-cd ingredients && uv run python -m ingredients.cli --site punch --limit 200
-
-# Dry-run preview, no DB writes.
-cd ingredients && uv run python -m ingredients.cli --dry-run
-
-# Run the eval set; no DB writes. Use during rule iteration.
-cd ingredients && uv run python -m ingredients.cli --review
-
-# After bumping PARSER_VERSION, re-parse everything left at the old version.
-cd ingredients && uv run python -m ingredients.cli --reset --except-version v1 --yes
-```
-
-The eval set is `ingredients/src/ingredients/eval_set.py`. Add a new should-parse-as-X case whenever you teach the parser a new pattern; add a should-abstain case whenever you find an over-match.
-
-**Common, scraper, ingredients packages.** `common/` holds shared utilities (`supabase_client`, `progress`, `summary`, `cli_common`); both `scraper/` (Zone 1) and `ingredients/` (Zone 2) depend on it via the root-level uv workspace.
-
 ## Web UI
 
 Reads `recipes_public` via the publishable key (`sb_publishable_…`, post-Nov-2025 replacement for the legacy anon key). No backend.

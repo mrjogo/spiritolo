@@ -2,6 +2,57 @@
 
 Editing these tables is a parser logic change — bump PARSER_VERSION in
 parser.py whenever you add or remove an alias.
+
+Four tables, four roles. Together they govern what shows up in
+ParseResult.unit and ParseResult.name:
+
+  UNIT_ALIASES         Words the parser will populate ParseResult.unit
+                       with via _try_qty_unit / _try_lexical_qty. Three
+                       sub-categories live here:
+                         * volume / weight measurements: oz, ml, cup,
+                           tsp, tbsp, pint, quart, gallon, lb, g, kg, …
+                         * imprecise bartending counts: dash, splash,
+                           pinch, drop, jigger, shot, squeeze, barspoon,
+                           grind, sprinkle, handful, knob, dropper, …
+                         * containers: bottle, can, bag, bunch (also
+                           dual-listed in COUNT_NOUN_ALIASES so they can
+                           match at the tail position too).
+
+  COUNT_NOUN_ALIASES   Form / piece / shape words. Populate
+                       ParseResult.unit via _try_count_noun (head or
+                       tail position). Examples: wedge, slice, leaf,
+                       sprig, cube, wheel, twist, peel, zest, stick,
+                       clove, pod, bean, chunk, quarter, half, coin,
+                       disc, ring, segment, spear, stalk, sheet, strip,
+                       scoop, piece. These describe how the ingredient
+                       has been *shaped*, not the ingredient itself.
+
+  INGREDIENT_COUNTABLES Whole-ingredient nouns that are countable but
+                       are NOT measurement words: lemon, lime, orange,
+                       banana, raspberry, jalapeño, cherry, berry, egg,
+                       peppercorn, star anise, … When these match,
+                       _try_qty_known_noun emits unit="each" — the
+                       sentinel for "count of whole items," distinct
+                       from any volume measurement. Whole-ingredient
+                       nouns never populate the unit field directly.
+
+  BARE_INGREDIENT_ALIASES Mass-noun ingredients seen in no-qty rows:
+                       Ice, Crushed ice, Soda water, Worcestershire,
+                       Vodka, Champagne, … Recognized only by
+                       _try_no_qty_known_noun, which emits unit=None
+                       (no qty → no unit). Never affects qty-bearing
+                       parses; deliberately separate so that mass nouns
+                       like `cream` or `club soda` don't mis-fire as
+                       tail-position count nouns.
+
+ParseResult.unit value space, by parser_rule:
+  qty_unit            -> a UNIT_ALIASES canonical (oz, ml, dash, bottle, …).
+  count_noun          -> a COUNT_NOUN_ALIASES canonical (wedge, leaf, …).
+  qty_known_noun      -> the literal string "each".
+  qty_annotated_name  -> None (preserved annotation; unit unknown).
+  lexical_qty         -> a UNIT_ALIASES canonical (Pinch X, Splash X).
+  no_qty_known_noun   -> None (no qty → no unit).
+  topup, garnish_prefix -> None (semantic role, no qty/unit).
 """
 
 from __future__ import annotations
