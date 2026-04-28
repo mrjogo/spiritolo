@@ -1,5 +1,5 @@
 # --- repo-mixin:devcontainer-claude ---
-# [repo-mixin:devcontainer-claude] Generated env file with host paths and tokens
+# Generated env file with host paths and tokens
 .devcontainer/.env.devcontainer
 # --- /repo-mixin:devcontainer-claude ---
 

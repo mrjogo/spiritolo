@@ -1,0 +1,6 @@
+{
+  // [repo-mixin:devcontainer-claude] Default to 'auto' permission mode when opening on the host.
+  // The devcontainer overrides this with 'bypassPermissions' via devcontainer.json -- safe there
+  // because damage is confined to the ephemeral container filesystem.
+  "claudeCode.initialPermissionMode": "auto"
+}

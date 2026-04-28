@@ -68,7 +68,13 @@
       "extensions": [
         // [repo-mixin:devcontainer-claude] Claude Code VS Code extension
         "anthropic.claude-code"
-      ]
+      ],
+      // [repo-mixin:devcontainer-claude] Default the in-container Claude Code session to bypass permission prompts.
+      // Safe inside the devcontainer because damage is confined to the ephemeral container filesystem.
+      "settings": {
+        "claudeCode.allowDangerouslySkipPermissions": true,
+        "claudeCode.initialPermissionMode": "bypassPermissions"
+      }
     }
   }
 }

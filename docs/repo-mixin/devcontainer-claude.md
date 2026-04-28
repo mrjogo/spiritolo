@@ -1,18 +1,19 @@
 # devcontainer-claude mixin
 
 Applied from: https://github.com/mrjogo/repo-mixin/tree/main/mixins/devcontainer-claude
-Applied commit: 7df795465f52bec8658e88919c2982d20652f881
-Applied: 2026-04-20
+Applied commit: 05348e77d488842d9dfa812c9d1976a40a8b662f
+Applied: 2026-04-28
 
 ## What this does
 
 Sets up a devcontainer with Claude Code integration, including conversation
 history bridging between host and container, tmux for session persistence,
-GitHub CLI with auth forwarding, starter Claude Code permissions, and an
-optional macOS notification hook.
+GitHub CLI with auth forwarding, starter Claude Code permissions, an
+optional macOS notification hook, and a `@claude` GitHub Actions workflow.
 
 ## Files touched
 
+- .vscode/settings.json
 - .devcontainer/Dockerfile
 - .devcontainer/devcontainer.json
 - .devcontainer/.inputrc
@@ -25,6 +26,7 @@ optional macOS notification hook.
 - .claude/settings.json.repo-mixin.jsonc
 - .claude/manage_settings.py
 - .claude/hooks/notify.sh
+- .github/workflows/claude.yml
 - .gitignore
 - CLAUDE.md
 - docs/devcontainer-setup.md
