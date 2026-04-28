@@ -1,7 +1,7 @@
 # devcontainer-claude mixin
 
 Applied from: https://github.com/mrjogo/repo-mixin/tree/main/mixins/devcontainer-claude
-Applied commit: a301f1e4db217332a98b9abedfea9dbbd42d7f5d
+Applied commit: 05348e77d488842d9dfa812c9d1976a40a8b662f
 Applied: 2026-04-28
 
 ## What this does
@@ -13,6 +13,7 @@ optional macOS notification hook, and a `@claude` GitHub Actions workflow.
 
 ## Files touched
 
+- .vscode/settings.json
 - .devcontainer/Dockerfile
 - .devcontainer/devcontainer.json
 - .devcontainer/.inputrc
