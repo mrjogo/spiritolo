@@ -2,7 +2,7 @@
 
 # spiritolo
 
-Cocktail recipe scraper + verification UI. Stages: discover → fetch → classify_url → validate (HTML + drink scoring) → extract (Schema.org Recipe JSON-LD → Supabase). Vite/React SPA reads `recipes_public`.
+Cocktail recipe scraper + verification UI. Stages: discover → classify_url → fetch (runs HTML validation + drink scoring inline) → extract (Schema.org Recipe JSON-LD → Supabase). `validate` is a re-scoring CLI for cached HTML after a version bump, not a normal pipeline step. Vite/React SPA reads `recipes_public`.
 
 - `scraper/` — Python 3.11+ (uv), pytest. Stage CLIs in `scraper/src/{fetch,classify,validate,extract}.py`. Work queue: `data/scraper.db` (SQLite).
 - `supabase/migrations/` — `recipes` + `taxonomy_*` tables.
