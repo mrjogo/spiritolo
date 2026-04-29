@@ -55,3 +55,44 @@ def test_cli_map_phase1_applied_writes_alias_resolution(fixture_taxonomy, test_d
         "from recipe_ingredients where lower(trim(name))='gin'"
     ).fetchone()
     assert row == (ids["gin"], "alias", "v1")
+
+
+def test_cli_map_resolve_pending_aborts_without_yes_on_pipe(fixture_taxonomy, test_db_url):
+    conn, _ = fixture_taxonomy
+    # Seed one pending row.
+    conn.execute("truncate table recipe_ingredients, recipes restart identity cascade")
+    rid = conn.execute(
+        "insert into recipes (site, source_url, jsonld, fetched_at) "
+        "values ('punch', 'https://example.com/q', '{}'::jsonb, now()) returning id"
+    ).fetchone()[0]
+    conn.execute(
+        "insert into recipe_ingredients "
+        "(recipe_id, position, raw_text, name, parse_status, parser_rule, parser_version, "
+        " mapper_source, mapper_version) "
+        "values (%s, 0, '1 oz unknown', 'unknown', 'parsed', 'qty_unit', 'v1', 'pending_llm', 'v1')",
+        (rid,),
+    )
+    conn.commit()
+
+    proc = _run_cli(
+        ["map", "resolve-pending", "--provider", "claude"],
+        {"SUPABASE_DB_URL": test_db_url},
+    )
+    # Without --yes and with non-tty stdin, the run aborts cleanly (exit 1).
+    assert proc.returncode == 1
+    # Nothing got resolved.
+    row = conn.execute(
+        "select mapper_source from recipe_ingredients where lower(trim(name))='unknown'"
+    ).fetchone()
+    assert row[0] == "pending_llm"
+
+
+def test_cli_map_resolve_pending_empty_queue_exits_zero(fixture_taxonomy, test_db_url):
+    conn, _ = fixture_taxonomy
+    conn.execute("truncate table recipe_ingredients, recipes restart identity cascade")
+    conn.commit()
+    proc = _run_cli(
+        ["map", "resolve-pending", "--provider", "claude"],
+        {"SUPABASE_DB_URL": test_db_url},
+    )
+    assert proc.returncode == 0

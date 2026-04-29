@@ -98,6 +98,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     _add_map_args(p_map)
     map_sub = p_map.add_subparsers(dest="map_cmd")
     # Phase 2 + review subcommands attach to map_sub in Tasks 18/19.
+    p_resolve = map_sub.add_parser(
+        "resolve-pending",
+        help="Phase 2 — drain the pending_llm queue using the chosen provider.",
+    )
+    p_resolve.add_argument(
+        "--provider", choices=["claude", "ollama"], required=True,
+        help="LLM provider to use.",
+    )
+    p_resolve.add_argument("--limit", type=int, default=None,
+                           help="Process at most N distinct pending names.")
+    p_resolve.add_argument("--yes", action="store_true",
+                           help="Skip the residual-count confirmation prompt.")
 
     return parser
 
@@ -185,7 +197,55 @@ def run_worker(args: argparse.Namespace) -> int:
         db.close()
 
 
+def run_resolve_pending(args: argparse.Namespace) -> int:
+    from ingredients.mapping.db import fetch_pending_llm_names
+    from ingredients.mapping.llm_resolver import run_phase2
+    from ingredients.mapping.mapper import MAPPER_VERSION
+
+    db = IngredientsDatabase()
+    try:
+        pending = fetch_pending_llm_names(db.conn, mapper_version=MAPPER_VERSION)
+        if not pending:
+            log.info("nothing pending; queue is empty")
+            return 0
+
+        # Show residual count + top-N before any external call so the
+        # operator can choose to skip / hand-curate / proceed.
+        log.info("%d distinct names pending Phase 2", len(pending))
+        for n in pending[:20]:
+            log.info("  %s", n)
+        if len(pending) > 20:
+            log.info("  ... and %d more", len(pending) - 20)
+
+        if not args.yes:
+            sys.stderr.write(f"Proceed with --provider {args.provider}? [y/N]: ")
+            sys.stderr.flush()
+            answer = sys.stdin.readline().strip().lower()
+            if answer not in ("y", "yes"):
+                log.info("aborted by operator")
+                return 1
+
+        if args.provider == "claude":
+            from ingredients.mapping.llm_provider_claude import ClaudeProvider
+            provider = ClaudeProvider.from_env()
+        else:
+            from ingredients.mapping.llm_provider_ollama import OllamaProvider
+            provider = OllamaProvider.from_env()
+
+        summary = run_phase2(db.conn, provider=provider, limit=args.limit)
+        changes = {"all": Counter(summary)}
+        print_summary(
+            f"Map resolve-pending ({args.provider}, {MAPPER_VERSION})",
+            changes, mode="applied",
+        )
+        return 0
+    finally:
+        db.close()
+
+
 def run_map(args: argparse.Namespace) -> int:
+    if getattr(args, "map_cmd", None) == "resolve-pending":
+        return run_resolve_pending(args)
     from ingredients.mapping.mapper import MAPPER_VERSION, run_phase1
     if args.review:
         log.error("--review for map not implemented yet (Task 21)")
