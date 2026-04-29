@@ -152,6 +152,48 @@ def test_run_cluster_compute_separates_ratio_variants(dedup_fixture, db_conn):
     assert rows[0][1] != rows[1][1]
 
 
+def test_cluster_compute_dry_run_does_not_write(dedup_fixture, db_conn):
+    """dry_run=True must leave cluster_id NULL while still reporting counts."""
+    conn, ids = dedup_fixture
+    db_conn.execute("""
+        insert into recipes (id, source_url, site, name, jsonld, fetched_at,
+                             canonical_name, canonical_name_source, normalizer_version, normalized_at)
+        values
+            (5301, 'http://x/dr1', 'punch', 'Negroni', '{}'::jsonb, now(),
+             'negroni', 'alias', 'v1', now())
+        on conflict (source_url) do nothing
+    """)
+    for pos, slug, amount in (
+        (1, "london_dry_gin", 1.0),
+        (2, "campari",        1.0),
+        (3, "sweet_vermouth", 1.0),
+    ):
+        db_conn.execute("""
+            insert into recipe_ingredients
+                (recipe_id, position, raw_text, amount, unit,
+                 parse_status, parser_version, taxonomy_node_id,
+                 mapper_source, mapper_version)
+            values (%s, %s, 'x', %s, 'oz', 'parsed', 'v1', %s, 'alias', 'v1')
+            on conflict (recipe_id, position) do nothing
+        """, (5301, pos, amount, ids[slug]))
+
+    from ingredients.dedup.cluster import run_cluster_compute
+    counts = run_cluster_compute(db_conn, dry_run=True)
+    # Must still report what would have happened.
+    assert counts.get("recipes_clustered", 0) >= 1
+    assert counts.get("clusters_created", 0) >= 1
+    # Nothing was written.
+    row = db_conn.execute(
+        "select cluster_id, variant_key, dedup_version from recipes where id = 5301"
+    ).fetchone()
+    assert row[0] is None, f"dry_run wrote cluster_id={row[0]!r}"
+    assert row[1] is None, f"dry_run wrote variant_key={row[1]!r}"
+    assert row[2] is None, f"dry_run wrote dedup_version={row[2]!r}"
+    # recipe_clusters table should be empty too.
+    cluster_count = db_conn.execute("select count(*) from recipe_clusters").fetchone()[0]
+    assert cluster_count == 0, f"dry_run wrote {cluster_count} recipe_clusters row(s)"
+
+
 def test_run_cluster_compute_ignores_ice(dedup_fixture, db_conn):
     conn, ids = dedup_fixture
     db_conn.execute("""

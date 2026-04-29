@@ -31,6 +31,7 @@ def run_phase1(
     *,
     site: str | None = None,
     limit: int | None = None,
+    dry_run: bool = False,
 ) -> dict[str, int]:
     """Return Counter-shaped dict keyed by 'alias' | 'lexical' | 'pending_llm'."""
     counts: Counter[str] = Counter()
@@ -40,32 +41,36 @@ def run_phase1(
     for raw in raw_names:
         normalized = normalize_cocktail_name(raw)
         if not normalized:
-            write_pending_normalize(conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION)
+            if not dry_run:
+                write_pending_normalize(conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION)
             counts["pending_llm"] += 1
             continue
 
         result = resolve_alias(conn, normalized)
         if isinstance(result, Resolved):
-            write_normalization(
-                conn, raw_name=raw, normalized=normalized,
-                canonical_name=result.canonical_name, source=result.source,
-                normalizer_version=NORMALIZER_VERSION,
-            )
+            if not dry_run:
+                write_normalization(
+                    conn, raw_name=raw, normalized=normalized,
+                    canonical_name=result.canonical_name, source=result.source,
+                    normalizer_version=NORMALIZER_VERSION,
+                )
             counts["alias"] += 1
             continue
 
         result = resolve_lexical(conn, normalized)
         if isinstance(result, Resolved):
-            write_normalization(
-                conn, raw_name=raw, normalized=normalized,
-                canonical_name=result.canonical_name, source=result.source,
-                normalizer_version=NORMALIZER_VERSION,
-            )
+            if not dry_run:
+                write_normalization(
+                    conn, raw_name=raw, normalized=normalized,
+                    canonical_name=result.canonical_name, source=result.source,
+                    normalizer_version=NORMALIZER_VERSION,
+                )
             counts["lexical"] += 1
             continue
 
         # Pending → queue for Phase 2.
-        write_pending_normalize(conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION)
+        if not dry_run:
+            write_pending_normalize(conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION)
         counts["pending_llm"] += 1
 
     return dict(counts)

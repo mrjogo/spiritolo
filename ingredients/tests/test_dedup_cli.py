@@ -37,3 +37,17 @@ def test_cli_recognizes_promote_substances():
 def test_cli_recognizes_dedup_all():
     args = build_arg_parser().parse_args(["dedup-all"])
     assert args.cmd == "dedup-all"
+
+
+def test_cluster_reset_with_site_is_refused():
+    """cluster --reset --site X is semantically broken; CLI rejects it with exit 2."""
+    from unittest.mock import MagicMock, patch
+    from ingredients.cli import run_cluster
+
+    args = build_arg_parser().parse_args(["cluster", "--reset", "--site", "punch", "--yes"])
+    # Patch IngredientsDatabase so no real DB connection is attempted.
+    with patch("ingredients.cli.IngredientsDatabase") as mock_db_cls:
+        mock_db = MagicMock()
+        mock_db_cls.return_value = mock_db
+        result = run_cluster(args)
+    assert result == 2, f"Expected exit code 2, got {result}"

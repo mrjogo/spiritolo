@@ -570,6 +570,7 @@ def run_normalize_names(args: argparse.Namespace) -> int:
             ):
                 log.error("reset aborted")
                 return 1
+            except_version = getattr(args, "except_version", None)
             db.conn.execute("""
                 update recipes
                    set canonical_name = null,
@@ -577,12 +578,14 @@ def run_normalize_names(args: argparse.Namespace) -> int:
                        normalizer_version = null,
                        normalized_at = null
                  where (%s::text is null or site = %s)
-            """, (args.site, args.site))
+                   and (%s::text is null or normalizer_version <> %s or normalizer_version is null)
+            """, (args.site, args.site, except_version, except_version))
             db.conn.commit()
             log.info("cleared normalization columns")
             return 0
         from ingredients.dedup.normalizer import run_phase1
-        counts = run_phase1(db.conn, site=args.site, limit=args.limit)
+        counts = run_phase1(db.conn, site=args.site, limit=args.limit,
+                            dry_run=args.dry_run)
         changes = {"all": Counter(counts)}
         mode = "dry-run" if args.dry_run else "applied"
         print_summary(f"normalize-names (Phase 1, {NORMALIZER_VERSION})", changes, mode=mode)
@@ -613,6 +616,13 @@ def run_cluster(args: argparse.Namespace) -> int:
     db = IngredientsDatabase()
     try:
         if args.reset:
+            if args.site:
+                log.error(
+                    "cluster --reset does not support --site scoping: recipe_clusters is "
+                    "shared across sites. Either reset globally (omit --site) or null only "
+                    "the recipes.cluster_id column manually."
+                )
+                return 2
             scope = describe_reset_scope(
                 site=args.site,
                 except_version=getattr(args, "except_version", None),
@@ -624,28 +634,43 @@ def run_cluster(args: argparse.Namespace) -> int:
             ):
                 log.error("reset aborted")
                 return 1
-            db.conn.execute("""
-                delete from recipe_clusters
-                 where (%s::text is null or true)
-            """, (args.site,))
-            db.conn.execute("""
-                update recipes
-                   set cluster_id = null, variant_key = null, dedup_version = null
-                 where (%s::text is null or site = %s)
-            """, (args.site, args.site))
-            db.conn.execute("""
-                update recipe_ingredients
-                   set role = null, role_source = null
-                 where recipe_id in (
-                     select id from recipes
-                     where (%s::text is null or site = %s)
-                 )
-            """, (args.site, args.site))
+            except_version = getattr(args, "except_version", None)
+            if except_version:
+                db.conn.execute("""
+                    delete from recipe_clusters
+                     where dedup_version <> %s or dedup_version is null
+                """, (except_version,))
+            else:
+                db.conn.execute("delete from recipe_clusters")
+            if except_version:
+                db.conn.execute("""
+                    update recipes
+                       set cluster_id = null, variant_key = null, dedup_version = null
+                     where dedup_version <> %s or dedup_version is null
+                """, (except_version,))
+                db.conn.execute("""
+                    update recipe_ingredients
+                       set role = null, role_source = null
+                     where recipe_id in (
+                         select id from recipes
+                          where dedup_version <> %s or dedup_version is null
+                     )
+                """, (except_version,))
+            else:
+                db.conn.execute("""
+                    update recipes
+                       set cluster_id = null, variant_key = null, dedup_version = null
+                """)
+                db.conn.execute("""
+                    update recipe_ingredients
+                       set role = null, role_source = null
+                """)
             db.conn.commit()
             log.info("cleared cluster columns")
             return 0
         from ingredients.dedup.cluster import run_cluster_compute
-        counts = run_cluster_compute(db.conn, site=args.site, limit=args.limit)
+        counts = run_cluster_compute(db.conn, site=args.site, limit=args.limit,
+                                     dry_run=args.dry_run)
         changes = {"all": Counter(counts)}
         mode = "dry-run" if args.dry_run else "applied"
         print_summary("cluster", changes, mode=mode)

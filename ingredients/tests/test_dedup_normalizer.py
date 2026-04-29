@@ -38,3 +38,25 @@ def test_phase1_idempotent_at_current_version(dedup_fixture, db_conn):
     counts2 = run_phase1(db_conn)
     # Second run touches nothing (already at current version)
     assert sum(counts2.values()) == 0
+
+
+def test_phase1_dry_run_does_not_write(dedup_fixture, db_conn):
+    """dry_run=True must leave canonical_name NULL while still reporting counts."""
+    conn, _ = dedup_fixture
+    db_conn.execute("""
+        insert into recipes (id, source_url, site, name, jsonld, fetched_at)
+        values
+            (3201, 'http://x/dr1', 'punch', 'The Negroni',          '{}'::jsonb, now()),
+            (3202, 'http://x/dr2', 'punch', 'Some Wild House Drink', '{}'::jsonb, now())
+        on conflict (source_url) do nothing
+    """)
+    counts = run_phase1(db_conn, dry_run=True)
+    # Must still report what would have happened.
+    assert counts.get("alias", 0) >= 1       # negroni resolves via alias
+    assert counts.get("pending_llm", 0) >= 1  # unknown drink stays pending
+    # But nothing was written.
+    rows = db_conn.execute(
+        "select canonical_name, canonical_name_source from recipes where id in (3201, 3202)"
+    ).fetchall()
+    for canonical_name, source in rows:
+        assert canonical_name is None, f"dry_run wrote canonical_name={canonical_name!r}"

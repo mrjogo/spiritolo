@@ -162,9 +162,11 @@ def run_cluster_compute(
     *,
     site: str | None = None,
     limit: int | None = None,
+    dry_run: bool = False,
 ) -> dict[str, int]:
     """Tag roles, compute cluster + variant keys, write recipe_clusters
     + recipes.cluster_id + recipes.variant_key + recipe_ingredients.role.
+    When dry_run=True, all DB writes and commit are skipped.
     """
     counts: Counter[str] = Counter()
     recipes = _fetch_recipes_to_cluster(
@@ -194,15 +196,16 @@ def run_cluster_compute(
                 if slug_row and not slug_row[1]:
                     counts["underspecified"] += 1
 
-        for ing in ingredients:
-            conn.execute(
-                """
-                update recipe_ingredients
-                   set role = %s, role_source = %s
-                 where id = %s
-                """,
-                (ing["role"], ing["role_source"], ing["id"]),
-            )
+        if not dry_run:
+            for ing in ingredients:
+                conn.execute(
+                    """
+                    update recipe_ingredients
+                       set role = %s, role_source = %s
+                     where id = %s
+                    """,
+                    (ing["role"], ing["role_source"], ing["id"]),
+                )
 
         in_key_ings = [ing for ing in ingredients if in_cluster_key(ing)]
         if not in_key_ings:
@@ -213,57 +216,64 @@ def run_cluster_compute(
         if cluster_key in cluster_lookup:
             cluster_id = cluster_lookup[cluster_key]
         else:
-            row = conn.execute(
-                """
-                insert into recipe_clusters
-                    (cluster_key, canonical_name, ingredient_set, dedup_version)
-                values (%s, %s, %s::jsonb, %s)
-                on conflict (cluster_key) do update
-                    set canonical_name = excluded.canonical_name,
-                        dedup_version  = excluded.dedup_version
-                returning id
-                """,
-                (cluster_key, canonical_name,
-                 _canonical_json(_ingredient_set_jsonb(ingredients)),
-                 DEDUP_VERSION),
-            ).fetchone()
-            cluster_id = row[0]
+            if not dry_run:
+                row = conn.execute(
+                    """
+                    insert into recipe_clusters
+                        (cluster_key, canonical_name, ingredient_set, dedup_version)
+                    values (%s, %s, %s::jsonb, %s)
+                    on conflict (cluster_key) do update
+                        set canonical_name = excluded.canonical_name,
+                            dedup_version  = excluded.dedup_version
+                    returning id
+                    """,
+                    (cluster_key, canonical_name,
+                     _canonical_json(_ingredient_set_jsonb(ingredients)),
+                     DEDUP_VERSION),
+                ).fetchone()
+                cluster_id = row[0]
+            else:
+                # In dry_run mode assign a placeholder so cluster_lookup still
+                # deduplicates within the batch (negative to avoid collisions).
+                cluster_id = -(len(cluster_lookup) + 1)
             cluster_lookup[cluster_key] = cluster_id
             counts["clusters_created"] += 1
 
-        variant_key = compute_variant_key(cluster_key, ingredients)
-        conn.execute(
-            """
-            update recipes
-               set cluster_id    = %s,
-                   variant_key   = %s,
-                   dedup_version = %s
-             where id = %s
-            """,
-            (cluster_id, variant_key, DEDUP_VERSION, recipe_id),
-        )
+        if not dry_run:
+            variant_key = compute_variant_key(cluster_key, ingredients)
+            conn.execute(
+                """
+                update recipes
+                   set cluster_id    = %s,
+                       variant_key   = %s,
+                       dedup_version = %s
+                 where id = %s
+                """,
+                (cluster_id, variant_key, DEDUP_VERSION, recipe_id),
+            )
         counts["recipes_clustered"] += 1
 
-    conn.execute(
-        """
-        update recipe_clusters c
-           set recipe_count = sub.recipe_count,
-               source_count = sub.source_count,
-               representative_recipe_id = sub.rep_id
-        from (
-            select cluster_id,
-                   count(*)              as recipe_count,
-                   count(distinct site)  as source_count,
-                   min(id)               as rep_id
-            from recipes
-            where cluster_id is not null
-              and dedup_version = %s
-            group by cluster_id
-        ) sub
-        where c.id = sub.cluster_id
-        """,
-        (DEDUP_VERSION,),
-    )
+    if not dry_run:
+        conn.execute(
+            """
+            update recipe_clusters c
+               set recipe_count = sub.recipe_count,
+                   source_count = sub.source_count,
+                   representative_recipe_id = sub.rep_id
+            from (
+                select cluster_id,
+                       count(*)              as recipe_count,
+                       count(distinct site)  as source_count,
+                       min(id)               as rep_id
+                from recipes
+                where cluster_id is not null
+                  and dedup_version = %s
+                group by cluster_id
+            ) sub
+            where c.id = sub.cluster_id
+            """,
+            (DEDUP_VERSION,),
+        )
+        conn.commit()
 
-    conn.commit()
     return dict(counts)
