@@ -335,13 +335,57 @@ def run_map(args: argparse.Namespace) -> int:
         log.error("--review for map not implemented yet (Task 21)")
         return 2
     if args.sample is not None:
-        log.error("--sample for map not implemented yet (Task 20)")
-        return 2
+        from ingredients.mapping.admin import sample_pending
+        from ingredients.mapping.alias_layer import resolve_alias
+        from ingredients.mapping.lexical_layer import resolve_lexical
+        from ingredients.mapping.mapper import MAPPER_VERSION
+        from ingredients.mapping.normalize import normalize_name
+        from ingredients.mapping.types import Resolved
+        db = IngredientsDatabase()
+        try:
+            for raw in sample_pending(
+                db.conn, n=args.sample, mapper_version=MAPPER_VERSION, site=args.site,
+            ):
+                normalized = normalize_name(raw)
+                a = resolve_alias(db.conn, normalized)
+                if isinstance(a, Resolved):
+                    print(f"  {raw!r:40s} -> alias  node_id={a.taxonomy_node_id}")
+                    continue
+                l = resolve_lexical(db.conn, normalized)
+                if isinstance(l, Resolved):
+                    print(f"  {raw!r:40s} -> lexical node_id={l.taxonomy_node_id}")
+                else:
+                    print(f"  {raw!r:40s} -> would mark pending_llm")
+            return 0
+        finally:
+            db.close()
     db = IngredientsDatabase()
     try:
         if args.reset:
-            log.error("map --reset not implemented yet (Task 20)")
-            return 2
+            from ingredients.mapping.admin import (
+                clear_mapping_columns, count_mapped_rows,
+            )
+            to_clear = count_mapped_rows(
+                db.conn,
+                site=args.site, except_version=args.except_version,
+                older_than=args.older_than,
+            )
+            scope = describe_reset_scope(
+                site=args.site, except_version=args.except_version, older_than=args.older_than,
+            )
+            if not confirm_reset(
+                row_count=to_clear, scope_desc=scope, assume_yes=args.yes,
+            ):
+                log.error("reset aborted")
+                return 1
+            if to_clear:
+                n = clear_mapping_columns(
+                    db.conn,
+                    site=args.site, except_version=args.except_version,
+                    older_than=args.older_than,
+                )
+                log.info("cleared mapping columns on %d rows", n)
+            return 0
         summary = run_phase1(
             db.conn, site=args.site, limit=args.limit, dry_run=args.dry_run,
         )

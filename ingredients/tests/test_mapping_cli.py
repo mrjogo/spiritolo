@@ -130,3 +130,53 @@ def test_review_proposals_approve_creates_node(fixture_taxonomy, test_db_url, mo
         "select status, decided_by from taxonomy_proposals where raw_string = 'lemon zest'"
     ).fetchone()
     assert status == ("approved", "tester")
+
+
+def test_cli_map_reset_clears_mapping_columns_in_scope(fixture_taxonomy, test_db_url):
+    conn, ids = fixture_taxonomy
+    conn.execute("truncate table recipe_ingredients, recipes restart identity cascade")
+    rid = conn.execute(
+        "insert into recipes (site, source_url, jsonld, fetched_at) "
+        "values ('punch', 'https://example.com/r', '{}'::jsonb, now()) returning id"
+    ).fetchone()[0]
+    conn.execute(
+        "insert into recipe_ingredients "
+        "(recipe_id, position, raw_text, name, parse_status, parser_rule, parser_version, "
+        " taxonomy_node_id, mapper_source, mapper_version, mapper_at) "
+        "values (%s, 0, '2 oz gin', 'gin', 'parsed', 'qty_unit', 'v1', %s, 'alias', 'v1', now())",
+        (rid, ids["gin"]),
+    )
+    conn.commit()
+
+    proc = _run_cli(["map", "--reset", "--yes"], {"SUPABASE_DB_URL": test_db_url})
+    assert proc.returncode == 0, proc.stderr
+    row = conn.execute(
+        "select taxonomy_node_id, mapper_source, mapper_version "
+        "from recipe_ingredients where lower(trim(name))='gin'"
+    ).fetchone()
+    assert row == (None, None, None)
+
+
+def test_cli_map_sample_writes_nothing(fixture_taxonomy, test_db_url):
+    conn, _ = fixture_taxonomy
+    conn.execute("truncate table recipe_ingredients, recipes restart identity cascade")
+    rid = conn.execute(
+        "insert into recipes (site, source_url, jsonld, fetched_at) "
+        "values ('punch', 'https://example.com/s', '{}'::jsonb, now()) returning id"
+    ).fetchone()[0]
+    conn.execute(
+        "insert into recipe_ingredients "
+        "(recipe_id, position, raw_text, name, parse_status, parser_rule, parser_version) "
+        "values (%s, 0, '2 oz gin', 'gin', 'parsed', 'qty_unit', 'v1')",
+        (rid,),
+    )
+    conn.commit()
+
+    proc = _run_cli(["map", "--sample", "5"], {"SUPABASE_DB_URL": test_db_url})
+    assert proc.returncode == 0, proc.stderr
+    row = conn.execute(
+        "select taxonomy_node_id, mapper_source from recipe_ingredients where lower(trim(name))='gin'"
+    ).fetchone()
+    assert row == (None, None)
+    # Sample output should appear in stdout.
+    assert "gin" in proc.stdout
