@@ -545,8 +545,9 @@ def run_normalize_names(args: argparse.Namespace) -> int:
 
     # Default: Phase 1
     if args.review:
-        log.info("normalize-names --review: eval mode (eval_set TBD in Task 10.1)")
-        return 0
+        from ingredients.dedup.eval_set import run_eval as _run_dedup_eval
+        report = _run_dedup_eval()
+        return 0 if report.failed == 0 else 1
 
     db = IngredientsDatabase()
     try:
@@ -605,8 +606,9 @@ def run_cluster(args: argparse.Namespace) -> int:
             db.close()
 
     if args.review:
-        log.info("cluster --review: eval mode (eval_set TBD in Task 10.1)")
-        return 0
+        from ingredients.dedup.eval_set import run_eval as _run_dedup_eval
+        report = _run_dedup_eval()
+        return 0 if report.failed == 0 else 1
 
     db = IngredientsDatabase()
     try:

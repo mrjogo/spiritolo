@@ -70,7 +70,7 @@ _ALIASES_TAX = [
 _COCKTAIL_ALIASES = [
     # canonical → list of aliases (each is post-normalize_cocktail_name form)
     ("negroni", ["negroni"]),
-    ("old fashioned", ["old fashioned", "old-fashioned"]),
+    ("old fashioned", ["old fashioned", "old-fashioned", "rye old fashioned"]),
     ("manhattan", ["manhattan"]),
     ("daiquiri", ["daiquiri", "daquiri"]),  # the typo is a useful seed
     ("martini", ["martini"]),
