@@ -1,10 +1,12 @@
 """parse_ingredients CLI.
 
-Modes:
-  --review      Run the eval set, print pass/fail, exit 0 on green.
-  default       Polling worker. Reads `recipes` from Supabase, parses each
-                row's recipeIngredient array, writes rows to recipe_ingredients.
-                Skips recipes that already have rows at the current PARSER_VERSION.
+Subcommands:
+  parse   (default) Polling worker. Reads `recipes` from Supabase, parses each
+          row's recipeIngredient array, writes rows to recipe_ingredients.
+          Skips recipes that already have rows at the current PARSER_VERSION.
+          Bare flags (--review, --site, --limit, --dry-run, --reset …) also
+          accepted at the top level for backward compatibility.
+  map     Taxonomy mapper. Phase 1 (alias + lexical) by default.
 
 Reset flow (matches scraper conventions):
   --reset --yes [--site S] [--except-version V] [--older-than ISO_TS]
@@ -31,28 +33,72 @@ from ingredients.worker import build_rows_for_recipe
 log = logging.getLogger("parse_ingredients")
 
 
-def build_arg_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="parse_ingredients",
-        description="Spiritolo ingredient parser — Zone-2 reconciling worker.",
-    )
-    parser.add_argument(
+def _add_parse_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
         "--review", action="store_true",
         help="Run the eval set against the parser; do not touch the database.",
     )
-    parser.add_argument(
+    p.add_argument(
         "--site", default=None,
         help="Restrict processing to one source site (e.g. 'punch').",
     )
-    parser.add_argument(
+    p.add_argument(
         "--limit", type=int, default=None,
         help="Process at most N recipes.",
     )
-    parser.add_argument(
+    p.add_argument(
         "--dry-run", action="store_true",
         help="Parse and report counts; do not write to the database.",
     )
-    add_reset_args(parser, stage="recipe_ingredients")
+    add_reset_args(p, stage="recipe_ingredients")
+
+
+def _add_map_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument(
+        "--review", action="store_true",
+        help="Run the mapper eval set; do not touch the database.",
+    )
+    p.add_argument(
+        "--site", default=None,
+        help="Restrict to one source site.",
+    )
+    p.add_argument(
+        "--limit", type=int, default=None,
+        help="Process at most N distinct names.",
+    )
+    p.add_argument(
+        "--dry-run", action="store_true",
+        help="Compute resolutions; do not write to the database.",
+    )
+    p.add_argument(
+        "--sample", type=int, default=None,
+        help="Spot-check N random pending names; print results, write nothing.",
+    )
+    add_reset_args(p, stage="recipe_ingredients (mapping columns)")
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="parse_ingredients",
+        description="Spiritolo ingredient parser + taxonomy mapper.",
+    )
+    # Top-level parse args for backward compatibility: callers that do
+    # build_arg_parser().parse_args(["--review"]) without a subcommand
+    # still get a valid namespace (args.cmd will be None).
+    _add_parse_args(parser)
+
+    sub = parser.add_subparsers(dest="cmd")
+
+    # Parse subcommand (default — preserves backward-compatible CLI).
+    p_parse = sub.add_parser("parse", help="Parser worker (default).")
+    _add_parse_args(p_parse)
+
+    # Map subcommand: Phase 1 (alias + lexical).
+    p_map = sub.add_parser("map", help="Taxonomy mapper. Phase 1 by default.")
+    _add_map_args(p_map)
+    map_sub = p_map.add_subparsers(dest="map_cmd")
+    # Phase 2 + review subcommands attach to map_sub in Tasks 18/19.
+
     return parser
 
 
@@ -139,13 +185,51 @@ def run_worker(args: argparse.Namespace) -> int:
         db.close()
 
 
+def run_map(args: argparse.Namespace) -> int:
+    from ingredients.mapping.mapper import MAPPER_VERSION, run_phase1
+    if args.review:
+        log.error("--review for map not implemented yet (Task 21)")
+        return 2
+    if args.sample is not None:
+        log.error("--sample for map not implemented yet (Task 20)")
+        return 2
+    db = IngredientsDatabase()
+    try:
+        if args.reset:
+            log.error("map --reset not implemented yet (Task 20)")
+            return 2
+        summary = run_phase1(
+            db.conn, site=args.site, limit=args.limit, dry_run=args.dry_run,
+        )
+        mode = "dry-run" if args.dry_run else "applied"
+        changes = {"all": Counter(summary)}
+        print_summary(f"Map ingredients (Phase 1, {MAPPER_VERSION})", changes, mode=mode)
+        return 0
+    finally:
+        db.close()
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = build_arg_parser()
-    args = parser.parse_args()
-    if args.review:
-        return run_review()
-    return run_worker(args)
+    # Backward compat: if no subcommand is given, default to "parse".
+    # Exception: bare --help/-h should show the top-level help (with
+    # subcommand list) rather than the parse subcommand help.
+    argv = sys.argv[1:]
+    if argv and argv[0] not in ("parse", "map", "--help", "-h"):
+        argv = ["parse"] + argv
+    elif not argv:
+        argv = ["parse"] + argv
+    args = parser.parse_args(argv)
+    cmd = args.cmd or "parse"
+    if cmd == "parse":
+        if args.review:
+            return run_review()
+        return run_worker(args)
+    if cmd == "map":
+        return run_map(args)
+    parser.error(f"unknown command {cmd!r}")
+    return 2
 
 
 if __name__ == "__main__":
