@@ -123,6 +123,11 @@ def _resolve_with_retry(
     return None
 
 
+# Public re-export so other stages (e.g. dedup) can reuse the retry helper
+# without depending on the orchestrator details.
+resolve_with_retry = _resolve_with_retry
+
+
 def run_phase2(
     conn: psycopg.Connection,
     *,
