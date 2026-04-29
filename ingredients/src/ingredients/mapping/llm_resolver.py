@@ -98,15 +98,21 @@ def _create_brand_node(
 def _resolve_with_retry(
     provider: LLMProvider, *, system_prompt: str, user_prompt: str,
     normalized_name: str, max_attempts: int = 3,
+    parse_fn=None,
 ) -> dict | None:
     """Call provider + parse; retry on any exception with exponential backoff.
-    Returns the parsed action dict, or None if all attempts failed."""
+    Returns the parsed action dict, or None if all attempts failed.
+
+    ``parse_fn`` defaults to this module's ``parse_response``. Callers with a
+    different action vocabulary (e.g. dedup) can pass their own parser so that
+    the retry loop validates against the right set of actions."""
+    _parse = parse_fn if parse_fn is not None else parse_response
     for attempt in range(max_attempts):
         try:
             raw = provider.resolve(
                 system_prompt=system_prompt, user_prompt=user_prompt,
             ).raw_text
-            return parse_response(raw)
+            return _parse(raw)
         except Exception as exc:
             if attempt + 1 == max_attempts:
                 log.error(
