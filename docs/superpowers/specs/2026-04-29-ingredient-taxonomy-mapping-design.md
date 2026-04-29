@@ -6,7 +6,12 @@ Per [docs/future-direction.md](../../future-direction.md), Track `[D]` resolves 
 
 This spec covers `[D]` only — specifically the mapper itself.
 
-**Prerequisite (separate spec):** the existing taxonomy seed in [supabase/seeds/taxonomy_nodes.sql](../../../supabase/seeds/taxonomy_nodes.sql) covers spirit families and a small produce set, but is missing structurally important categories (liqueurs, syrups, juices, fresh herbs, dairy, mixers), brand and expression nodes, the alias table is empty, and form-node coverage exists only as a decision in this spec. Extending the seed is its own design+implementation track. The mapper code in this spec is built and tested against a fixture taxonomy that exercises every code path; the first end-to-end production run is gated on the taxonomy-seed-extension track landing.
+**Prerequisite (split across tracks):** the existing taxonomy seed in [supabase/seeds/taxonomy_nodes.sql](../../../supabase/seeds/taxonomy_nodes.sql) covers spirit families and a small produce set, but is missing structurally important categories and an empty alias table. Seed expansion is now split:
+
+- **Spirit-side content** (gin sub-styles, individual amari, individual bitters, key liqueurs, fortified wines) plus three new columns (`is_cluster_node`, `role_default`, `is_defining_garnish`) land as part of `[E]` — see [2026-04-29-recipe-dedup-design.md](2026-04-29-recipe-dedup-design.md).
+- **Other categories** (juices, syrups, mixers, dairy, fresh herbs) and the broader alias seed remain a separate, not-yet-specced track.
+
+The mapper code in this spec is built and tested against a fixture taxonomy; the first end-to-end production run is gated on enough seed coverage existing for the eval set to pass against production data.
 
 ## Status snapshot from the data
 
@@ -47,6 +52,8 @@ Layer 2's threshold is set conservatively (`sim ≥ 0.92`, `top1 > 1.5 × top2`)
 When the LLM identifies a row as a specific brand or expression that doesn't exist in `taxonomy_nodes` and proposes a parent that does exist, a node is created automatically. Provenance is written to `taxonomy_provenance` so a later audit pass (out of scope for this spec) can review what the mapper produced.
 
 If the LLM proposes a parent that doesn't exist, the row abstains rather than auto-creating an orphan.
+
+Auto-created nodes always default to `is_cluster_node = false` (the column added by `[E]`). The antichain that defines dedup cluster identity stays curator-controlled; brands and expressions roll up via the DAG to the existing cluster ancestor rather than becoming new ones.
 
 The doc [docs/spirits-taxonomy.md](../../spirits-taxonomy.md) explicitly endorses this stance: "Hand-curate the well-known; let the [D] mapper auto-create the long tail when it exists."
 
