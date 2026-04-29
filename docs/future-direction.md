@@ -2,7 +2,7 @@
 
 ## Status
 
-- **Completed** [A], [B], [C]
+- **Completed** [A], [B], [C], [D]
 
 ## Vision
 

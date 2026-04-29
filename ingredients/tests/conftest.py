@@ -162,3 +162,17 @@ def isolated_db(test_db_url: str):
     db.conn.execute("truncate table recipes cascade")
     db.conn.commit()
     db.close()
+
+
+@pytest.fixture
+def fixture_taxonomy(test_db_url: str):
+    """Yield (psycopg conn, slug->id dict) with taxonomy_* truncated and
+    seeded from ingredients.mapping.eval_fixture. Truncates on teardown."""
+    from ingredients.mapping.eval_fixture import seed
+
+    conn = psycopg.connect(test_db_url)
+    ids = seed(conn)
+    yield conn, ids
+    conn.execute("truncate table taxonomy_aliases, taxonomy_edges, taxonomy_nodes restart identity cascade")
+    conn.commit()
+    conn.close()
