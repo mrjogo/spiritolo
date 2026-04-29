@@ -6,7 +6,7 @@ Per [docs/future-direction.md](../../future-direction.md), Track `[E]` deduplica
 
 Dedup operates as **identity**, not similarity. Cluster membership is a deterministic function of recipe content; ambiguity is resolved at audit time, not by a fuzzy threshold. Soft adjacency between clusters (substitution graph, "similar drinks") is the job of `[G]`/`[H]`, not this spec.
 
-The product shape this spec serves: each cluster is a **stack** of cards. The card at the top is the canonical recipe (most-frequent ratios, no brand call-outs); cards below show interesting variants — different ratios, brand call-outs, modifier substitutions. Identical recipes within a stack collapse to a single card with a source count. Outside the stack, a graph of related drinks (substitutions, variations) is built later from cluster-to-cluster relationships.
+The product shape this spec serves: each cluster is a **stack** of variants. The variant at the top is the canonical recipe (most-frequent ratios, no brand call-outs); variants below show interesting variants — different ratios, brand call-outs, modifier substitutions. Identical recipes within a stack collapse to a single variant with a source count. Outside the stack, a graph of related drinks (substitutions, variations) is built later from cluster-to-cluster relationships.
 
 ## Decisions
 
@@ -19,7 +19,7 @@ The product shape this spec serves: each cluster is a **stack** of cards. The ca
 # adds it here and bumps DEDUP_VERSION.
 INCLUDED_ROLES = {
     'base_spirit', 'modifier', 'citrus', 'sweetener',
-    'bitters', 'wash', 'other',
+    'bitters', 'dilution', 'wash', 'other',
 }
 
 def in_cluster_key(ing):
@@ -78,16 +78,16 @@ The full antichain content is enumerated in the taxonomy seed migration, not her
 
 Some recipes will resolve only to a node that has antichain descendants but is not itself one — e.g., a recipe specifying "amaro" generically when the antichain sits at individual amari. The roll-up function returns the node itself (the only legal answer) and the cluster key proceeds. The audit pass flags the row: `underspecified_ingredient = true`. Reviewers either upgrade the resolution by hand, accept the underspecified cluster, or flag the source recipe for re-extraction. No block in the pipeline.
 
-### Two-level fold: cards as a derived view inside `recipe_clusters`
+### Two-level fold: variants as a derived view inside `recipe_clusters`
 
-A **cluster** is the same drink (joint key match). A **card** is the same recipe within a cluster — same cluster key, same amounts, same brand call-outs. Multiple sources publishing the identical Negroni at 1oz/1oz/1oz collapse to one card with `source_count = N`. The same Negroni at 1.5oz/1oz/1oz is a separate card in the same cluster.
+A **cluster** is the same drink (joint key match). A **variant** is the same recipe within a cluster — same cluster key, same amounts, same brand call-outs. Multiple sources publishing the identical Negroni at 1oz/1oz/1oz collapse to one variant with `source_count = N`. The same Negroni at 1.5oz/1oz/1oz is a separate variant in the same cluster.
 
-Cards are **not stored as a table** in v1. The cluster compute writes a `card_key` column on each `recipes` row; cards are the equivalence classes of recipes sharing `(cluster_id, card_key)`. A view `recipe_cards` aggregates these for the read path. Materializing as a table is a follow-up if query patterns prove that the aggregation is hot.
+Variants are **not stored as a table** in v1. The cluster compute writes a `variant_key` column on each `recipes` row; variants are the equivalence classes of recipes sharing `(cluster_id, variant_key)`. A view `recipe_variants` aggregates these for the read path. Materializing as a table is a follow-up if query patterns prove that the aggregation is hot.
 
-Card key:
+Variant key:
 
 ```
-card_key = sha256(canonical_json({
+variant_key = sha256(canonical_json({
     'cluster_key': cluster_key,
     'ingredients': sorted([
         (ing.role,
@@ -101,9 +101,9 @@ card_key = sha256(canonical_json({
 }))
 ```
 
-`taxonomy_node_id` is whatever D resolved the ingredient to — for a recipe specifying "Tanqueray" it's the `tanqueray` brand node; for one specifying just "gin" it's `gin`. This makes a Tanqueray Negroni and a Bombay Negroni different cards in the same cluster (same `antichain_node_id = london_dry_gin`, different `taxonomy_node_id`), while two Tanqueray Negronis collapse to the same card. `amount` distinguishes ratio variants. Recipes with no brand specification share a card when their amounts and units agree.
+`taxonomy_node_id` is whatever D resolved the ingredient to — for a recipe specifying "Tanqueray" it's the `tanqueray` brand node; for one specifying just "gin" it's `gin`. This makes a Tanqueray Negroni and a Bombay Negroni different variants in the same cluster (same `antichain_node_id = london_dry_gin`, different `taxonomy_node_id`), while two Tanqueray Negronis collapse to the same variant. `amount` distinguishes ratio variants. Recipes with no brand specification share a variant when their amounts and units agree.
 
-The UI renders the cluster's representative card on top, with the rest as expand-to-see variants. Identical-recipe duplicates within a card show as a source count.
+The UI renders the cluster's representative variant on top, with the rest as expand-to-see variants. Identical-recipe duplicates within a variant show as a source count.
 
 ### Roles on ingredients
 
@@ -117,7 +117,8 @@ The UI renders the cluster's representative card on top, with the rest as expand
 | `sweetener` | yes | simple syrup, honey, demerara |
 | `bitters` | yes | Angostura, Peychaud's, orange bitters |
 | `wash` | yes | absinthe rinse, smoke wash |
-| `dilution` | **no** | ice, soda water, hot water |
+| `dilution` | yes | soda water, tonic, ginger beer, hot water |
+| `ice` | **no** | ice cubes, crushed ice, ice ring |
 | `garnish` | configurable | twist (no), cocktail onion (yes) |
 | `other` | yes | unclassifiable; flagged for review |
 
@@ -147,7 +148,7 @@ A new column `taxonomy_nodes.is_defining_garnish boolean default false`. Set to 
 - `chili_rim` / `tajin_rim`
 - (Long tail added by audit as we discover them.)
 
-The cluster key includes a garnish row only when the resolved node is a defining garnish. Stylistic garnishes (twist, peel, wedge, sprig, cherry, olive) are filtered out regardless of recipe. The UI may still surface the stylistic garnish on the recipe card; it just doesn't enter the cluster identity.
+The cluster key includes a garnish row only when the resolved node is a defining garnish. Stylistic garnishes (twist, peel, wedge, sprig, cherry, olive) are filtered out regardless of recipe. The UI may still surface the stylistic garnish on the recipe variant; it just doesn't enter the cluster identity.
 
 The list grows slowly through the audit signal "stylistic-garnish recipes mismatched with otherwise-identical neighbors that lack the garnish."
 
@@ -197,18 +198,87 @@ Five queries, surfaced via a CLI subcommand. None require additional tables.
 ### Versioning: two constants
 
 - `NORMALIZER_VERSION = "v1"` — name normalization (alias + lexical + LLM layers, phase 1 + phase 2)
-- `DEDUP_VERSION = "v1"` — cluster compute (which includes role classification and card-key derivation)
+- `DEDUP_VERSION = "v1"` — cluster compute (which includes role classification and variant-key derivation)
 
-Each is independently re-runnable with `--reset --except-version <prior>`. Bumping `DEDUP_VERSION` re-derives roles, cluster keys, and card keys but doesn't re-resolve names. Bumping `NORMALIZER_VERSION` invalidates clusters too (changed names → changed cluster keys); the operator must re-run `cluster --reset --except-version v1` afterward.
+Each is independently re-runnable with `--reset --except-version <prior>`. Bumping `DEDUP_VERSION` re-derives roles, cluster keys, and variant keys but doesn't re-resolve names. Bumping `NORMALIZER_VERSION` invalidates clusters too (changed names → changed cluster keys); the operator must re-run `cluster --reset --except-version v1` afterward.
 
 ### Hard prerequisites
 
-E hard-blocks on:
+D's v0 has shipped (PR #20). `recipe_ingredients` rows already carry `taxonomy_node_id` from D's alias + lexical layers, and phase-2 LLM coverage is operator-driven against the existing mapper. E consumes that output; E does **not** modify D's mapper code.
 
-- **D shipping its v0** — `recipe_ingredients` rows must carry `taxonomy_node_id` from at least D's alias + lexical layers. Coverage need not be 100%; the dedup pipeline tolerates `taxonomy_node_id IS NULL` rows by treating them as `role = 'other'` and excluding them from the cluster key (with a flag for audit). But the typical recipe must resolve enough ingredients for the cluster key to be meaningful.
-- **Taxonomy seed expansion** — the seed in [supabase/seeds/taxonomy_nodes.sql](../../../supabase/seeds/taxonomy_nodes.sql) must include the antichain content listed under *Antichain* above (gin sub-styles, individual amari, individual bitters, key liqueurs, fortified wines). The migration that adds `is_cluster_node`, `role_default`, and `is_defining_garnish` is part of this E spec; the *content* edits to the seed are an E deliverable, but coordinated with D's parallel taxonomy expansion to avoid conflict.
+The remaining prerequisite is taxonomy work, which E now owns end-to-end (D deferred its share to this spec):
 
-E does **not** modify D's mapper code. E consumes D's output. The taxonomy seed is shared territory; E's seed edits go in alongside D's, on a coordinated branch.
+- **Taxonomy seed expansion (E owns).** Two layers:
+  - *Antichain content* (the cocktail-identity layer this spec depends on): gin sub-styles, individual amari, individual bitters, key liqueurs / cordials, fortified wines, with `is_cluster_node` marked and `role_default` set.
+  - *Broader substance content that D originally listed*: juices (orange, grapefruit, pineapple, cranberry, etc. as expressions if needed), syrups (simple, demerara, honey, agave, grenadine, falernum, orgeat), fresh herbs and produce (mint, basil, ginger, cucumber), dairy (cream, milk, half-and-half, condensed milk), mixers (soda water, tonic, ginger beer, cola, ginger ale).
+  - *Alias seed*: the head ~500 raw ingredient strings from `recipe_ingredients` mapped to nodes, so D's mapper resolves them at Layer 1 instead of Layer 3.
+- **Reviewer gate.** Every taxonomy seed PR (and every `cocktail_aliases` seed PR) requires sign-off from the project curator (Ruddick) before merge. Auto-created brand/expression promotions surfaced by `promote-substances` go through the same gate. The implementation plan must build seed PRs in reviewable chunks (one branch per substance family is reasonable: bitters PR, amari PR, liqueurs PR, juices PR, dairy PR, etc.) so each can be approved independently rather than as a single 5K-line megamerge.
+- **Pipeline outputs need a refresh procedure.** D's mapper output and E's normalization output cost LLM calls to produce; a fresh `supabase db reset` must not nuke them. See *Seeding pipeline-output data — the rinse-and-repeat pattern* below.
+
+### Seeding pipeline-output data — the rinse-and-repeat pattern
+
+The local Supabase DB gets reset frequently. D's mapper LLM calls, E's name-normalizer LLM calls, and curator-reviewed taxonomy promotions all cost real money/time. The pattern below survives `supabase db reset` by separating *seeded* (LLM-touched / hand-curated) state from *recomputed* (deterministic + cheap) state, and shipping one script that brings the DB to a fully populated state regardless of which path each table needs.
+
+**Seed layout:**
+
+```
+supabase/seeds/
+├── recipes.sql                       (existing — raw scraped recipes)
+├── taxonomy_nodes.sql                (existing — hand-curated taxonomy seed)
+└── processed/                        (new — pipeline outputs that cost LLM)
+    ├── 00_taxonomy_grown.sql         (D's auto-created brand/expression nodes,
+    │                                  D's LLM-grown taxonomy_aliases,
+    │                                  E's promote-substances output,
+    │                                  taxonomy_provenance rows)
+    ├── 10_recipe_ingredients_llm.sql (D's mapping columns for rows resolved at
+    │                                  Layer 3 — taxonomy_node_id, mapper_source,
+    │                                  mapper_version, mapper_at — LLM rows only;
+    │                                  alias + lexical resolutions re-derive)
+    ├── 20_recipes_normalized.sql     (E's canonical_name + source + version on
+    │                                  recipes for LLM-resolved rows only)
+    └── 30_cocktail_aliases.sql       (E's grown cocktail alias seed)
+```
+
+Seed files are **committed to git** for now. Git bloat will become a problem; the long-term move is a hosted DB where these go away. When that happens, large-file history can be rewritten out of git in one pass — git LFS would solve the size problem now but adds friction in the meantime, so we accept the bloat instead.
+
+**The script: `scripts/refresh-processed-seeds.sh`**
+
+Two modes:
+
+```bash
+# Restore the DB to a fully populated state after `supabase db reset`.
+# Applies committed seeds, then runs the deterministic recompute steps so
+# the dev DB matches what a from-scratch pipeline run would have produced.
+scripts/refresh-processed-seeds.sh restore
+
+# Refresh the committed seed files from the current DB. Run after a
+# pipeline cycle that consumed LLM credits (D's resolve-pending,
+# E's resolve-pending, promote-substances). Diffs the seeds against
+# the DB and writes new contents.
+scripts/refresh-processed-seeds.sh dump
+```
+
+`restore` runs:
+1. Apply `supabase/seeds/processed/*.sql` in numeric order (FK-respecting).
+2. Run D's `map` (alias + lexical only — Layer 3 rows are already seeded).
+3. Run E's `normalize-names` (phase 1 only — phase 2 LLM rows are already seeded).
+4. Run E's `cluster` (deterministic; populates `recipe_clusters`, `cluster_id`, `variant_key`, `recipe_ingredients.role`).
+5. Print a summary: row counts, what got recomputed vs what came from seeds.
+
+`dump` runs:
+1. `pg_dump --data-only --column-inserts` against each tracked table-or-column-subset, filtered to the LLM-resolved rows (`mapper_source = 'llm'` for D, `canonical_name_source = 'llm'` for E).
+2. Write each output to its seed file.
+3. Print a `git diff --stat` of the seeds dir.
+
+`recipe_clusters`, the role tags on `recipe_ingredients`, and the cluster/variant_key columns on `recipes` are **not seeded** — `restore`'s deterministic recompute brings them up to date. Same for D's alias + lexical mappings (Layer 1 + Layer 2).
+
+**This is the default pattern going forward.** Any new stage that emits LLM-resolved or human-curated output:
+
+- Names its output column with a `_source` suffix that includes `'llm'` (or equivalent) for LLM-touched rows.
+- Adds a `supabase/seeds/processed/NN_<stage>.sql` file dumped via the same `pg_dump` pattern, filtered to the LLM/curated subset.
+- Adds itself to `restore`'s recompute list if it has a deterministic step worth running automatically.
+
+The convention is codified in CLAUDE.md as part of E's implementation, with `refresh-processed-seeds.sh` shipped alongside the dedup pipeline.
 
 ### Post-D auto-create cleanup (substance promotion)
 
@@ -243,7 +313,7 @@ alter table taxonomy_nodes
 alter table recipe_ingredients
   add column role         text check (role in (
                             'base_spirit', 'modifier', 'citrus',
-                            'sweetener', 'bitters', 'dilution',
+                            'sweetener', 'bitters', 'dilution', 'ice',
                             'garnish', 'wash', 'other')),
   add column role_source  text check (role_source in
                             ('default', 'rule', 'manual'));
@@ -302,43 +372,43 @@ create index recipe_clusters_canonical_idx on recipe_clusters (canonical_name);
 ```
 
 ```sql
--- 6. Card-level fold as a view; equivalence classes of recipes sharing
---    (cluster_id, card_key). Materializing as a table is a follow-up if
+-- 6. Variant-level fold as a view; equivalence classes of recipes sharing
+--    (cluster_id, variant_key). Materializing as a table is a follow-up if
 --    query patterns prove the aggregation is hot.
-create view recipe_cards as
+create view recipe_variants as
   select
     cluster_id,
-    card_key,
+    variant_key,
     min(id)                       as representative_recipe_id,
     count(*)                      as recipe_count,
     count(distinct site)          as source_count
   from recipes
-  where cluster_id is not null and card_key is not null
-  group by cluster_id, card_key;
+  where cluster_id is not null and variant_key is not null
+  group by cluster_id, variant_key;
 ```
 
 ```sql
--- 7. Recipe → cluster assignment + card_key (cards are derived).
+-- 7. Recipe → cluster assignment + variant_key (variants are derived).
 alter table recipes
   add column cluster_id    bigint references recipe_clusters(id),
-  add column card_key      text,
+  add column variant_key      text,
   add column dedup_version text;
 
 create index recipes_cluster_idx
   on recipes (cluster_id) where cluster_id is not null;
-create index recipes_cluster_card_idx
-  on recipes (cluster_id, card_key) where cluster_id is not null;
+create index recipes_cluster_variant_idx
+  on recipes (cluster_id, variant_key) where cluster_id is not null;
 ```
 
 ```sql
 -- 8. Public projection.
 create or replace view recipes_public as
   select id, source_url, site, name, author, image_url, jsonld,
-         cluster_id, card_key
+         cluster_id, variant_key
   from recipes;
 ```
 
-The web UI gains the ability to group by `cluster_id` and `card_key` without further schema changes (or to query `recipe_cards` for the aggregated view). RLS on `recipes` already blocks anon reads of the base table; the view is the public surface.
+The web UI gains the ability to group by `cluster_id` and `variant_key` without further schema changes (or to query `recipe_variants` for the aggregated view). RLS on `recipes` already blocks anon reads of the base table; the view is the public surface.
 
 ## Code structure
 
@@ -369,7 +439,7 @@ ingredients/src/ingredients/
     └── eval_set.py                  (dedup eval cases — separate from parser/mapper)
 ```
 
-`normalizer.py` takes distinct `recipes.name` strings, runs the phase-1 cascade (alias + lexical), and writes `canonical_name`/`canonical_name_source`/`normalizer_version` directly onto each `recipes` row. `normalizer_llm.py` is the phase-2 orchestrator; it imports `LLMProvider` and the Claude/Ollama implementations from `mapping/` (see *Reuse from [D]*) rather than duplicating them. `role_classifier.py` is a pure function over `(taxonomy_node_id, amount, unit, position)` plus a small DB lookup for `taxonomy_nodes.role_default`; it is imported by `cluster.py` rather than orchestrated as its own stage. `cluster.py` reads the joined view of `recipes` × `recipe_ingredients` × `taxonomy_nodes`, runs the role classifier, computes cluster and card keys, populates `recipe_clusters`, and writes `cluster_id` and `card_key` back to `recipes`. `promote_substances.py` is the post-D auto-create cleanup procedure.
+`normalizer.py` takes distinct `recipes.name` strings, runs the phase-1 cascade (alias + lexical), and writes `canonical_name`/`canonical_name_source`/`normalizer_version` directly onto each `recipes` row. `normalizer_llm.py` is the phase-2 orchestrator; it imports `LLMProvider` and the Claude/Ollama implementations from `mapping/` (see *Reuse from [D]*) rather than duplicating them. `role_classifier.py` is a pure function over `(taxonomy_node_id, amount, unit, position)` plus a small DB lookup for `taxonomy_nodes.role_default`; it is imported by `cluster.py` rather than orchestrated as its own stage. `cluster.py` reads the joined view of `recipes` × `recipe_ingredients` × `taxonomy_nodes`, runs the role classifier, computes cluster and variant keys, populates `recipe_clusters`, and writes `cluster_id` and `variant_key` back to `recipes`. `promote_substances.py` is the post-D auto-create cleanup procedure.
 
 ## Reuse from [D]
 
@@ -415,8 +485,8 @@ cd ingredients && uv run python -m ingredients.cli normalize-names --review
 # One-shot: walk auto-created brand/expression nodes that should be substances and promote them.
 cd ingredients && uv run python -m ingredients.cli promote-substances
 
-# Cluster compute. Tags roles, computes cluster/card keys, writes recipe_clusters,
-# stamps cluster_id and card_key on recipes.
+# Cluster compute. Tags roles, computes cluster/variant keys, writes recipe_clusters,
+# stamps cluster_id and variant_key on recipes.
 cd ingredients && uv run python -m ingredients.cli cluster
 
 # Audit. Prints the five signal queries.
@@ -433,7 +503,7 @@ cd ingredients && uv run python -m ingredients.cli dedup-all
 `--reset` semantics:
 
 - `normalize-names --reset` nulls `recipes.canonical_name`, `canonical_name_source`, `normalizer_version`, `normalized_at` for rows in scope.
-- `cluster --reset` clears `recipe_clusters`, nulls `recipes.cluster_id` / `card_key` / `dedup_version`, and nulls `recipe_ingredients.role*` columns in scope. (Roles are part of the cluster compute output and reset together.) Does not touch upstream tables.
+- `cluster --reset` clears `recipe_clusters`, nulls `recipes.cluster_id` / `variant_key` / `dedup_version`, and nulls `recipe_ingredients.role*` columns in scope. (Roles are part of the cluster compute output and reset together.) Does not touch upstream tables.
 
 ## Eval set & review workflow
 
@@ -473,14 +543,14 @@ Cases are added in three situations:
 
 - **Unit.** `normalizer.py` (alias + lexical layers, pure-function entry points), `role_classifier.py` (pure function table-driven), `cluster.py` (key hashing) tested without DB. `normalizer_llm.py` mocked at the provider boundary.
 - **DB integration.** `ingredients/tests/test_dedup_db.py` against `TEST_DB_URL`, applying all migrations (E's plus D's plus prior). Fixture taxonomy seeded in test setup; cascade exercised end-to-end without LLM (using a stub).
-- **Eval.** `ingredients/dedup/eval_set.py` driven by `--review`, runs against fixture taxonomy + fixture recipes, asserts every case lands in the expected cluster / card / role. CI gate.
+- **Eval.** `ingredients/dedup/eval_set.py` driven by `--review`, runs against fixture taxonomy + fixture recipes, asserts every case lands in the expected cluster / variant / role. CI gate.
 - **Cost guard.** Phase 2 LLM cost surfaced in CLI summary (call count, token usage). Operator sees the bill before re-running with `--reset`.
 - **Antichain integrity.** A unit test runs the integrity query against the production seed and fails CI if it finds violations.
 
 ## Open / deferred
 
 - **Promotion / demotion of clusters.** Hand-merging two clusters that should be one (or splitting one that should be two) has no UI yet. v1 stores cluster identity but does not provide override tooling. A `recipe_cluster_overrides` table or a `manual_cluster_id` column on `recipes` is the natural extension when curators arrive.
-- **Representative-recipe scoring.** v1 picks the cluster's representative recipe by simple heuristic (most-frequent ratios, fall back to highest-source-count card). A scored representative (using the existing `classify_drink_runs.score`, source quality, image presence) is a small follow-up.
+- **Representative-recipe scoring.** v1 picks the cluster's representative recipe by simple heuristic (most-frequent ratios, fall back to highest-source-count variant). A scored representative (using the existing `classify_drink_runs.score`, source quality, image presence) is a small follow-up.
 - **Audit workflow.** v1 ships the five queries via a CLI summary. A web-based audit/review surface — show flagged clusters, click to inspect, propose a merge or split — is deferred.
 - **Inter-cluster relationships.** Substitution edges and "similar drinks" are `[G]`/`[H]`. v1 stops at within-cluster identity.
 - **Re-running clustering as new recipes land.** v1 expects the operator to invoke `cluster` after parser / mapper runs. A reactive trigger (`LISTEN/NOTIFY`, Edge Function) is deferred.
