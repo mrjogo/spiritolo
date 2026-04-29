@@ -183,3 +183,65 @@ def test_cocktail_aliases_pkey_is_alias_canonical(db_conn):
         """
     ).fetchall()
     assert [r[0] for r in rows] == ["alias", "canonical_name"]
+
+
+def test_recipe_clusters_table_exists(db_conn):
+    cols = {
+        row[0]: row[1]
+        for row in db_conn.execute(
+            """
+            select column_name, data_type
+            from information_schema.columns
+            where table_name = 'recipe_clusters'
+            """
+        ).fetchall()
+    }
+    assert cols.get("id") == "bigint"
+    assert cols.get("cluster_key") == "text"
+    assert cols.get("canonical_name") == "text"
+    assert cols.get("ingredient_set") == "jsonb"
+    assert cols.get("representative_recipe_id") == "bigint"
+    assert cols.get("recipe_count") == "integer"
+    assert cols.get("source_count") == "integer"
+    assert cols.get("dedup_version") == "text"
+
+
+def test_recipes_has_cluster_assignment_columns(db_conn):
+    cols = {
+        row[0]: row[1]
+        for row in db_conn.execute(
+            """
+            select column_name, data_type
+            from information_schema.columns
+            where table_name = 'recipes'
+              and column_name in ('cluster_id', 'variant_key', 'dedup_version')
+            """
+        ).fetchall()
+    }
+    assert cols.get("cluster_id") == "bigint"
+    assert cols.get("variant_key") == "text"
+    assert cols.get("dedup_version") == "text"
+
+
+def test_recipe_variants_view_exists(db_conn):
+    row = db_conn.execute(
+        """
+        select table_name from information_schema.views
+        where table_name = 'recipe_variants'
+        """
+    ).fetchone()
+    assert row is not None
+
+
+def test_recipes_public_view_includes_cluster_id_and_variant_key(db_conn):
+    cols = {
+        row[0]
+        for row in db_conn.execute(
+            """
+            select column_name from information_schema.columns
+            where table_name = 'recipes_public'
+            """
+        ).fetchall()
+    }
+    assert "cluster_id" in cols
+    assert "variant_key" in cols
