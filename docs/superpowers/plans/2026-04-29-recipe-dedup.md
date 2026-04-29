@@ -117,7 +117,6 @@ from __future__ import annotations
 import pytest
 
 
-@pytest.mark.db
 def test_taxonomy_nodes_has_is_cluster_node_column(db_conn):
     row = db_conn.execute(
         """
@@ -133,7 +132,6 @@ def test_taxonomy_nodes_has_is_cluster_node_column(db_conn):
     assert "false" in (default or "").lower()
 
 
-@pytest.mark.db
 def test_taxonomy_nodes_has_role_default_column(db_conn):
     row = db_conn.execute(
         """
@@ -148,7 +146,6 @@ def test_taxonomy_nodes_has_role_default_column(db_conn):
     assert nullable == "YES"
 
 
-@pytest.mark.db
 def test_taxonomy_nodes_has_is_defining_garnish_column(db_conn):
     row = db_conn.execute(
         """
@@ -164,7 +161,7 @@ def test_taxonomy_nodes_has_is_defining_garnish_column(db_conn):
     assert "false" in (default or "").lower()
 ```
 
-(`db_conn` fixture is already provided by `ingredients/tests/conftest.py`. The `@pytest.mark.db` mark is the existing convention for DB-integration tests.)
+(`db_conn` fixture is added to `ingredients/tests/conftest.py` as part of this task — it opens a `psycopg.connect(test_db_url, autocommit=True)` connection and yields it. The inherited `test_db_url` fixture skips the test if `TEST_DB_URL` is unset. No `pytest.mark.db` marker is needed.)
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -256,7 +253,6 @@ All migrations in this phase land together as part of [E]'s main code PR(s). The
 Append to `ingredients/tests/test_dedup_migrations.py`:
 
 ```python
-@pytest.mark.db
 def test_recipe_ingredients_has_role_columns(db_conn):
     cols = {
         row[0]: (row[1], row[2])
@@ -275,7 +271,6 @@ def test_recipe_ingredients_has_role_columns(db_conn):
     assert cols["role_source"] == ("text", "YES")
 
 
-@pytest.mark.db
 def test_recipe_ingredients_role_check_constraint_rejects_unknown(db_conn):
     with pytest.raises(Exception):
         db_conn.execute(
@@ -346,7 +341,6 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 Append:
 
 ```python
-@pytest.mark.db
 def test_recipes_has_normalize_columns(db_conn):
     cols = {
         row[0]: row[1]
@@ -368,7 +362,6 @@ def test_recipes_has_normalize_columns(db_conn):
     assert cols.get("normalized_at") == "timestamp with time zone"
 
 
-@pytest.mark.db
 def test_recipes_canonical_name_source_check_constraint(db_conn):
     # Inserting an out-of-vocabulary source should fail.
     with pytest.raises(Exception):
@@ -435,7 +428,6 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 - [ ] **Step 1: Add failing test**
 
 ```python
-@pytest.mark.db
 def test_cocktail_aliases_table_exists(db_conn):
     cols = {
         row[0]: row[1]
@@ -453,7 +445,6 @@ def test_cocktail_aliases_table_exists(db_conn):
     assert cols.get("created_at") == "timestamp with time zone"
 
 
-@pytest.mark.db
 def test_cocktail_aliases_pkey_is_alias_canonical(db_conn):
     rows = db_conn.execute(
         """
@@ -508,7 +499,6 @@ Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>"
 - [ ] **Step 1: Add failing tests**
 
 ```python
-@pytest.mark.db
 def test_recipe_clusters_table_exists(db_conn):
     cols = {
         row[0]: row[1]
@@ -530,7 +520,6 @@ def test_recipe_clusters_table_exists(db_conn):
     assert cols.get("dedup_version") == "text"
 
 
-@pytest.mark.db
 def test_recipes_has_cluster_assignment_columns(db_conn):
     cols = {
         row[0]: row[1]
@@ -548,7 +537,6 @@ def test_recipes_has_cluster_assignment_columns(db_conn):
     assert cols.get("dedup_version") == "text"
 
 
-@pytest.mark.db
 def test_recipe_variants_view_exists(db_conn):
     row = db_conn.execute(
         """
@@ -559,7 +547,6 @@ def test_recipe_variants_view_exists(db_conn):
     assert row is not None
 
 
-@pytest.mark.db
 def test_recipes_public_view_includes_cluster_id_and_variant_key(db_conn):
     cols = {
         row[0]
@@ -899,7 +886,6 @@ import pytest
 from ingredients.dedup.eval_fixture import seed_dedup_fixture
 
 
-@pytest.mark.db
 def test_seed_dedup_fixture_creates_taxonomy_and_aliases(db_conn):
     ids = seed_dedup_fixture(db_conn)
 
@@ -1155,7 +1141,6 @@ from ingredients.dedup.alias_layer import resolve_alias
 from ingredients.dedup.types import Pending, Resolved
 
 
-@pytest.mark.db
 def test_exact_alias_hit_returns_resolved(dedup_fixture):
     conn, _ = dedup_fixture
     result = resolve_alias(conn, "negroni")
@@ -1164,7 +1149,6 @@ def test_exact_alias_hit_returns_resolved(dedup_fixture):
     assert result.source == "alias"
 
 
-@pytest.mark.db
 def test_typo_seed_resolves(dedup_fixture):
     conn, _ = dedup_fixture
     # 'daquiri' is seeded as an alias of 'daiquiri'
@@ -1173,14 +1157,12 @@ def test_typo_seed_resolves(dedup_fixture):
     assert result.canonical_name == "daiquiri"
 
 
-@pytest.mark.db
 def test_unknown_string_returns_pending(dedup_fixture):
     conn, _ = dedup_fixture
     result = resolve_alias(conn, "fancy unknown thing")
     assert isinstance(result, Pending)
 
 
-@pytest.mark.db
 def test_empty_string_returns_pending(dedup_fixture):
     conn, _ = dedup_fixture
     assert isinstance(resolve_alias(conn, ""), Pending)
@@ -1245,7 +1227,6 @@ from ingredients.dedup.lexical_layer import resolve_lexical, lexical_candidates
 from ingredients.dedup.types import Pending, Resolved
 
 
-@pytest.mark.db
 def test_close_match_resolves(dedup_fixture):
     # 'negronni' (extra n) should match 'negroni' via trgm
     conn, _ = dedup_fixture
@@ -1255,14 +1236,12 @@ def test_close_match_resolves(dedup_fixture):
     assert result.source == "lexical"
 
 
-@pytest.mark.db
 def test_no_match_returns_pending(dedup_fixture):
     conn, _ = dedup_fixture
     result = resolve_lexical(conn, "completely unrelated phrase")
     assert isinstance(result, Pending)
 
 
-@pytest.mark.db
 def test_ambiguous_match_returns_pending(dedup_fixture):
     # If two candidates score within the ratio threshold of each other,
     # the layer abstains so Phase 2 / human can decide. Construct a name
@@ -1273,7 +1252,6 @@ def test_ambiguous_match_returns_pending(dedup_fixture):
     assert isinstance(result, Pending)
 
 
-@pytest.mark.db
 def test_lexical_candidates_returns_top_n_with_scores(dedup_fixture):
     conn, _ = dedup_fixture
     cands = lexical_candidates(conn, "negronni", limit=5)
@@ -1384,7 +1362,6 @@ from ingredients.dedup.db import (
 from ingredients.dedup.version import NORMALIZER_VERSION
 
 
-@pytest.mark.db
 def test_fetch_unresolved_recipe_names_excludes_already_normalized(dedup_fixture, db_conn):
     conn, _ = dedup_fixture
     # Seed two recipes; one already normalized at current version.
@@ -1409,7 +1386,6 @@ def test_fetch_unresolved_recipe_names_excludes_already_normalized(dedup_fixture
     assert "old fashioned" not in names
 
 
-@pytest.mark.db
 def test_write_normalization_updates_all_rows_sharing_name(dedup_fixture, db_conn):
     conn, _ = dedup_fixture
     db_conn.execute("""
@@ -1431,7 +1407,6 @@ def test_write_normalization_updates_all_rows_sharing_name(dedup_fixture, db_con
     assert all(r[0] == "negroni" for r in canonicals)
 
 
-@pytest.mark.db
 def test_add_cocktail_alias_idempotent(dedup_fixture, db_conn):
     conn, _ = dedup_fixture
     add_cocktail_alias(db_conn, alias="the best negroni", canonical_name="negroni", source="llm")
@@ -1614,7 +1589,6 @@ from ingredients.dedup.normalizer import run_phase1
 from ingredients.dedup.version import NORMALIZER_VERSION
 
 
-@pytest.mark.db
 def test_phase1_resolves_alias_and_lexical_pending_for_unknown(dedup_fixture, db_conn):
     conn, _ = dedup_fixture
     db_conn.execute("""
@@ -1641,7 +1615,6 @@ def test_phase1_resolves_alias_and_lexical_pending_for_unknown(dedup_fixture, db
     assert statuses[3004] == (None, "pending_llm")
 
 
-@pytest.mark.db
 def test_phase1_idempotent_at_current_version(dedup_fixture, db_conn):
     conn, _ = dedup_fixture
     db_conn.execute("""
@@ -2007,7 +1980,6 @@ class StubProvider:
         return ProviderResult(raw_text=next(self.scripted), model_id=self.model_id)
 
 
-@pytest.mark.db
 def test_phase2_chose_writes_canonical(dedup_fixture, db_conn):
     conn, _ = dedup_fixture
     db_conn.execute("""
@@ -2028,7 +2000,6 @@ def test_phase2_chose_writes_canonical(dedup_fixture, db_conn):
     assert row == ("old fashioned", "llm")
 
 
-@pytest.mark.db
 def test_phase2_propose_adds_alias(dedup_fixture, db_conn):
     conn, _ = dedup_fixture
     db_conn.execute("""
@@ -2055,7 +2026,6 @@ def test_phase2_propose_adds_alias(dedup_fixture, db_conn):
     assert alias[0] == "llm"
 
 
-@pytest.mark.db
 def test_phase2_abstain(dedup_fixture, db_conn):
     conn, _ = dedup_fixture
     db_conn.execute("""
@@ -2404,7 +2374,6 @@ import pytest
 from ingredients.dedup.rollup import roll_up_to_antichain
 
 
-@pytest.mark.db
 def test_brand_rolls_up_to_substance_antichain(dedup_fixture):
     conn, ids = dedup_fixture
     # tanqueray (brand) rolls up to london_dry_gin (cluster_node)
@@ -2412,14 +2381,12 @@ def test_brand_rolls_up_to_substance_antichain(dedup_fixture):
     assert result == ids["london_dry_gin"]
 
 
-@pytest.mark.db
 def test_antichain_node_rolls_up_to_itself(dedup_fixture):
     conn, ids = dedup_fixture
     result = roll_up_to_antichain(conn, ids["campari"])
     assert result == ids["campari"]
 
 
-@pytest.mark.db
 def test_node_above_antichain_rolls_up_to_itself(dedup_fixture):
     conn, ids = dedup_fixture
     # 'gin' is above the cut (london_dry_gin / old_tom_gin are antichain).
@@ -2428,14 +2395,12 @@ def test_node_above_antichain_rolls_up_to_itself(dedup_fixture):
     assert result == ids["gin"]
 
 
-@pytest.mark.db
 def test_unknown_node_id_returns_input(dedup_fixture):
     conn, _ = dedup_fixture
     result = roll_up_to_antichain(conn, 99_999_999)
     assert result == 99_999_999
 
 
-@pytest.mark.db
 def test_multi_parent_picks_first_antichain_ancestor(dedup_fixture, db_conn):
     """If a node has multiple parents and one parent is antichain, that
     ancestor is the answer. We don't have a multi-parent fixture by
@@ -2920,7 +2885,6 @@ def run_cluster_compute(
 Append to `tests/test_dedup_cluster.py`:
 
 ```python
-@pytest.mark.db
 def test_run_cluster_compute_groups_identical_negronis(dedup_fixture, db_conn):
     conn, ids = dedup_fixture
     # Two Negronis from different sources at identical ratios → same cluster, same variant.
@@ -2961,7 +2925,6 @@ def test_run_cluster_compute_groups_identical_negronis(dedup_fixture, db_conn):
     assert rows[0][1] == rows[1][1]  # same variant
 
 
-@pytest.mark.db
 def test_run_cluster_compute_separates_ratio_variants(dedup_fixture, db_conn):
     conn, ids = dedup_fixture
     db_conn.execute("""
@@ -3001,7 +2964,6 @@ def test_run_cluster_compute_separates_ratio_variants(dedup_fixture, db_conn):
     assert rows[0][1] != rows[1][1]            # different variant
 
 
-@pytest.mark.db
 def test_run_cluster_compute_ignores_ice(dedup_fixture, db_conn):
     """Recipe with ice and recipe without ice → same variant (ice not in key)."""
     conn, ids = dedup_fixture
@@ -3078,7 +3040,6 @@ from ingredients.dedup.audit import (
 )
 
 
-@pytest.mark.db
 def test_audit_singleton_editorial_names_flags_best_perfect_ultimate(dedup_fixture, db_conn):
     conn, ids = dedup_fixture
     db_conn.execute("""
@@ -3098,7 +3059,6 @@ def test_audit_singleton_editorial_names_flags_best_perfect_ultimate(dedup_fixtu
     assert any("best" in (r.get("name") or "").lower() for r in rows)
 
 
-@pytest.mark.db
 def test_run_all_audits_returns_dict_keyed_by_signal_name(dedup_fixture, db_conn):
     conn, _ = dedup_fixture
     summary = run_all_audits(db_conn)
@@ -3305,7 +3265,6 @@ def test_definitional_substances_includes_expected_names():
     assert not missing, f"DEFINITIONAL_SUBSTANCES missing: {missing}"
 
 
-@pytest.mark.db
 def test_candidate_promotions_finds_auto_created_brands(dedup_fixture, db_conn):
     """Insert an auto-created 'campari' brand node (as if D's mapper made
     it before E's promote-substances run); the candidate query must find it."""
@@ -3330,7 +3289,6 @@ def test_candidate_promotions_finds_auto_created_brands(dedup_fixture, db_conn):
     assert "campari" in slugs
 
 
-@pytest.mark.db
 def test_promote_node_sets_role_null_and_is_cluster_node_true(dedup_fixture, db_conn):
     conn, ids = dedup_fixture
     db_conn.execute("""
@@ -3975,7 +3933,6 @@ import pytest
 from ingredients.dedup.eval_set import run_eval
 
 
-@pytest.mark.db
 def test_dedup_eval_passes(monkeypatch):
     import os
     if not os.environ.get("TEST_DB_URL"):
@@ -4344,7 +4301,6 @@ from ingredients.dedup.cluster import run_cluster_compute
 from ingredients.dedup.normalizer import run_phase1
 
 
-@pytest.mark.db
 def test_end_to_end_negroni_old_fashioned(dedup_fixture, db_conn):
     conn, ids = dedup_fixture
 
