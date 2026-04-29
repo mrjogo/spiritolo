@@ -165,6 +165,18 @@ def isolated_db(test_db_url: str):
 
 
 @pytest.fixture
+def db_conn(test_db_url: str):
+    """Raw psycopg connection to the test DB. Closed after each test.
+
+    Use this for schema-level assertions (information_schema queries) and
+    other tests that don't need the IngredientsDatabase wrapper.
+    """
+    conn = psycopg.connect(test_db_url, autocommit=True)
+    yield conn
+    conn.close()
+
+
+@pytest.fixture
 def fixture_taxonomy(test_db_url: str):
     """Yield (psycopg conn, slug->id dict) with taxonomy_* truncated and
     seeded from ingredients.mapping.eval_fixture. Truncates on teardown."""
