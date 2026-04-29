@@ -32,3 +32,4 @@ htmlcov/
 
 # Worktrees
 .worktrees/
+.claude/worktrees/
