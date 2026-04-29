@@ -92,3 +92,49 @@ from (values
   ('french vermouth',  'dry_vermouth')
 ) as a(alias, slug)
 join taxonomy_nodes n on n.slug = a.slug;
+
+-- Bitters subtypes (antichain layer — every individual bitters is a cluster node).
+-- The parent `bitters` stays non-antichain; recipes that say generic "bitters"
+-- resolve there and surface as underspecified in the dedup audit.
+update taxonomy_nodes set role_default = 'bitters' where slug = 'bitters';
+
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+  ('angostura_bitters',      'Angostura Bitters',       true, 'bitters'),
+  ('peychauds_bitters',      'Peychaud''s Bitters',     true, 'bitters'),
+  ('orange_bitters',         'Orange Bitters',          true, 'bitters'),
+  ('creole_bitters',         'Creole Bitters',          true, 'bitters'),
+  ('chocolate_bitters',      'Chocolate Bitters',       true, 'bitters'),
+  ('aromatic_bitters_other', 'Aromatic Bitters (Other)', true, 'bitters');
+
+insert into taxonomy_edges (parent_id, child_id)
+select p.id, c.id
+from (values
+  ('bitters', 'angostura_bitters'),
+  ('bitters', 'peychauds_bitters'),
+  ('bitters', 'orange_bitters'),
+  ('bitters', 'creole_bitters'),
+  ('bitters', 'chocolate_bitters'),
+  ('bitters', 'aromatic_bitters_other')
+) as e(parent_slug, child_slug)
+join taxonomy_nodes p on p.slug = e.parent_slug
+join taxonomy_nodes c on c.slug = e.child_slug;
+
+insert into taxonomy_aliases (alias, node_id)
+select a.alias, n.id
+from (values
+  ('angostura',                 'angostura_bitters'),
+  ('angostura aromatic bitters','angostura_bitters'),
+  ('aromatic bitters',          'angostura_bitters'),
+  ('peychaud''s',               'peychauds_bitters'),
+  ('peychauds',                 'peychauds_bitters'),
+  ('peychaud''s bitters',       'peychauds_bitters'),
+  ('regan''s orange bitters',   'orange_bitters'),
+  ('regans orange bitters',     'orange_bitters'),
+  ('fee brothers orange bitters','orange_bitters'),
+  ('mole bitters',              'chocolate_bitters'),
+  ('xocolatl mole bitters',     'chocolate_bitters'),
+  ('bittermens xocolatl mole bitters','chocolate_bitters'),
+  ('bittermens chocolate bitters','chocolate_bitters'),
+  ('the bitter truth creole bitters','creole_bitters')
+) as a(alias, slug)
+join taxonomy_nodes n on n.slug = a.slug;
