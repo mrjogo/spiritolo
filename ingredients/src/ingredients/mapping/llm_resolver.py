@@ -10,6 +10,8 @@ Branching by LLM action:
 
 from __future__ import annotations
 
+import logging
+import time
 from collections import Counter
 
 import psycopg
@@ -23,6 +25,8 @@ from .prompt import (
     SYSTEM_PROMPT, build_user_prompt, parse_response, prompt_hash,
 )
 from .proposals import enqueue_form_proposal
+
+log = logging.getLogger("mapper")
 
 
 def _candidates_with_parents(
@@ -91,6 +95,34 @@ def _create_brand_node(
     return new_id
 
 
+def _resolve_with_retry(
+    provider: LLMProvider, *, system_prompt: str, user_prompt: str,
+    normalized_name: str, max_attempts: int = 3,
+) -> dict | None:
+    """Call provider + parse; retry on any exception with exponential backoff.
+    Returns the parsed action dict, or None if all attempts failed."""
+    for attempt in range(max_attempts):
+        try:
+            raw = provider.resolve(
+                system_prompt=system_prompt, user_prompt=user_prompt,
+            ).raw_text
+            return parse_response(raw)
+        except Exception as exc:
+            if attempt + 1 == max_attempts:
+                log.error(
+                    "LLM call exhausted retries for %r: %s",
+                    normalized_name, exc,
+                )
+                return None
+            sleep_for = 2 ** attempt   # 1s, 2s, 4s
+            log.warning(
+                "LLM call failed for %r (attempt %d/%d): %s — retrying in %ds",
+                normalized_name, attempt + 1, max_attempts, exc, sleep_for,
+            )
+            time.sleep(sleep_for)
+    return None
+
+
 def run_phase2(
     conn: psycopg.Connection,
     *,
@@ -106,8 +138,15 @@ def run_phase2(
         user_prompt = build_user_prompt(
             normalized_name=normalized, parser_unit=None, site=site, candidates=cands,
         )
-        raw = provider.resolve(system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt).raw_text
-        action_obj = parse_response(raw)
+        action_obj = _resolve_with_retry(
+            provider,
+            system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt,
+            normalized_name=normalized,
+        )
+        if action_obj is None:
+            # All retries exhausted; leave row at pending_llm and move on.
+            counts["error"] += 1
+            continue
         action = action_obj["action"]
 
         if action == "chose":

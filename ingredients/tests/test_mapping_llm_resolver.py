@@ -215,3 +215,56 @@ def test_brand_auto_create_rolls_back_if_resolution_fails(fixture_taxonomy, monk
         "select id from taxonomy_nodes where slug = 'beefeater'"
     ).fetchone()
     assert row is None, "leaked taxonomy node from non-atomic auto-create"
+
+
+def test_resolver_retries_on_provider_failure_then_continues_loop(fixture_taxonomy, monkeypatch):
+    """A transient provider failure on one row must NOT abort the whole
+    queue. The failed row stays at pending_llm; subsequent rows process."""
+    from ingredients.mapping.db import write_pending
+    from ingredients.mapping import llm_resolver
+
+    conn, ids = fixture_taxonomy
+    conn.execute("truncate table recipe_ingredients, recipes restart identity cascade")
+    rid = conn.execute(
+        "insert into recipes (site, source_url, jsonld, fetched_at) "
+        "values ('punch', 'https://example.com/retry', '{}'::jsonb, now()) returning id"
+    ).fetchone()[0]
+    for pos, name in enumerate(["broken thing", "fancy gin variant"]):
+        conn.execute(
+            "insert into recipe_ingredients "
+            "(recipe_id, position, raw_text, name, parse_status, parser_rule, parser_version) "
+            "values (%s,%s,%s,%s,'parsed','qty_unit','v1')",
+            (rid, pos, f"1 oz {name}", name),
+        )
+    conn.commit()
+    write_pending(conn, normalized_name="broken thing", mapper_version="v1")
+    write_pending(conn, normalized_name="fancy gin variant", mapper_version="v1")
+
+    # Provider raises on "broken thing", succeeds on "fancy gin variant".
+    class FlakyProvider:
+        model_id = "stub-flaky"
+        def resolve(self, *, system_prompt, user_prompt):
+            if '"name": "broken thing"' in user_prompt:
+                raise RuntimeError("simulated transient failure")
+            return ProviderResult(
+                raw_text='{"action": "chose", "node_id": ' + str(ids["gin"]) + '}',
+                model_id="stub-flaky",
+            )
+
+    # Skip the actual sleeping during the test.
+    monkeypatch.setattr(llm_resolver.time, "sleep", lambda _s: None)
+
+    summary = llm_resolver.run_phase2(conn, provider=FlakyProvider())
+
+    # Broken row stayed at pending_llm; gin variant got resolved.
+    row1 = conn.execute(
+        "select mapper_source from recipe_ingredients where lower(trim(name)) = 'broken thing'"
+    ).fetchone()
+    row2 = conn.execute(
+        "select mapper_source, taxonomy_node_id from recipe_ingredients "
+        "where lower(trim(name)) = 'fancy gin variant'"
+    ).fetchone()
+    assert row1[0] == "pending_llm"
+    assert row2 == ("llm", ids["gin"])
+    assert summary.get("chose") == 1
+    assert summary.get("error", 0) == 1
