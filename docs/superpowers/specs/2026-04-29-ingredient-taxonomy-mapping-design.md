@@ -36,7 +36,7 @@ Three layers, **phased**:
 | Phase | Layer | Source value | Mechanism |
 |---|---|---|---|
 | 1 | `alias` | `alias` | `SELECT node_id FROM taxonomy_aliases WHERE alias = :normalized_name` |
-| 1 | `lexical` | `lexical` | `pg_trgm` similarity over `taxonomy_nodes.display_name` ∪ `taxonomy_aliases.alias`. Accept only when `top1.similarity ≥ 0.92 AND top1.similarity > 1.5 × top2.similarity` |
+| 1 | `lexical` | `lexical` | `pg_trgm` similarity over `taxonomy_nodes.display_name` ∪ `taxonomy_aliases.alias`. Accept only when `top1.similarity ≥ 0.75 AND top1.similarity > 1.5 × top2.similarity` |
 | 2 | `llm` | `llm` | Provider chosen at Phase 2 invocation time (`--provider {ollama|claude}`). Input: raw string, parser context (unit, site), top-20 lexical candidates with their parents. Output: a chosen node id, a brand/expression auto-create proposal, a form-node review proposal, or abstain |
 
 Phase 1 runs as part of every `map` invocation — cheap, idempotent, no external dependencies. Strings that don't resolve get `mapper_source = 'pending_llm'`, `taxonomy_node_id IS NULL`, and stop. Phase 2 is a separate subcommand operating on the `pending_llm` queue, run only when an operator chooses to pay the LLM cost (or not — a small pending list might be hand-resolved as aliases).
@@ -47,7 +47,7 @@ The phasing is deliberate. Rows resolved in Phase 1 cost effectively zero on eve
 
 ### Cascade thresholds and the "lexically confident, semantically wrong" risk
 
-Layer 2's threshold is set conservatively (`sim ≥ 0.92`, `top1 > 1.5 × top2`) to fail closed — better to fall through to LLM than to confidently mis-map. The discipline that polices threshold tuning is the eval set: every case where the lexical layer was confidently wrong becomes a `should-abstain-and-fall-through-to-LLM` eval row, plus either an explicit alias entry or a threshold tightening.
+Layer 2's threshold is set conservatively (`sim ≥ 0.75`, `top1 > 1.5 × top2`) to fail closed — better to fall through to LLM than to confidently mis-map. The discipline that polices threshold tuning is the eval set: every case where the lexical layer was confidently wrong becomes a `should-abstain-and-fall-through-to-LLM` eval row, plus either an explicit alias entry or a threshold tightening.
 
 ### Brand and expression nodes auto-create silently
 
