@@ -86,7 +86,8 @@ def _create_brand_node(
         """,
         (new_id, MAPPER_VERSION, raw_string, prompt_hash_value, model_id),
     )
-    conn.commit()
+    # NOTE: no conn.commit() here — the caller's write_resolution() commit
+    # covers the whole unit (node + edge + provenance + row update) atomically.
     return new_id
 
 
@@ -122,20 +123,28 @@ def run_phase2(
                 write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
                 counts["abstain"] += 1
                 continue
-            new_id = _create_brand_node(
-                conn,
-                slug=action_obj["slug"],
-                display_name=action_obj["display_name"],
-                parent_id=parent_id,
-                role=action_obj["role"],
-                raw_string=normalized,
-                prompt_hash_value=prompt_hash(normalized, None, site, cands),
-                model_id=provider.model_id,
-            )
-            write_resolution(
-                conn, normalized_name=normalized, taxonomy_node_id=new_id,
-                source="llm", mapper_version=MAPPER_VERSION,
-            )
+            # _create_brand_node + write_resolution must be atomic: the node,
+            # edge, provenance, and recipe_ingredients update land in ONE
+            # transaction. If write_resolution raises, we roll back so we
+            # don't leak an orphan taxonomy node.
+            try:
+                new_id = _create_brand_node(
+                    conn,
+                    slug=action_obj["slug"],
+                    display_name=action_obj["display_name"],
+                    parent_id=parent_id,
+                    role=action_obj["role"],
+                    raw_string=normalized,
+                    prompt_hash_value=prompt_hash(normalized, None, site, cands),
+                    model_id=provider.model_id,
+                )
+                write_resolution(
+                    conn, normalized_name=normalized, taxonomy_node_id=new_id,
+                    source="llm", mapper_version=MAPPER_VERSION,
+                )
+            except Exception:
+                conn.rollback()
+                raise
             counts["propose_brand"] += 1
         elif action == "propose_form":
             parent_id = _lookup_node_by_slug(conn, action_obj["parent_slug"])

@@ -169,3 +169,49 @@ def test_resolver_respects_limit(fixture_taxonomy):
         "select count(*) from recipe_ingredients where mapper_source = 'pending_llm'"
     ).fetchone()[0]
     assert pending == 1
+
+
+def test_brand_auto_create_rolls_back_if_resolution_fails(fixture_taxonomy, monkeypatch):
+    """If the rows-update step fails after the node-create step, the
+    new node + edge + provenance must roll back so we don't leak an
+    orphan taxonomy node."""
+    from ingredients.mapping.db import write_pending
+    from ingredients.mapping import llm_resolver
+
+    conn, _ = fixture_taxonomy
+    conn.execute("truncate table recipe_ingredients, recipes restart identity cascade")
+    rid = conn.execute(
+        "insert into recipes (site, source_url, jsonld, fetched_at) "
+        "values ('punch', 'https://example.com/atomic', '{}'::jsonb, now()) returning id"
+    ).fetchone()[0]
+    conn.execute(
+        "insert into recipe_ingredients "
+        "(recipe_id, position, raw_text, name, parse_status, parser_rule, parser_version) "
+        "values (%s, 0, '1 oz beefeater', 'beefeater', 'parsed', 'qty_unit', 'v1')",
+        (rid,),
+    )
+    conn.commit()
+    write_pending(conn, normalized_name="beefeater", mapper_version="v1")
+
+    provider = StubProvider({
+        "beefeater": (
+            '{"action": "propose_brand", "slug": "beefeater", '
+            '"display_name": "Beefeater", "parent_slug": "london_dry_gin", '
+            '"role": "brand"}'
+        ),
+    })
+
+    # Force write_resolution to raise after _create_brand_node has run.
+    def boom(*args, **kwargs):
+        raise RuntimeError("simulated crash before resolution commit")
+    monkeypatch.setattr(llm_resolver, "write_resolution", boom)
+
+    import pytest
+    with pytest.raises(RuntimeError):
+        llm_resolver.run_phase2(conn, provider=provider)
+
+    # The node must NOT exist if atomicity is preserved.
+    row = conn.execute(
+        "select id from taxonomy_nodes where slug = 'beefeater'"
+    ).fetchone()
+    assert row is None, "leaked taxonomy node from non-atomic auto-create"
