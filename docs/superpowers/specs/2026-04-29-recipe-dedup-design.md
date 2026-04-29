@@ -150,15 +150,15 @@ Three layers, **phased**:
 
 | Phase | Layer | Source value | Mechanism |
 |---|---|---|---|
-| 1 | `alias` | `recipe_name_aliases.canonical_name` | exact match after light normalization (lowercase, strip punctuation, drop stop-set: "the", "classic", "best", "perfect", "cocktail", "recipe") |
-| 1 | `lexical` | `recipe_name_aliases.canonical_name` | `pg_trgm` similarity. Accept only when `top1.similarity ≥ 0.92 AND top1.similarity > 1.5 × top2.similarity` |
+| 1 | `alias` | `cocktail_aliases.canonical_name` | exact match after light normalization (lowercase, strip punctuation, drop stop-set: "the", "classic", "best", "perfect", "cocktail", "recipe") |
+| 1 | `lexical` | `cocktail_aliases.canonical_name` | `pg_trgm` similarity. Accept only when `top1.similarity ≥ 0.92 AND top1.similarity > 1.5 × top2.similarity` |
 | 2 | `llm` | LLM-proposed canonical | provider TBD, see *LLM provider deferral* below |
 
 Phase 1 runs as part of every dedup invocation — cheap, idempotent, no external dependencies. Strings that don't resolve get `source = 'pending_llm'` and stop. Phase 2 is a separate subcommand operating on the `pending_llm` queue.
 
 **Phase 2 ships as part of v1, not as an opt-in extension.** Editorial titles ("Best Old Fashioned Recipe", "How to Make a Perfect Manhattan") are common enough that without phase 2 the dedup feature visibly under-clusters. Cost is bounded: a worst-case run against ~10K residuals through Claude Haiku at ~$0.001/call is ~$10; through Ollama qwen3:14b it is free. The phasing exists for cost visibility and for the option to hand-curate small queues as aliases — not as a deferral mechanism for shipping v1.
 
-`recipe_name_resolutions` is the cache: one row per distinct raw recipe name, mapped to a canonical name and a source. The "canonical name" pool builds bottom-up: hand-seed the top ~100–200 well-known cocktails (Negroni, Old Fashioned, Manhattan, etc.), let LLM and alias additions grow the list as new drinks appear in the data.
+Resolution is written directly onto `recipes` (`canonical_name`, `canonical_name_source`, `normalizer_version`, `normalized_at`). This mirrors D's pattern — D writes resolution + source + version directly onto `recipe_ingredients` rather than maintaining a separate cache table. Re-runs find unresolved rows by `canonical_name IS NULL OR normalizer_version <> current`. The "canonical name" pool builds bottom-up: hand-seed the top ~100–200 well-known cocktails (Negroni, Old Fashioned, Manhattan, etc.) into `cocktail_aliases`, let LLM and alias additions grow the list as new drinks appear in the data.
 
 Mirrors D's cascade pattern; differs in being phased rather than eager, because E's LLM volume is not pre-known and the head-cover ratio for recipe names is likely high enough that phase 1 alone covers most rows.
 
@@ -171,7 +171,7 @@ Phase 2's provider is **deferred** until phase 1's residual count is known. The 
 
 The CLI prints residual count and top-N residuals before the LLM call so an operator can decide whether to send to LLM, hand-curate as aliases, or skip.
 
-Versioned `NORMALIZER_VERSION = "v1"`. Bumping it requires `--reset --except-version v1` against `recipe_name_resolutions`.
+Versioned `NORMALIZER_VERSION = "v1"`. Bumping it requires `--reset --except-version v1` against `recipes.normalizer_version`.
 
 ### Audit signals
 
@@ -244,23 +244,26 @@ create index recipe_ingredients_role_idx
 ```
 
 ```sql
--- 3. Name normalization cache.
-create table recipe_name_resolutions (
-  raw_name        text primary key,
-  canonical_name  text,
-  source          text not null check (source in
-                    ('alias', 'lexical', 'llm', 'pending_llm', 'abstain')),
-  version         text not null,
-  resolved_at     timestamptz not null default now()
-);
+-- 3. Name normalization output written directly onto `recipes`.
+--    Mirrors D's pattern of writing resolution + source + version onto the
+--    source table (`recipe_ingredients` for D, `recipes` for E) — no
+--    separate cache table needed.
+alter table recipes
+  add column canonical_name        text,
+  add column canonical_name_source text check (canonical_name_source in
+                                     ('alias', 'lexical', 'pending_llm',
+                                      'llm', 'abstain')),
+  add column normalizer_version    text,
+  add column normalized_at         timestamptz;
 
-create index recipe_name_resolutions_pending_idx
-  on recipe_name_resolutions (source) where source = 'pending_llm';
+create index recipes_pending_normalize_idx
+  on recipes (canonical_name_source) where canonical_name_source = 'pending_llm';
 ```
 
 ```sql
--- 4. Hand-curated and grown-from-data canonical-name list.
-create table recipe_name_aliases (
+-- 4. Cocktail alias table — exact analogue of taxonomy_aliases.
+--    Used by Phase-1 alias-layer lookups and grown by Phase-2 LLM resolutions.
+create table cocktail_aliases (
   alias          text not null,
   canonical_name text not null,
   source         text not null check (source in ('seed', 'llm', 'manual')),
@@ -268,8 +271,8 @@ create table recipe_name_aliases (
   primary key (alias, canonical_name)
 );
 
-create index recipe_name_aliases_canonical_idx
-  on recipe_name_aliases (canonical_name);
+create index cocktail_aliases_canonical_idx
+  on cocktail_aliases (canonical_name);
 ```
 
 ```sql
@@ -357,7 +360,29 @@ ingredients/src/ingredients/
     └── eval_set.py                  (dedup eval cases — separate from parser/mapper)
 ```
 
-`normalizer.py` takes a list of distinct `recipes.name` strings, runs the phase-1 cascade, and writes `recipe_name_resolutions`. `normalizer_llm.py` consumes the `pending_llm` rows. `role_classifier.py` is a pure function over `(taxonomy_node_id, amount, unit, position)` plus a small DB lookup for `taxonomy_nodes.role_default`; it is imported by `cluster.py` rather than orchestrated as its own stage. `cluster.py` reads the joined view of `recipes` × `recipe_ingredients` × `taxonomy_nodes`, runs the role classifier, computes cluster and card keys, populates `recipe_clusters`, and writes `cluster_id` and `card_key` back to `recipes`. `promote_substances.py` is the post-D auto-create cleanup procedure.
+`normalizer.py` takes distinct `recipes.name` strings, runs the phase-1 cascade (alias + lexical), and writes `canonical_name`/`canonical_name_source`/`normalizer_version` directly onto each `recipes` row. `normalizer_llm.py` is the phase-2 orchestrator; it imports `LLMProvider` and the Claude/Ollama implementations from `mapping/` (see *Reuse from [D]*) rather than duplicating them. `role_classifier.py` is a pure function over `(taxonomy_node_id, amount, unit, position)` plus a small DB lookup for `taxonomy_nodes.role_default`; it is imported by `cluster.py` rather than orchestrated as its own stage. `cluster.py` reads the joined view of `recipes` × `recipe_ingredients` × `taxonomy_nodes`, runs the role classifier, computes cluster and card keys, populates `recipe_clusters`, and writes `cluster_id` and `card_key` back to `recipes`. `promote_substances.py` is the post-D auto-create cleanup procedure.
+
+## Reuse from [D]
+
+D shipped a clean LLM cascade infrastructure. E reuses the low-level pieces directly rather than parallel-implementing them; only the domain-specific layers (cocktail-name normalization rules, the cluster compute) are E-original.
+
+| Concern | Reuses from D | E adds |
+|---|---|---|
+| LLM provider abstraction | `ingredients.mapping.llm_provider.LLMProvider` (Protocol), `ProviderResult` dataclass | nothing — same Protocol used as-is |
+| LLM provider implementations | `mapping.llm_provider_claude.ClaudeProvider`, `mapping.llm_provider_ollama.OllamaProvider` | nothing — imported and instantiated |
+| Retry-with-backoff around an LLM call | `mapping.llm_resolver._resolve_with_retry` (lift to module-level export, or extract to `mapping/llm_runtime.py` if a third caller appears) | nothing |
+| Light-string normalization | `mapping.normalize.normalize_name` (lowercase + whitespace) | a heavier `dedup.normalize.normalize_cocktail_name` that wraps `normalize_name` and adds stop-word stripping ("the", "best", "classic", "cocktail", "recipe"), parenthetical removal, punctuation handling appropriate to recipe titles |
+| Alias-layer SQL pattern | `mapping.alias_layer.resolve_alias` shape (parameterized table) | identical shape against `cocktail_aliases` instead of `taxonomy_aliases`; small helper module `dedup.alias_layer` |
+| Lexical-layer pg_trgm pattern | `mapping.lexical_layer` shape (threshold + tiebreaker) | identical shape against `cocktail_aliases.alias` instead of `taxonomy_nodes.display_name ∪ taxonomy_aliases.alias` |
+| Typed cascade results | `mapping.types.Resolved`/`Pending`/`Abstain` shape | E's analogue in `dedup/types.py` carries `canonical_name: str` instead of `taxonomy_node_id: int`; otherwise identical |
+| CLI argument plumbing | `spiritolo_common.cli_common.add_reset_args`, `confirm_reset`, `describe_reset_scope` | nothing — used directly |
+| Run summary + progress | `spiritolo_common.summary.print_summary`, `spiritolo_common.progress.make_progress` | nothing — used directly |
+| Supabase connection | `spiritolo_common.supabase_client` | nothing — used directly |
+| Eval-against-fixture pattern | `mapping.eval_fixture` + `mapping.eval_set` shape | E's analogue: `dedup/eval_fixture.py` (a fixture taxonomy with antichain marked + a fixture cocktail-alias seed) and `dedup/eval_set.py` |
+
+**Verb naming.** Phase-2 LLM CLI is `resolve-pending`, mirroring D's `map resolve-pending`. The `--provider {claude, ollama}` flag, residual-count confirmation prompt, and `--limit` semantics are the same.
+
+**What is *not* reused.** D's `mapping/prompt.py` is taxonomy-specific (candidates with parents). E's prompt asks "given this raw recipe title and these candidate canonical cocktail names, pick one or propose a new one"; the shape diverges enough to warrant a separate `dedup/prompt.py`. Similarly, D's `mapping/proposals.py` (`taxonomy_proposals` queue for form-node review) doesn't map cleanly onto cocktail-name proposals — for v1, LLM-proposed canonical names auto-add to `cocktail_aliases` with `source='llm'` and the audit pass surfaces them, no human-review queue. If LLM cocktail-name hallucinations turn out to be a real problem, a `cocktail_proposals` mirror of `taxonomy_proposals` is the natural follow-up.
 
 ## CLI surface
 
@@ -371,9 +396,9 @@ cd ingredients && uv run python -m ingredients.cli normalize-names
 cd ingredients && uv run python -m ingredients.cli normalize-names list-pending
 cd ingredients && uv run python -m ingredients.cli normalize-names list-pending --limit 50
 
-# Phase 2: send pending strings to LLM.
-cd ingredients && uv run python -m ingredients.cli normalize-names llm-pending --provider ollama
-cd ingredients && uv run python -m ingredients.cli normalize-names llm-pending --provider claude
+# Phase 2: send pending strings to LLM (mirrors D's `map resolve-pending`).
+cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider ollama
+cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider claude
 
 # Eval set, no DB writes.
 cd ingredients && uv run python -m ingredients.cli normalize-names --review
@@ -398,7 +423,7 @@ cd ingredients && uv run python -m ingredients.cli dedup-all
 
 `--reset` semantics:
 
-- `normalize-names --reset` clears `recipe_name_resolutions` rows in scope.
+- `normalize-names --reset` nulls `recipes.canonical_name`, `canonical_name_source`, `normalizer_version`, `normalized_at` for rows in scope.
 - `cluster --reset` clears `recipe_clusters`, nulls `recipes.cluster_id` / `card_key` / `dedup_version`, and nulls `recipe_ingredients.role*` columns in scope. (Roles are part of the cluster compute output and reset together.) Does not touch upstream tables.
 
 ## Eval set & review workflow
@@ -431,7 +456,7 @@ Cases are added in three situations:
 - **Antichain integrity violation.** A taxonomy seed edit that creates an `is_cluster_node = true` node with an `is_cluster_node = true` ancestor must be caught at seed-load time (a CHECK or a startup integrity query). The dedup CLI refuses to run if this query returns rows.
 - **Roll-up traversal cycle.** Should be impossible by `taxonomy_edges` invariants, but a defensive `WITH RECURSIVE` depth cap (e.g., 10) protects against pathology.
 - **LLM API failure (phase 2).** Same as D: retry 3× with backoff, leave `pending_llm` unchanged on exhaustion. No `abstain` write for network errors — `abstain` is reserved for "model considered and declined."
-- **LLM proposes a canonical name not in `recipe_name_aliases`.** Auto-add the alias with `source = 'llm'`. The audit pass surfaces these for human review in batch (analogous to D's `taxonomy_provenance`).
+- **LLM proposes a canonical name not in `cocktail_aliases`.** Auto-add the alias with `source = 'llm'`. The audit pass surfaces these for human review in batch (analogous to D's `taxonomy_provenance`).
 - **Concurrent dedup runs.** The cluster compute is idempotent given fixed inputs: every (joint key) maps to one cluster_key. Two operators racing produce duplicate work, not corruption. UPSERT on `cluster_key` resolves the writes.
 - **Underspecified ingredients.** Recipes resolving only to nodes above the antichain produce a cluster key with the parent node verbatim. The audit flags this; no block.
 
