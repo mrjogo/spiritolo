@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 from collections import Counter
 
@@ -110,6 +111,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
                            help="Process at most N distinct pending names.")
     p_resolve.add_argument("--yes", action="store_true",
                            help="Skip the residual-count confirmation prompt.")
+
+    p_review = map_sub.add_parser(
+        "review-proposals",
+        help="Walk the pending taxonomy_proposals queue interactively.",
+    )
+    p_review.add_argument(
+        "--decided-by", default=os.environ.get("USER", "operator"),
+        help="Name recorded on each decision.",
+    )
 
     return parser
 
@@ -243,9 +253,83 @@ def run_resolve_pending(args: argparse.Namespace) -> int:
         db.close()
 
 
+def run_review_proposals(args: argparse.Namespace) -> int:
+    from ingredients.mapping.db import write_resolution
+    from ingredients.mapping.mapper import MAPPER_VERSION
+    from ingredients.mapping.proposals import (
+        fetch_pending_proposals, mark_decided,
+    )
+
+    db = IngredientsDatabase()
+    try:
+        pending = fetch_pending_proposals(db.conn)
+        if not pending:
+            log.info("no pending proposals")
+            return 0
+
+        for p in pending:
+            print()
+            print(f"proposal #{p['id']}  raw_string={p['raw_string']!r}  proposed_slug={p['proposed_slug']!r}")
+            parent_label = "(none)"
+            if p["proposed_parent_id"]:
+                row = db.conn.execute(
+                    "select slug, display_name from taxonomy_nodes where id = %s",
+                    (p["proposed_parent_id"],),
+                ).fetchone()
+                if row:
+                    parent_label = f"{row[1]} ({row[0]}, id={p['proposed_parent_id']})"
+            print(f"  parent: {parent_label}")
+            print("  closest existing candidates:")
+            for c in (p["candidates"] or [])[:5]:
+                print(f"    {c.get('display_name')}  sim={c.get('similarity'):.2f}  id={c.get('node_id')}")
+
+            answer = input("[a]pprove / [r]eject / [s]kip / [e]dit slug: ").strip().lower()
+            slug = p["proposed_slug"]
+            if answer == "e":
+                slug = input(f"new slug (was {slug!r}): ").strip() or slug
+                answer = "a"  # treat edited as approve
+
+            if answer == "a":
+                if not p["proposed_parent_id"]:
+                    log.error("cannot approve without a parent_id; rejecting instead")
+                    mark_decided(db.conn, proposal_id=p["id"], status="rejected", decided_by=args.decided_by)
+                    continue
+                # Create the new node + edge + alias; resolve the row.
+                new_id = db.conn.execute(
+                    "insert into taxonomy_nodes (slug, display_name) values (%s, %s) returning id",
+                    (slug, slug.replace("_", " ").title()),
+                ).fetchone()[0]
+                db.conn.execute(
+                    "insert into taxonomy_edges (parent_id, child_id) values (%s, %s)",
+                    (p["proposed_parent_id"], new_id),
+                )
+                db.conn.execute(
+                    "insert into taxonomy_aliases (alias, node_id) values (%s, %s) on conflict do nothing",
+                    (p["raw_string"], new_id),
+                )
+                db.conn.commit()
+                write_resolution(
+                    db.conn, normalized_name=p["raw_string"],
+                    taxonomy_node_id=new_id, source="llm",
+                    mapper_version=MAPPER_VERSION,
+                )
+                mark_decided(db.conn, proposal_id=p["id"], status="approved", decided_by=args.decided_by)
+                log.info("approved %s as node id=%s", slug, new_id)
+            elif answer == "r":
+                mark_decided(db.conn, proposal_id=p["id"], status="rejected", decided_by=args.decided_by)
+                log.info("rejected %s", p["proposed_slug"])
+            else:
+                continue  # skip
+        return 0
+    finally:
+        db.close()
+
+
 def run_map(args: argparse.Namespace) -> int:
     if getattr(args, "map_cmd", None) == "resolve-pending":
         return run_resolve_pending(args)
+    if getattr(args, "map_cmd", None) == "review-proposals":
+        return run_review_proposals(args)
     from ingredients.mapping.mapper import MAPPER_VERSION, run_phase1
     if args.review:
         log.error("--review for map not implemented yet (Task 21)")

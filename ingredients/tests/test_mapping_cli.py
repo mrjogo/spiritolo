@@ -96,3 +96,37 @@ def test_cli_map_resolve_pending_empty_queue_exits_zero(fixture_taxonomy, test_d
         {"SUPABASE_DB_URL": test_db_url},
     )
     assert proc.returncode == 0
+
+
+def test_review_proposals_approve_creates_node(fixture_taxonomy, test_db_url, monkeypatch):
+    """Drive run_review_proposals directly with a stubbed input() so we
+    don't need to wrangle a subprocess pty."""
+    from ingredients.cli import run_review_proposals
+    from ingredients.mapping.proposals import enqueue_form_proposal
+    import argparse
+
+    conn, ids = fixture_taxonomy
+    conn.execute("truncate table taxonomy_proposals restart identity cascade")
+    conn.commit()
+    enqueue_form_proposal(
+        conn, raw_string="lemon zest", proposed_slug="lemon_zest",
+        proposed_display_name="Lemon Zest", proposed_parent_id=ids["lemon"],
+        candidates=[{"node_id": ids["lemon_wheel"], "display_name": "Lemon Wheel", "similarity": 0.6}],
+        mapper_version="v1",
+    )
+
+    answers = iter(["a"])  # approve first proposal
+    monkeypatch.setattr("builtins.input", lambda _prompt="": next(answers))
+    monkeypatch.setenv("SUPABASE_DB_URL", test_db_url)
+
+    rc = run_review_proposals(argparse.Namespace(decided_by="tester"))
+    assert rc == 0
+
+    new_node = conn.execute(
+        "select id from taxonomy_nodes where slug = 'lemon_zest'"
+    ).fetchone()
+    assert new_node is not None
+    status = conn.execute(
+        "select status, decided_by from taxonomy_proposals where raw_string = 'lemon zest'"
+    ).fetchone()
+    assert status == ("approved", "tester")
