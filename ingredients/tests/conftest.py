@@ -188,3 +188,13 @@ def fixture_taxonomy(test_db_url: str):
     conn.execute("truncate table taxonomy_aliases, taxonomy_edges, taxonomy_nodes restart identity cascade")
     conn.commit()
     conn.close()
+
+
+@pytest.fixture
+def dedup_fixture(db_conn):
+    """Seed the dedup fixture taxonomy + cocktail_aliases into TEST_DB_URL.
+    Yields (conn, ids). Tables are truncated on session teardown by the
+    existing db_conn fixture."""
+    from ingredients.dedup.eval_fixture import seed_dedup_fixture
+    ids = seed_dedup_fixture(db_conn)
+    return db_conn, ids
