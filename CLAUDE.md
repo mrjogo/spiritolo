@@ -146,6 +146,89 @@ The eval set is `ingredients/src/ingredients/mapping/eval_set.py`, run against t
 
 `ANTHROPIC_API_KEY` is required for `--provider claude`; `OLLAMA_BASE_URL` defaults to `http://localhost:11434` for `--provider ollama`.
 
+## Recipe Dedup
+
+E groups recipes that represent the same drink into a `recipe_clusters` row, with per-recipe `cluster_id` + `variant_key` on `recipes`. Cluster identity is `hash(canonical_name, role-tagged ingredient set rolled up to a curated antichain in the taxonomy DAG)`. Two recipes share a variant iff they also share amounts and brand call-outs; multiple sources publishing identical recipes collapse to one variant with `source_count > 1`.
+
+**Versioning:**
+- `NORMALIZER_VERSION` in [dedup/version.py](ingredients/src/ingredients/dedup/version.py) — name normalization (alias + lexical + LLM phases).
+- `DEDUP_VERSION` in the same file — role classification + cluster + variant compute.
+
+**Typical usage (from repo root):**
+
+```bash
+# Phase 1: alias + lexical name normalization (deterministic).
+cd ingredients && uv run python -m ingredients.cli normalize-names
+
+# Inspect what's queued for Phase 2.
+cd ingredients && uv run python -m ingredients.cli normalize-names list-pending --limit 50
+
+# Phase 2: drain the pending_llm queue with a chosen provider.
+cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider ollama
+cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider claude
+
+# Cluster compute. Tags roles, computes cluster + variant keys,
+# writes recipe_clusters / recipes.cluster_id / recipes.variant_key.
+cd ingredients && uv run python -m ingredients.cli cluster
+
+# Audit signals (operator triages by hand — no automated remediation).
+cd ingredients && uv run python -m ingredients.cli cluster audit
+
+# One-shot post-D substance promotion (Campari, Aperol, Angostura, etc.
+# auto-created as brand/expression by D's mapper become substance-role
+# antichain nodes).
+cd ingredients && uv run python -m ingredients.cli promote-substances
+
+# Convenience: phase-1 normalize + cluster in one go.
+cd ingredients && uv run python -m ingredients.cli dedup-all
+
+# Run the eval set against the fixture (no DB writes).
+cd ingredients && uv run python -m ingredients.cli normalize-names --review
+cd ingredients && uv run python -m ingredients.cli cluster --review
+
+# After bumping a version constant, re-run leftovers.
+cd ingredients && uv run python -m ingredients.cli normalize-names --reset --except-version v1 --yes
+cd ingredients && uv run python -m ingredients.cli cluster --reset --except-version v1 --yes
+```
+
+The canonical-name pool grows bottom-up: the seed in [supabase/seeds/taxonomy_nodes.sql](supabase/seeds/taxonomy_nodes.sql) ships ~20 well-known cocktails as `cocktail_aliases`; LLM resolutions add to it.
+
+The eval set is [dedup/eval_set.py](ingredients/src/ingredients/dedup/eval_set.py), run against the fixture taxonomy in [dedup/eval_fixture.py](ingredients/src/ingredients/dedup/eval_fixture.py) so eval results don't drift with seed changes.
+
+## Processed-data seeding pattern
+
+The local Supabase DB gets reset frequently. LLM-touched data and curator-reviewed taxonomy promotions are expensive to recompute, so they're seeded; deterministic state (alias + lexical mappings, role tags, cluster compute) is recomputed on demand.
+
+**Layout:**
+
+```
+supabase/seeds/
+├── recipes.sql                       (raw scraped recipes)
+├── taxonomy_nodes.sql                (hand-curated taxonomy seed)
+└── processed/
+    ├── 00_taxonomy_grown.sql         (D's auto-created brand/expression nodes,
+    │                                  D's LLM-grown taxonomy_aliases,
+    │                                  E's promote-substances output)
+    ├── 10_recipe_ingredients_llm.sql (D's mapper Layer-3 rows only)
+    ├── 20_recipes_normalized.sql     (E's Phase-2 LLM resolutions only)
+    └── 30_cocktail_aliases.sql       (E's grown cocktail aliases)
+```
+
+**Workflow:**
+
+```bash
+# After supabase db reset: bring the DB up to a fully populated state.
+scripts/refresh-processed-seeds.sh restore
+
+# After running pipeline cycles that consumed LLM credits: refresh
+# committed seed files from the current DB.
+scripts/refresh-processed-seeds.sh dump
+```
+
+`restore` applies the committed seeds + runs the deterministic recompute steps (D's `map`, E's `normalize-names`, E's `cluster`). `dump` filters to LLM-touched + curator-promoted rows only — anything cheap to re-derive stays out of seeds.
+
+**Going forward.** Any new pipeline stage that emits LLM-resolved or human-curated output adds itself to this pattern: a seed file in `supabase/seeds/processed/NN_<stage>.sql` (filtered to the LLM/curated subset) and an entry in `restore`'s recompute list if it has a deterministic step.
+
 ## Web UI
 
 Reads `recipes_public` via the publishable key (`sb_publishable_…`, post-Nov-2025 replacement for the legacy anon key). No backend.
