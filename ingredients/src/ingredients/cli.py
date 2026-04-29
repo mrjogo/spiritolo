@@ -295,9 +295,14 @@ def run_review_proposals(args: argparse.Namespace) -> int:
                     mark_decided(db.conn, proposal_id=p["id"], status="rejected", decided_by=args.decided_by)
                     continue
                 # Create the new node + edge + alias; resolve the row.
+                # Prefer the LLM's proposed display_name; fall back to a slug
+                # derivation for rows that predate the proposed_display_name column.
+                display_name = (
+                    p.get("proposed_display_name") or slug.replace("_", " ").title()
+                )
                 new_id = db.conn.execute(
                     "insert into taxonomy_nodes (slug, display_name) values (%s, %s) returning id",
-                    (slug, slug.replace("_", " ").title()),
+                    (slug, display_name),
                 ).fetchone()[0]
                 db.conn.execute(
                     "insert into taxonomy_edges (parent_id, child_id) values (%s, %s)",

@@ -17,10 +17,11 @@ def test_enqueue_writes_pending_row(fixture_taxonomy):
         mapper_version="v1",
     )
     row = conn.execute(
-        "select raw_string, proposed_slug, status from taxonomy_proposals where id = %s",
+        "select raw_string, proposed_slug, status, proposed_display_name "
+        "from taxonomy_proposals where id = %s",
         (pid,),
     ).fetchone()
-    assert row == ("lemon zest", "lemon_zest", "pending")
+    assert row == ("lemon zest", "lemon_zest", "pending", "Lemon Zest")
 
 
 def test_enqueue_is_idempotent_per_version(fixture_taxonomy):

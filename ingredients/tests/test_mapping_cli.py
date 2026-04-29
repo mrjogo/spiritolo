@@ -123,9 +123,10 @@ def test_review_proposals_approve_creates_node(fixture_taxonomy, test_db_url, mo
     assert rc == 0
 
     new_node = conn.execute(
-        "select id from taxonomy_nodes where slug = 'lemon_zest'"
+        "select id, display_name from taxonomy_nodes where slug = 'lemon_zest'"
     ).fetchone()
     assert new_node is not None
+    assert new_node[1] == "Lemon Zest"
     status = conn.execute(
         "select status, decided_by from taxonomy_proposals where raw_string = 'lemon zest'"
     ).fetchone()

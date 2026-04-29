@@ -28,26 +28,26 @@ def enqueue_form_proposal(
     row = conn.execute(
         """
         insert into taxonomy_proposals
-            (raw_string, proposed_slug, proposed_parent_id, candidates, mapper_version)
-        values (%s, %s, %s, %s::jsonb, %s)
+            (raw_string, proposed_slug, proposed_display_name, proposed_parent_id,
+             candidates, mapper_version)
+        values (%s, %s, %s, %s, %s::jsonb, %s)
         on conflict (raw_string, mapper_version) do update
-            set proposed_slug = excluded.proposed_slug
+            set proposed_slug = excluded.proposed_slug,
+                proposed_display_name = excluded.proposed_display_name
         returning id
         """,
-        (raw_string, proposed_slug, proposed_parent_id, json.dumps(candidates), mapper_version),
+        (raw_string, proposed_slug, proposed_display_name, proposed_parent_id,
+         json.dumps(candidates), mapper_version),
     ).fetchone()
     conn.commit()
-    # The display_name isn't stored on the row (it's reconstructable from the
-    # node when the proposal is approved); kept as a parameter for future use
-    # by the review CLI without changing the schema. Suppress unused-arg warning.
-    _ = proposed_display_name
     return row[0]
 
 
 def fetch_pending_proposals(conn: psycopg.Connection) -> list[dict[str, Any]]:
     rows = conn.execute(
         """
-        select id, raw_string, proposed_slug, proposed_parent_id, candidates, mapper_version
+        select id, raw_string, proposed_slug, proposed_parent_id, candidates,
+               mapper_version, proposed_display_name
         from taxonomy_proposals
         where status = 'pending'
         order by created_at, id
@@ -57,6 +57,7 @@ def fetch_pending_proposals(conn: psycopg.Connection) -> list[dict[str, Any]]:
         {
             "id": r[0], "raw_string": r[1], "proposed_slug": r[2],
             "proposed_parent_id": r[3], "candidates": r[4], "mapper_version": r[5],
+            "proposed_display_name": r[6],
         }
         for r in rows
     ]
