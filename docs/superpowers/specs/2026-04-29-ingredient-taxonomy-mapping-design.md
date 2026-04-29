@@ -29,19 +29,21 @@ Distribution is heavy-tailed. The head is concentrated enough that an alias seed
 
 ## Decisions
 
-### Mapper layer ordering: strict cascade
+### Mapper layer ordering: phased cascade
 
-For every unique normalized `name`, walk three layers and stop at the first confident hit. The layer that produced the answer is recorded on the row.
+Three layers, **phased**:
 
-| Layer | Source value | Mechanism |
-|---|---|---|
-| 1 | `alias` | `SELECT node_id FROM taxonomy_aliases WHERE alias = :normalized_name` |
-| 2 | `lexical` | `pg_trgm` similarity over `taxonomy_nodes.display_name` ∪ `taxonomy_aliases.alias`. Accept only when `top1.similarity ≥ 0.92 AND top1.similarity > 1.5 × top2.similarity` |
-| 3 | `llm` | Anthropic Claude Haiku 4.5. Input: raw string, parser context (unit, site), top-20 lexical candidates with their parents. Output: a chosen node id, a brand/expression auto-create proposal, a form-node review proposal, or abstain |
+| Phase | Layer | Source value | Mechanism |
+|---|---|---|---|
+| 1 | `alias` | `alias` | `SELECT node_id FROM taxonomy_aliases WHERE alias = :normalized_name` |
+| 1 | `lexical` | `lexical` | `pg_trgm` similarity over `taxonomy_nodes.display_name` ∪ `taxonomy_aliases.alias`. Accept only when `top1.similarity ≥ 0.92 AND top1.similarity > 1.5 × top2.similarity` |
+| 2 | `llm` | `llm` | Provider chosen at Phase 2 invocation time (`--provider {ollama|claude}`). Input: raw string, parser context (unit, site), top-20 lexical candidates with their parents. Output: a chosen node id, a brand/expression auto-create proposal, a form-node review proposal, or abstain |
 
-If all three layers fail to resolve, the row is recorded with `mapper_source='abstain'` and `taxonomy_node_id IS NULL`.
+Phase 1 runs as part of every `map` invocation — cheap, idempotent, no external dependencies. Strings that don't resolve get `mapper_source = 'pending_llm'`, `taxonomy_node_id IS NULL`, and stop. Phase 2 is a separate subcommand operating on the `pending_llm` queue, run only when an operator chooses to pay the LLM cost (or not — a small pending list might be hand-resolved as aliases).
 
-The cascade is deliberate. Rows resolved at Layer 1 cost effectively zero on every re-run forever; LLM is only paid for strings the deterministic layers couldn't handle. The alternative (always-LLM with lexical as candidate generator) was considered and rejected: the heavy-headed distribution makes per-string LLM cost wasteful when a one-time alias seeding job buys deterministic resolution for the top of the distribution.
+If Phase 2's LLM call also fails to resolve a string, the row flips to `mapper_source = 'abstain'`.
+
+The phasing is deliberate. Rows resolved in Phase 1 cost effectively zero on every re-run forever; LLM is only paid when an operator has seen the residual count and chosen a provider. The alternative (always-LLM with lexical as candidate generator) was considered and rejected: the heavy-headed distribution makes per-string LLM cost wasteful when a one-time alias seeding job buys deterministic resolution for the top of the distribution. Mirrors `[E]`'s name-normalization cascade, which makes the same call for the same reason.
 
 ### Cascade thresholds and the "lexically confident, semantically wrong" risk
 
@@ -83,11 +85,18 @@ A separate table would only be justified if mappings were many-to-many or requir
 
 The eval set must pass on every version bump.
 
-### LLM layer: Anthropic Claude, cached per unique string
+### Phase 2: LLM provider deferral
 
-Claude Haiku 4.5 by default; escalate low-confidence calls to Sonnet 4.6. Cost back-of-envelope (assuming ~600 input + ~80 output tokens per call): worst-case all-LLM run ~$15–30 against the current 25,912 unique strings; realistic run with alias seed handling the head ~$5–10. Re-runs after `MAPPER_VERSION` bumps cost the same.
+Phase 2's provider is **deferred** until Phase 1's residual count is known. The `--provider` flag accepts at minimum:
 
-Each unique normalized `name` is resolved at most once per `MAPPER_VERSION` regardless of how many rows share it. With 25,912 unique strings against 101,570 rows, this is a ~4× reduction in LLM volume vs naive per-row resolution. Cache lives in the database — when the mapper resolves a string, it computes the answer once and `UPDATE`s every row sharing that normalized name.
+- `ollama` — qwen3:14b (already running locally for URL classification). Free, lower-quality on niche cocktail knowledge, sufficient for "is this a recognizable spirit/category?" judgments on the long tail.
+- `claude` — Anthropic Claude Haiku 4.5 with optional Sonnet 4.6 escalation. Modest cost; better at brand/expression long-tail.
+
+The CLI prints residual count and top-N residuals before the LLM call so an operator can decide whether to send to LLM, hand-curate as aliases, or skip.
+
+Cost back-of-envelope with `--provider claude` (assuming ~600 input + ~80 output tokens per call): worst-case all-LLM run ~$15–30 against the current 25,912 unique strings; realistic run with alias seed handling the head ~$5–10. `--provider ollama` is free but takes longer wall-clock and produces more abstains on niche brands.
+
+Each unique normalized `name` is resolved at most once per `MAPPER_VERSION` regardless of how many rows share it. With 25,912 unique strings against 101,570 rows, this is a ~4× reduction in LLM volume vs naive per-row resolution. Cache lives in the database — when Phase 2 resolves a string, it computes the answer once and `UPDATE`s every row sharing that normalized name.
 
 ### Code housing: lives inside `ingredients/`
 
@@ -104,7 +113,7 @@ The mapper inherits the same wake-up evolution path as the parser — polling wo
 alter table recipe_ingredients
   add column taxonomy_node_id bigint references taxonomy_nodes(id),
   add column mapper_source    text check (mapper_source in
-    ('alias', 'lexical', 'llm', 'abstain')),
+    ('alias', 'lexical', 'pending_llm', 'llm', 'abstain')),
   add column mapper_version   text,
   add column mapper_at        timestamptz;
 
@@ -156,25 +165,31 @@ ingredients/src/ingredients/
 ├── eval_set.py            (existing, parser eval — unchanged)
 ├── cli.py                 (existing — gain a `map` subcommand)
 ├── ...
-└── mapping/               (new submodule)
+└── mapping/                (new submodule)
     ├── __init__.py
-    ├── mapper.py          (MAPPER_VERSION, cascade orchestration)
-    ├── alias_layer.py     (Layer 1)
-    ├── lexical_layer.py   (Layer 2 — pg_trgm queries)
-    ├── llm_layer.py       (Layer 3 — Anthropic SDK call)
-    ├── prompt.py          (system prompt, candidate formatting)
-    ├── proposals.py       (write/read taxonomy_proposals)
-    └── eval_set.py        (mapper eval cases — separate from parser eval)
+    ├── mapper.py           (MAPPER_VERSION, Phase 1 orchestration)
+    ├── alias_layer.py      (Phase 1, Layer 1)
+    ├── lexical_layer.py    (Phase 1, Layer 2 — pg_trgm queries)
+    ├── llm_resolver.py     (Phase 2 orchestration over pending_llm queue)
+    ├── llm_provider.py     (provider interface; selects ollama|claude)
+    ├── llm_provider_claude.py   (Anthropic SDK call)
+    ├── llm_provider_ollama.py   (local ollama call)
+    ├── prompt.py           (system prompt, candidate formatting; provider-agnostic)
+    ├── proposals.py        (write/read taxonomy_proposals)
+    └── eval_set.py         (mapper eval cases — separate from parser eval)
 ```
 
-`mapper.py` orchestrates one cycle: pull unique normalized names lacking a current-version mapping, walk the cascade per name, batch-update `recipe_ingredients` rows that share each name. Layer modules are pure functions of `(name, parser_context, db_handle | api_client)` returning a typed result that `mapper.py` records.
+`mapper.py` orchestrates one Phase 1 cycle: pull unique normalized names lacking a current-version mapping, walk alias → lexical, batch-update `recipe_ingredients` rows that share each name (with `mapper_source = 'pending_llm'` for misses). `llm_resolver.py` orchestrates Phase 2: pull rows where `mapper_source = 'pending_llm'`, dispatch each to the chosen provider, batch-update.
+
+Layer modules are pure functions of `(name, parser_context, db_handle | provider_client)` returning a typed result that the orchestrator records. Provider modules implement a small interface (`resolve(prompt) -> ProviderResult`) so adding a third provider later is a one-file change.
 
 ## CLI surface
 
-A `map` subcommand on the existing `ingredients` CLI. Flags mirror the parser (and the broader stage convention documented in [CLAUDE.md](../../../CLAUDE.md)):
+A `map` subcommand on the existing `ingredients` CLI, with three sub-modes (Phase 1 default, Phase 2 explicit, review-proposals). Flags mirror the parser (and the broader stage convention documented in [CLAUDE.md](../../../CLAUDE.md)):
 
 ```bash
-# Main run — map every parsed-name string lacking a row at the current MAPPER_VERSION.
+# Phase 1 — alias + lexical against unresolved rows. No external calls.
+# Strings that don't resolve get mapper_source='pending_llm'.
 cd ingredients && uv run python -m ingredients.cli map
 
 # Scoped to one site, with a row cap.
@@ -183,7 +198,7 @@ cd ingredients && uv run python -m ingredients.cli map --site punch --limit 500
 # Dry-run preview, no DB writes.
 cd ingredients && uv run python -m ingredients.cli map --dry-run
 
-# Run the eval set; no DB writes. Use during rule iteration.
+# Run the eval set; no DB writes.
 cd ingredients && uv run python -m ingredients.cli map --review
 
 # Spot-check a sample of strings without committing.
@@ -192,11 +207,17 @@ cd ingredients && uv run python -m ingredients.cli map --sample 25
 # After bumping MAPPER_VERSION, re-map everything left at the old version.
 cd ingredients && uv run python -m ingredients.cli map --reset --except-version v1 --yes
 
+# Phase 2 — drain the pending_llm queue with the chosen provider.
+# Prints residual count + top-N residuals before any external call;
+# operator confirms (or aborts) before any cost is paid.
+cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider claude
+cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider ollama --limit 100
+
 # Walk the form-proposal review queue.
 cd ingredients && uv run python -m ingredients.cli map review-proposals
 ```
 
-Bare `--reset` clears the mapping columns on `recipe_ingredients` for rows in scope (the queue gates on `mapper_version IS NULL` rather than presence of an eval row).
+Bare `--reset` clears the mapping columns on `recipe_ingredients` for rows in scope (the queue gates on `mapper_version IS NULL` rather than presence of an eval row). `--reset` does *not* distinguish Phase 1 from Phase 2 rows; a reset is "re-do everything for these rows from scratch."
 
 `review-proposals` shows pending `taxonomy_proposals` one at a time:
 
@@ -223,7 +244,7 @@ class MapperEvalCase:
     parser_unit: str | None
     site: str | None
     expect_node_slug: str | None        # exact-match expectation
-    expect_source: str | None           # 'alias' | 'lexical' | 'llm' | 'abstain'
+    expect_source: str | None           # 'alias' | 'lexical' | 'pending_llm' | 'llm' | 'abstain'
     expect_proposal_slug: str | None    # form-proposal expectation
 ```
 
@@ -235,7 +256,7 @@ Cases are added in two situations:
 
 ## Error handling
 
-- **LLM API failure:** retry with exponential backoff up to 3 attempts. After exhaustion, the string is left unmapped (no row written, no version recorded). Next CLI invocation retries it. The mapper does not write `mapper_source='abstain'` for a network failure — abstain is reserved for "model considered and declined."
+- **LLM API failure (Phase 2):** retry with exponential backoff up to 3 attempts. After exhaustion, the row is left at `mapper_source='pending_llm'` (no version flip, no abstain). Next `resolve-pending` invocation retries it. The resolver does not write `mapper_source='abstain'` for a network failure — abstain is reserved for "model considered and declined."
 - **LLM returns malformed JSON:** treated as failure (retried). Persistent malformed responses get logged and surface in CLI summary; the operator decides whether to escalate the call to Sonnet 4.6 or add an explicit alias.
 - **LLM proposes a parent node that doesn't exist:** row abstains. No orphan auto-create. The proposed parent slug is logged so seed gaps surface during review.
 - **Lexical layer threshold misfire (caught by eval):** add the offending case to the eval set; either tighten the threshold or seed the explicit alias. Both are valid responses; the eval suite enforces the choice.
@@ -244,8 +265,8 @@ Cases are added in two situations:
 
 ## Testing approach
 
-- **Unit:** layer modules are pure functions; tested without DB except `lexical_layer.py` which queries `pg_trgm`. `llm_layer.py` is tested with the Anthropic SDK mocked.
-- **DB integration:** `ingredients/tests/test_mapping_db.py` against `TEST_DB_URL`, applying all migrations including the new ones. Fixture taxonomy seeded in test setup; cascade exercised end-to-end without LLM calls (using a stub).
+- **Unit:** layer modules are pure functions; tested without DB except `lexical_layer.py` which queries `pg_trgm`. Provider modules (`llm_provider_claude.py`, `llm_provider_ollama.py`) are tested with their respective clients mocked. The `LLMProvider` interface lets tests inject a stub.
+- **DB integration:** `ingredients/tests/test_mapping_db.py` against `TEST_DB_URL`, applying all migrations including the new ones. Fixture taxonomy seeded in test setup; Phase 1 cascade exercised end-to-end against real `pg_trgm`. Phase 2 exercised end-to-end with a stub provider.
 - **Eval:** `ingredients/mapping/eval_set.py` driven by `--review`, runs against fixture taxonomy, asserts every case resolves to the expected node and source. CI gate.
 - **Cost guard:** the mapper logs LLM call counts and token usage per run; CLI summary surfaces them. No automated cost cap in v1, but the operator sees the bill before re-running with `--reset`.
 
