@@ -77,6 +77,48 @@ Do not add a node for:
 
 A soft grouping becomes a node **only when** a product surface (UI section, filter chip, curated list) is literally named after it. No speculative promotion. Adding the node later is cheap; removing one with edges and aliases attached is not.
 
+## Aliases vs nodes
+
+An alias is a free-text variant that resolves to a single existing node. Use aliases for:
+
+- **Capitalization or punctuation variants** — `'anejo'` / `'añejo'`, `'peychaud''s'` / `'peychauds'`.
+- **Language variants of one canonical name** — `'rosso vermouth'` / `'italian vermouth'` / `'sweet vermouth'`.
+- **Generic substance terms covered by the brand-as-substance carve-out** — `'aromatic bitters'` → `angostura_bitters` (the cocktail community treats Angostura as the substance, not a brand call).
+
+Do **not** use aliases for:
+
+- **Brand or product names.** "Regan's Orange Bitters", "Bittermens Xocolatl Mole Bitters", "Fee Brothers Whiskey Barrel-Aged" are real products. Each gets its own `role='expression'` node, parented under its `role='brand'` node and (for non-brand-as-substance items) under the appropriate type node. Aliasing a product name to a type erases brand provenance, collapses what the [E] dedup variant-key is meant to keep distinct, and pre-empts the [D] mapper's auto-create flow for the long tail.
+
+Hand-curate the well-known brand and expression nodes in the seed; the [D] mapper auto-creates the long tail when a recipe forces the issue.
+
+## Antichain shape
+
+`taxonomy_nodes.is_cluster_node` marks the cluster-identity cut for the [E] dedup pipeline. **The cut does not have to sit at uniform DAG depth.** Different branches mark different levels:
+
+- For substance types where many brands cluster together (orange bitters, chocolate bitters, bourbon, london_dry_gin), `is_cluster_node` lives on the **type** node. Brand and expression descendants roll up to it.
+- For brand-as-substance items (Angostura, Peychaud's, Campari, Aperol, Fernet-Branca, Chartreuse, Cynar, Suze, Bénédictine, Drambuie, Pimm's) — products the recipe community treats as a substance — `is_cluster_node` lives on the **expression**. The brand is its own `role='brand'` node above; there is no cluster-node type node intermediate.
+
+Required invariant: no `is_cluster_node = true` node has an `is_cluster_node = true` ancestor. Checked at seed-load time; the dedup CLI refuses to run if violated.
+
+Concrete example (the `bitters` family):
+
+```
+bitters (parent, role_default='bitters')
+├── angostura (role='brand')
+│   └── angostura_bitters (role='expression', is_cluster_node=true)   ← brand-as-substance
+├── peychauds (role='brand')
+│   └── peychauds_bitters (role='expression', is_cluster_node=true)   ← brand-as-substance
+├── orange_bitters (is_cluster_node=true)                              ← type-level cluster
+│   └── regans (role='brand')
+│       └── regans_orange_bitters (role='expression')
+├── chocolate_bitters (is_cluster_node=true)                           ← type-level cluster
+│   └── ⟨expressions parented multi-parent: [chocolate_bitters, brand]⟩
+└── creole_bitters (is_cluster_node=true)                              ← type-level cluster
+    └── ⟨expressions parented multi-parent: [creole_bitters, brand]⟩
+```
+
+For multi-product brands (Bittermens, Fee Brothers, The Bitter Truth), the brand sits directly under the family parent (`bitters`) and each expression has two parents — its brand and its type — so the rollup deterministically lands at the type's cluster_node.
+
 ## Taxonomy vs vectors
 
 | Task | Use |
