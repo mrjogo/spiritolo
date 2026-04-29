@@ -78,6 +78,32 @@ def _add_map_args(p: argparse.ArgumentParser) -> None:
     add_reset_args(p, stage="recipe_ingredients (mapping columns)")
 
 
+def _add_normalize_names_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--review", action="store_true",
+                   help="Run the dedup eval set; do not touch the database.")
+    p.add_argument("--site", default=None,
+                   help="Restrict to one source site.")
+    p.add_argument("--limit", type=int, default=None,
+                   help="Process at most N distinct names.")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Compute resolutions; do not write to the database.")
+    p.add_argument("--sample", type=int, default=None,
+                   help="Spot-check N random pending names; print, write nothing.")
+    add_reset_args(p, stage="recipes (normalization columns)")
+
+
+def _add_cluster_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--site", default=None,
+                   help="Restrict to one source site.")
+    p.add_argument("--limit", type=int, default=None,
+                   help="Process at most N recipes.")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Compute clusters; do not write to the database.")
+    p.add_argument("--review", action="store_true",
+                   help="Run the dedup eval set; do not touch the database.")
+    add_reset_args(p, stage="recipes (cluster_id, variant_key, dedup_version)")
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="parse_ingredients",
@@ -120,6 +146,49 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--decided-by", default=os.environ.get("USER", "operator"),
         help="Name recorded on each decision.",
     )
+
+    # normalize-names: Phase 1 by default; resolve-pending / list-pending sub-subcommands.
+    p_norm = sub.add_parser("normalize-names",
+                            help="Cocktail-name normalization. Phase 1 by default.")
+    _add_normalize_names_args(p_norm)
+    norm_sub = p_norm.add_subparsers(dest="normalize_cmd")
+
+    p_resolve_norm = norm_sub.add_parser(
+        "resolve-pending",
+        help="Phase 2 — drain the pending_llm queue using the chosen provider.",
+    )
+    p_resolve_norm.add_argument("--provider", choices=["claude", "ollama"], required=True,
+                                help="LLM provider to use.")
+    p_resolve_norm.add_argument("--limit", type=int, default=None,
+                                help="Process at most N distinct pending names.")
+    p_resolve_norm.add_argument("--yes", action="store_true",
+                                help="Skip the residual-count confirmation prompt.")
+
+    p_list_pending = norm_sub.add_parser(
+        "list-pending",
+        help="List names queued for Phase 2.",
+    )
+    p_list_pending.add_argument("--limit", type=int, default=50,
+                                help="List at most N names (default: 50).")
+
+    # cluster: cluster compute by default; audit sub-subcommand.
+    p_cluster = sub.add_parser("cluster",
+                               help="Compute clusters + variants from normalized recipes.")
+    _add_cluster_args(p_cluster)
+    cluster_sub = p_cluster.add_subparsers(dest="cluster_cmd")
+    cluster_sub.add_parser("audit",
+                           help="Print the five cluster-quality audit signals.")
+
+    # promote-substances.
+    p_promote = sub.add_parser("promote-substances",
+                               help="Walk the post-D substance-promotion allowlist interactively.")
+    p_promote.add_argument("--yes", action="store_true",
+                           help="Promote without per-row confirmation.")
+
+    # dedup-all: chained convenience.
+    p_all = sub.add_parser("dedup-all",
+                           help="Run normalize-names (phase 1) then cluster, in order.")
+    _add_cluster_args(p_all)
 
     return parser
 
@@ -422,6 +491,216 @@ def run_map(args: argparse.Namespace) -> int:
         db.close()
 
 
+def run_normalize_names(args: argparse.Namespace) -> int:
+    from ingredients.dedup.db import fetch_pending_canonical_names
+    from ingredients.dedup.version import NORMALIZER_VERSION
+
+    if getattr(args, "normalize_cmd", None) == "resolve-pending":
+        from ingredients.dedup.normalizer_llm import run_phase2
+        db = IngredientsDatabase()
+        try:
+            residuals = fetch_pending_canonical_names(db.conn, normalizer_version=NORMALIZER_VERSION)
+            if not residuals:
+                log.info("nothing pending; queue is empty")
+                return 0
+            log.info("Phase 2: %d distinct names pending. Top 20:", len(residuals))
+            for n in residuals[:20]:
+                log.info("  %s", n)
+            if len(residuals) > 20:
+                log.info("  ... and %d more", len(residuals) - 20)
+            if not args.yes:
+                sys.stderr.write(f"Proceed with --provider {args.provider}? [y/N]: ")
+                sys.stderr.flush()
+                answer = sys.stdin.readline().strip().lower()
+                if answer not in ("y", "yes"):
+                    log.info("aborted by operator")
+                    return 1
+            if args.provider == "claude":
+                from ingredients.mapping.llm_provider_claude import ClaudeProvider
+                provider = ClaudeProvider.from_env()
+            else:
+                from ingredients.mapping.llm_provider_ollama import OllamaProvider
+                provider = OllamaProvider.from_env()
+            limit = getattr(args, "limit", None)
+            counts = run_phase2(db.conn, provider=provider, limit=limit)
+            changes = {"all": Counter(counts)}
+            print_summary(f"normalize-names resolve-pending ({args.provider}, {NORMALIZER_VERSION})",
+                          changes, mode="applied")
+            return 0
+        finally:
+            db.close()
+
+    if getattr(args, "normalize_cmd", None) == "list-pending":
+        db = IngredientsDatabase()
+        try:
+            limit = getattr(args, "limit", 50)
+            residuals = fetch_pending_canonical_names(
+                db.conn, normalizer_version=NORMALIZER_VERSION, limit=limit,
+            )
+            for n in residuals:
+                print(n)
+            return 0
+        finally:
+            db.close()
+
+    # Default: Phase 1
+    if args.review:
+        log.info("normalize-names --review: eval mode (eval_set TBD in Task 10.1)")
+        return 0
+
+    db = IngredientsDatabase()
+    try:
+        if args.reset:
+            from ingredients.mapping.admin import count_mapped_rows
+            to_clear = count_mapped_rows(
+                db.conn,
+                site=args.site,
+                except_version=getattr(args, "except_version", None),
+                older_than=getattr(args, "older_than", None),
+            )
+            scope = describe_reset_scope(
+                site=args.site,
+                except_version=getattr(args, "except_version", None),
+                older_than=getattr(args, "older_than", None),
+            )
+            if not confirm_reset(
+                row_count=to_clear, scope_desc=scope,
+                assume_yes=getattr(args, "yes", False),
+            ):
+                log.error("reset aborted")
+                return 1
+            db.conn.execute("""
+                update recipes
+                   set canonical_name = null,
+                       canonical_name_source = null,
+                       normalizer_version = null,
+                       normalized_at = null
+                 where (%s::text is null or site = %s)
+            """, (args.site, args.site))
+            db.conn.commit()
+            log.info("cleared normalization columns")
+            return 0
+        from ingredients.dedup.normalizer import run_phase1
+        counts = run_phase1(db.conn, site=args.site, limit=args.limit)
+        changes = {"all": Counter(counts)}
+        mode = "dry-run" if args.dry_run else "applied"
+        print_summary(f"normalize-names (Phase 1, {NORMALIZER_VERSION})", changes, mode=mode)
+        return 0
+    finally:
+        db.close()
+
+
+def run_cluster(args: argparse.Namespace) -> int:
+    if getattr(args, "cluster_cmd", None) == "audit":
+        from ingredients.dedup.audit import run_all_audits
+        db = IngredientsDatabase()
+        try:
+            sigs = run_all_audits(db.conn)
+            for name, rows in sigs.items():
+                print(f"\n=== {name} ({len(rows)} rows) ===")
+                for r in rows[:50]:
+                    print(f"  {r}")
+            return 0
+        finally:
+            db.close()
+
+    if args.review:
+        log.info("cluster --review: eval mode (eval_set TBD in Task 10.1)")
+        return 0
+
+    db = IngredientsDatabase()
+    try:
+        if args.reset:
+            scope = describe_reset_scope(
+                site=args.site,
+                except_version=getattr(args, "except_version", None),
+                older_than=getattr(args, "older_than", None),
+            )
+            if not confirm_reset(
+                row_count=None, scope_desc=scope,
+                assume_yes=getattr(args, "yes", False),
+            ):
+                log.error("reset aborted")
+                return 1
+            db.conn.execute("""
+                delete from recipe_clusters
+                 where (%s::text is null or true)
+            """, (args.site,))
+            db.conn.execute("""
+                update recipes
+                   set cluster_id = null, variant_key = null, dedup_version = null
+                 where (%s::text is null or site = %s)
+            """, (args.site, args.site))
+            db.conn.execute("""
+                update recipe_ingredients
+                   set role = null, role_source = null
+                 where recipe_id in (
+                     select id from recipes
+                     where (%s::text is null or site = %s)
+                 )
+            """, (args.site, args.site))
+            db.conn.commit()
+            log.info("cleared cluster columns")
+            return 0
+        from ingredients.dedup.cluster import run_cluster_compute
+        counts = run_cluster_compute(db.conn, site=args.site, limit=args.limit)
+        changes = {"all": Counter(counts)}
+        mode = "dry-run" if args.dry_run else "applied"
+        print_summary("cluster", changes, mode=mode)
+        return 0
+    finally:
+        db.close()
+
+
+def run_promote_substances(args: argparse.Namespace) -> int:
+    from ingredients.dedup.promote_substances import (
+        candidate_promotions, promote_node,
+    )
+    db = IngredientsDatabase()
+    try:
+        cands = candidate_promotions(db.conn)
+        if not cands:
+            log.info("No candidates for promotion.")
+            return 0
+        for c in cands:
+            print(f"\nCandidate: {c['display_name']} (slug={c['slug']}, current_role={c['current_role']})")
+            print(f"  proposed: role=NULL, is_cluster_node=true, role_default={c['proposed_role_default']}")
+            if not args.yes:
+                ans = input("Promote? [y/N/q] ").strip().lower()
+                if ans == "q":
+                    break
+                if ans != "y":
+                    continue
+            promote_node(
+                db.conn, slug=c["slug"],
+                role_default=c["proposed_role_default"],
+                promoter=os.environ.get("USER", "operator"),
+            )
+            log.info("Promoted %s.", c["slug"])
+        return 0
+    finally:
+        db.close()
+
+
+def run_dedup_all(args: argparse.Namespace) -> int:
+    from ingredients.dedup.normalizer import run_phase1
+    from ingredients.dedup.cluster import run_cluster_compute
+    from ingredients.dedup.version import NORMALIZER_VERSION
+
+    db = IngredientsDatabase()
+    try:
+        n = run_phase1(db.conn, site=args.site, limit=args.limit)
+        changes_n = {"all": Counter(n)}
+        print_summary("normalize-names", changes_n, mode="applied")
+
+        c = run_cluster_compute(db.conn, site=args.site, limit=args.limit)
+        changes_c = {"all": Counter(c)}
+        print_summary("cluster", changes_c, mode="applied")
+        return 0
+    finally:
+        db.close()
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = build_arg_parser()
@@ -429,7 +708,11 @@ def main() -> int:
     # Exception: bare --help/-h should show the top-level help (with
     # subcommand list) rather than the parse subcommand help.
     argv = sys.argv[1:]
-    if argv and argv[0] not in ("parse", "map", "--help", "-h"):
+    _top_level_cmds = (
+        "parse", "map", "normalize-names", "cluster",
+        "promote-substances", "dedup-all", "--help", "-h",
+    )
+    if argv and argv[0] not in _top_level_cmds:
         argv = ["parse"] + argv
     elif not argv:
         argv = ["parse"] + argv
@@ -441,6 +724,14 @@ def main() -> int:
         return run_worker(args)
     if cmd == "map":
         return run_map(args)
+    if cmd == "normalize-names":
+        return run_normalize_names(args)
+    if cmd == "cluster":
+        return run_cluster(args)
+    if cmd == "promote-substances":
+        return run_promote_substances(args)
+    if cmd == "dedup-all":
+        return run_dedup_all(args)
     parser.error(f"unknown command {cmd!r}")
     return 2
 
