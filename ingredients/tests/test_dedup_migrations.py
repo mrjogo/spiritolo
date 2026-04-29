@@ -113,3 +113,43 @@ def test_recipe_ingredients_role_source_check_constraint_rejects_unknown(db_conn
             """,
             (recipe_id,),
         )
+
+
+def test_recipes_has_normalize_columns(db_conn):
+    cols = {
+        row[0]: row[1]
+        for row in db_conn.execute(
+            """
+            select column_name, data_type
+            from information_schema.columns
+            where table_name = 'recipes'
+              and column_name in (
+                'canonical_name', 'canonical_name_source',
+                'normalizer_version', 'normalized_at'
+              )
+            """
+        ).fetchall()
+    }
+    assert cols.get("canonical_name") == "text"
+    assert cols.get("canonical_name_source") == "text"
+    assert cols.get("normalizer_version") == "text"
+    assert cols.get("normalized_at") == "timestamp with time zone"
+
+
+def test_recipes_canonical_name_source_check_constraint_rejects_unknown(db_conn):
+    # Insert a real recipe, then attempt to update it with an out-of-vocabulary
+    # source. The CHECK fires only on a real row mutation; a `where false`
+    # update would silently no-op, so we need an actual row.
+    recipe_id = db_conn.execute(
+        """
+        insert into recipes (source_url, site, name, jsonld, fetched_at)
+        values ('http://test/canonical-source-check', 'test', 'X', '{}'::jsonb, now())
+        on conflict (source_url) do update set name = excluded.name
+        returning id
+        """
+    ).fetchone()[0]
+    with pytest.raises(psycopg.errors.CheckViolation):
+        db_conn.execute(
+            "update recipes set canonical_name_source = 'bogus' where id = %s",
+            (recipe_id,),
+        )
