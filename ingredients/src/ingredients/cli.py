@@ -332,8 +332,28 @@ def run_map(args: argparse.Namespace) -> int:
         return run_review_proposals(args)
     from ingredients.mapping.mapper import MAPPER_VERSION, run_phase1
     if args.review:
-        log.error("--review for map not implemented yet (Task 21)")
-        return 2
+        # Eval runs against the fixture taxonomy in eval_fixture.py, so it
+        # needs the test DB. Refuse if TEST_DB_URL isn't set.
+        test_url = os.environ.get("TEST_DB_URL")
+        if not test_url:
+            log.error("--review needs TEST_DB_URL set; see CLAUDE.md")
+            return 2
+        from ingredients.mapping.eval_set import run_eval
+        from ingredients.mapping.eval_fixture import seed
+        import psycopg as _psycopg
+        with _psycopg.connect(test_url) as conn:
+            seed(conn)
+            out = run_eval(conn)
+        print("--- Mapper eval (fixture taxonomy) ---")
+        print(f"  passed: {out['passed']}")
+        print(f"  failed: {out['failed']}")
+        if out["failed"]:
+            print()
+            for c in out["cases"]:
+                if not c["ok"]:
+                    print(f"  {c['raw']!r}\n    -> source={c['source']!r} slug={c['slug']!r}")
+            return 1
+        return 0
     if args.sample is not None:
         from ingredients.mapping.admin import sample_pending
         from ingredients.mapping.alias_layer import resolve_alias
