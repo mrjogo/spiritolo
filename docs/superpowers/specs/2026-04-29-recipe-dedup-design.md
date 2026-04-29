@@ -67,13 +67,17 @@ A check or app-level invariant enforces antichain integrity: no `is_cluster_node
 
 The full antichain content is enumerated in the taxonomy seed migration, not here. This spec lists the *shape* of what must be marked.
 
+**Antichain v1 success criterion.** The seed expansion is "done" when ≥95% of `recipe_ingredients` rows with `role IN ('base_spirit', 'modifier', 'bitters')` resolve (after rollup) to a node where `is_cluster_node = true`. Long-tail substances that don't meet the bar surface as audit-flagged underspecified clusters and are added incrementally. This bound prevents the seed work from expanding open-endedly and gives a measurable definition of "ready to ship E."
+
 ### Recipes referencing nodes above the cut: audit, do not block
 
 Some recipes will resolve only to a node that has antichain descendants but is not itself one — e.g., a recipe specifying "amaro" generically when the antichain sits at individual amari. The roll-up function returns the node itself (the only legal answer) and the cluster key proceeds. The audit pass flags the row: `underspecified_ingredient = true`. Reviewers either upgrade the resolution by hand, accept the underspecified cluster, or flag the source recipe for re-extraction. No block in the pipeline.
 
-### Two-level fold: `recipe_cards` inside `recipe_clusters`
+### Two-level fold: cards as a derived view inside `recipe_clusters`
 
 A **cluster** is the same drink (joint key match). A **card** is the same recipe within a cluster — same cluster key, same amounts, same brand call-outs. Multiple sources publishing the identical Negroni at 1oz/1oz/1oz collapse to one card with `source_count = N`. The same Negroni at 1.5oz/1oz/1oz is a separate card in the same cluster.
+
+Cards are **not stored as a table** in v1. The cluster compute writes a `card_key` column on each `recipes` row; cards are the equivalence classes of recipes sharing `(cluster_id, card_key)`. A view `recipe_cards` aggregates these for the read path. Materializing as a table is a follow-up if query patterns prove that the aggregation is hot.
 
 Card key:
 
@@ -122,7 +126,7 @@ Role classification is deterministic in code: a function over `(taxonomy_node_id
    - Position 1, amount ≥ 1.5 oz, no `role_default` set → `base_spirit` (heuristic for unclassified substances).
 3. **Default `other`.** Everything else gets `role = 'other'` and `role_source = 'default'`. These rows surface in the audit summary as "needs taxonomy work" rather than blocking the pipeline.
 
-No LLM in the role classifier. Versioned `ROLE_VERSION = "v1"`.
+No LLM in the role classifier. **Role classification runs as a sub-step of cluster compute**, not as an independent stage — the work is small (a pure function with a tiny taxonomy lookup) and dedup is its only consumer in v1. The `recipe_ingredients.role` column is still written and remains available for downstream features (search filters, similarity weighting), but it shares the `DEDUP_VERSION` lifecycle. If a future feature needs to invalidate roles independently of clusters, role-tag can be split into its own stage at that point — the data shape doesn't change, only the orchestration.
 
 ### Garnish handling: `is_defining_garnish` allowlist
 
@@ -150,7 +154,9 @@ Three layers, **phased**:
 | 1 | `lexical` | `recipe_name_aliases.canonical_name` | `pg_trgm` similarity. Accept only when `top1.similarity ≥ 0.92 AND top1.similarity > 1.5 × top2.similarity` |
 | 2 | `llm` | LLM-proposed canonical | provider TBD, see *LLM provider deferral* below |
 
-Phase 1 runs as part of every dedup invocation — cheap, idempotent, no external dependencies. Strings that don't resolve get `source = 'pending_llm'` and stop. Phase 2 is a separate subcommand operating on the `pending_llm` queue, run only when an operator chooses to pay the LLM cost (or not — a small pending list might be hand-resolved as aliases).
+Phase 1 runs as part of every dedup invocation — cheap, idempotent, no external dependencies. Strings that don't resolve get `source = 'pending_llm'` and stop. Phase 2 is a separate subcommand operating on the `pending_llm` queue.
+
+**Phase 2 ships as part of v1, not as an opt-in extension.** Editorial titles ("Best Old Fashioned Recipe", "How to Make a Perfect Manhattan") are common enough that without phase 2 the dedup feature visibly under-clusters. Cost is bounded: a worst-case run against ~10K residuals through Claude Haiku at ~$0.001/call is ~$10; through Ollama qwen3:14b it is free. The phasing exists for cost visibility and for the option to hand-curate small queues as aliases — not as a deferral mechanism for shipping v1.
 
 `recipe_name_resolutions` is the cache: one row per distinct raw recipe name, mapped to a canonical name and a source. The "canonical name" pool builds bottom-up: hand-seed the top ~100–200 well-known cocktails (Negroni, Old Fashioned, Manhattan, etc.), let LLM and alias additions grow the list as new drinks appear in the data.
 
@@ -177,15 +183,14 @@ Five queries, surfaced via a CLI subcommand. None require additional tables.
 - **High in-stack ingredient diversity** — clusters where the antichain set is consistent but specific brands or sub-spirits vary unusually widely. Surfaces the "is a sub-spirit definitional here?" cases (Martinez with mixed gin sub-styles).
 - **Singleton clusters with editorial-looking names** — single-recipe clusters where the raw name contains "best", "perfect", "ultimate", suggesting a normalization miss.
 
-### Versioning: separate constants per stage
+**Owner / workflow.** The whole dedup pipeline is operator-invoked (CLI), and so is audit. After each `cluster` run, the operator runs `cluster audit` and triages the output by hand — adding aliases, marking definitional garnishes, or filing follow-ups. No automated remediation in v1. A web review surface is deferred (see *Open / deferred*).
 
-Each stage has its own version constant:
+### Versioning: two constants
 
 - `NORMALIZER_VERSION = "v1"` — name normalization (alias + lexical + LLM layers, phase 1 + phase 2)
-- `ROLE_VERSION = "v1"` — role classifier
-- `DEDUP_VERSION = "v1"` — cluster + card compute (depends on the prior two)
+- `DEDUP_VERSION = "v1"` — cluster compute (which includes role classification and card-key derivation)
 
-Each is independently re-runnable with `--reset --except-version <prior>`. Bumping `DEDUP_VERSION` re-derives clusters and cards but doesn't re-resolve names or roles. Bumping `NORMALIZER_VERSION` invalidates clusters too (changed names → changed cluster keys); the operator must re-run `cluster --reset --except-version v1` afterward.
+Each is independently re-runnable with `--reset --except-version <prior>`. Bumping `DEDUP_VERSION` re-derives roles, cluster keys, and card keys but doesn't re-resolve names. Bumping `NORMALIZER_VERSION` invalidates clusters too (changed names → changed cluster keys); the operator must re-run `cluster --reset --except-version v1` afterward.
 
 ### Hard prerequisites
 
@@ -195,6 +200,21 @@ E hard-blocks on:
 - **Taxonomy seed expansion** — the seed in [supabase/seeds/taxonomy_nodes.sql](../../../supabase/seeds/taxonomy_nodes.sql) must include the antichain content listed under *Antichain* above (gin sub-styles, individual amari, individual bitters, key liqueurs, fortified wines). The migration that adds `is_cluster_node`, `role_default`, and `is_defining_garnish` is part of this E spec; the *content* edits to the seed are an E deliverable, but coordinated with D's parallel taxonomy expansion to avoid conflict.
 
 E does **not** modify D's mapper code. E consumes D's output. The taxonomy seed is shared territory; E's seed edits go in alongside D's, on a coordinated branch.
+
+### Post-D auto-create cleanup (substance promotion)
+
+D auto-creates nodes for unmatched ingredient strings. By the time E begins, D has likely created `role='brand'` or `role='expression'` nodes for some commercially-branded-but-definitional substances (Campari, Aperol, Angostura, Peychaud's, Fernet-Branca, Chartreuse, etc.). E's antichain modeling expects these as `role=NULL` substance nodes, not brand/expression nodes — but pre-seeding before D would require coordinating with D's already-in-flight work, which is too entangled.
+
+Instead, E ships a one-shot **substance-promotion procedure** that runs after D and before E's first cluster compute:
+
+1. **Identify candidates.** Query `taxonomy_provenance` for `source = 'llm-mapper'` rows whose `taxonomy_nodes.role IN ('brand', 'expression')` and whose display_name matches a hand-curated allowlist of "definitional substance" names (Campari, Aperol, Fernet-Branca, Angostura, Peychaud's, Chartreuse, Cynar, Suze, Bénédictine, Drambuie, Pimm's, etc.).
+2. **Promote each.** Set `role = NULL`, `is_cluster_node = true`. Re-parent if needed (e.g., point `campari` directly under `amaro`). Update aliases.
+3. **Re-point recipe_ingredients.** Any rows whose `taxonomy_node_id` points at a now-promoted node remain valid; no row updates needed (the node id didn't change, just its role and antichain flag).
+4. **Audit log.** Each promotion writes a row to a `taxonomy_provenance`-style log so the change is reviewable.
+
+A CLI subcommand (`promote-substances`) walks the allowlist interactively, surfacing each candidate for confirmation before promoting. The allowlist lives in code so it's reviewable in PR. The procedure is one-shot for v1; new substances added later go through the same CLI.
+
+This is option (c) from the design discussion — chosen because pre-seeding before D would entangle the two specs, and post-process cleanup keeps D's spec untouched at the cost of a small E-side migration step.
 
 ## Schema changes
 
@@ -210,15 +230,14 @@ alter table taxonomy_nodes
 ```
 
 ```sql
--- 2. Role on recipe_ingredients.
+-- 2. Role on recipe_ingredients (written by cluster compute; shares DEDUP_VERSION).
 alter table recipe_ingredients
   add column role         text check (role in (
                             'base_spirit', 'modifier', 'citrus',
                             'sweetener', 'bitters', 'dilution',
                             'garnish', 'wash', 'other')),
   add column role_source  text check (role_source in
-                            ('default', 'rule', 'manual')),
-  add column role_version text;
+                            ('default', 'rule', 'manual'));
 
 create index recipe_ingredients_role_idx
   on recipe_ingredients (role) where role is not null;
@@ -271,40 +290,43 @@ create index recipe_clusters_canonical_idx on recipe_clusters (canonical_name);
 ```
 
 ```sql
--- 6. Card-level fold (identical-recipe collapse inside a cluster).
-create table recipe_cards (
-  id                       bigserial primary key,
-  cluster_id               bigint not null references recipe_clusters(id) on delete cascade,
-  card_key                 text unique not null,
-  representative_recipe_id bigint references recipes(id),
-  recipe_count             int not null default 0,
-  source_count             int not null default 0,
-  dedup_version            text not null
-);
-
-create index recipe_cards_cluster_idx on recipe_cards (cluster_id);
+-- 6. Card-level fold as a view; equivalence classes of recipes sharing
+--    (cluster_id, card_key). Materializing as a table is a follow-up if
+--    query patterns prove the aggregation is hot.
+create view recipe_cards as
+  select
+    cluster_id,
+    card_key,
+    min(id)                       as representative_recipe_id,
+    count(*)                      as recipe_count,
+    count(distinct site)          as source_count
+  from recipes
+  where cluster_id is not null and card_key is not null
+  group by cluster_id, card_key;
 ```
 
 ```sql
--- 7. Recipe → cluster/card assignment.
+-- 7. Recipe → cluster assignment + card_key (cards are derived).
 alter table recipes
   add column cluster_id    bigint references recipe_clusters(id),
-  add column card_id       bigint references recipe_cards(id),
+  add column card_key      text,
   add column dedup_version text;
 
-create index recipes_cluster_idx on recipes (cluster_id) where cluster_id is not null;
-create index recipes_card_idx    on recipes (card_id)    where card_id    is not null;
+create index recipes_cluster_idx
+  on recipes (cluster_id) where cluster_id is not null;
+create index recipes_cluster_card_idx
+  on recipes (cluster_id, card_key) where cluster_id is not null;
 ```
 
 ```sql
 -- 8. Public projection.
 create or replace view recipes_public as
   select id, source_url, site, name, author, image_url, jsonld,
-         cluster_id, card_id
+         cluster_id, card_key
   from recipes;
 ```
 
-The web UI gains the ability to group by `cluster_id` / `card_id` without further schema changes. RLS on `recipes` already blocks anon reads of the base table; the view is the public surface.
+The web UI gains the ability to group by `cluster_id` and `card_key` without further schema changes (or to query `recipe_cards` for the aggregated view). RLS on `recipes` already blocks anon reads of the base table; the view is the public surface.
 
 ## Code structure
 
@@ -327,14 +349,15 @@ ingredients/src/ingredients/
     ├── __init__.py
     ├── normalizer.py                (NORMALIZER_VERSION; phase-1 alias + lexical)
     ├── normalizer_llm.py            (phase-2 LLM provider abstraction)
-    ├── role_classifier.py           (ROLE_VERSION)
-    ├── cluster.py                   (DEDUP_VERSION; key hashing, fold compute)
+    ├── role_classifier.py           (helper invoked from cluster.py)
+    ├── cluster.py                   (DEDUP_VERSION; role tagging + key hashing + cluster compute)
+    ├── promote_substances.py       (one-shot post-D substance-promotion CLI)
     ├── audit.py                     (the five audit queries)
     ├── prompt.py                    (LLM prompt for name normalization)
     └── eval_set.py                  (dedup eval cases — separate from parser/mapper)
 ```
 
-`normalizer.py` takes a list of distinct `recipes.name` strings, runs the phase-1 cascade, and writes `recipe_name_resolutions`. `normalizer_llm.py` consumes the `pending_llm` rows. `role_classifier.py` is a pure function over `(taxonomy_node_id, amount, unit, position)` plus a small DB lookup for `taxonomy_nodes.role_default`. `cluster.py` reads the joined view of `recipes` × `recipe_ingredients` × `taxonomy_nodes`, computes keys, populates `recipe_clusters` / `recipe_cards`, and writes assignments back to `recipes`.
+`normalizer.py` takes a list of distinct `recipes.name` strings, runs the phase-1 cascade, and writes `recipe_name_resolutions`. `normalizer_llm.py` consumes the `pending_llm` rows. `role_classifier.py` is a pure function over `(taxonomy_node_id, amount, unit, position)` plus a small DB lookup for `taxonomy_nodes.role_default`; it is imported by `cluster.py` rather than orchestrated as its own stage. `cluster.py` reads the joined view of `recipes` × `recipe_ingredients` × `taxonomy_nodes`, runs the role classifier, computes cluster and card keys, populates `recipe_clusters`, and writes `cluster_id` and `card_key` back to `recipes`. `promote_substances.py` is the post-D auto-create cleanup procedure.
 
 ## CLI surface
 
@@ -355,16 +378,17 @@ cd ingredients && uv run python -m ingredients.cli normalize-names llm-pending -
 # Eval set, no DB writes.
 cd ingredients && uv run python -m ingredients.cli normalize-names --review
 
-# Role-tag every recipe_ingredients row with role IS NULL or stale role_version.
-cd ingredients && uv run python -m ingredients.cli role-tag
+# One-shot: walk auto-created brand/expression nodes that should be substances and promote them.
+cd ingredients && uv run python -m ingredients.cli promote-substances
 
-# Cluster compute. Reads name resolutions + roles, writes recipe_clusters/cards.
+# Cluster compute. Tags roles, computes cluster/card keys, writes recipe_clusters,
+# stamps cluster_id and card_key on recipes.
 cd ingredients && uv run python -m ingredients.cli cluster
 
 # Audit. Prints the five signal queries.
 cd ingredients && uv run python -m ingredients.cli cluster audit
 
-# Run all three stages in order.
+# Run normalize + cluster in order.
 cd ingredients && uv run python -m ingredients.cli dedup-all
 
 # Standard flags on each subcommand:
@@ -375,8 +399,7 @@ cd ingredients && uv run python -m ingredients.cli dedup-all
 `--reset` semantics:
 
 - `normalize-names --reset` clears `recipe_name_resolutions` rows in scope.
-- `role-tag --reset` nulls `recipe_ingredients.role*` columns in scope.
-- `cluster --reset` clears `recipe_clusters` and `recipe_cards` and nulls `recipes.cluster_id` / `card_id` in scope. Does not touch upstream tables.
+- `cluster --reset` clears `recipe_clusters`, nulls `recipes.cluster_id` / `card_key` / `dedup_version`, and nulls `recipe_ingredients.role*` columns in scope. (Roles are part of the cluster compute output and reset together.) Does not touch upstream tables.
 
 ## Eval set & review workflow
 
