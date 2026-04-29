@@ -13,14 +13,19 @@ The product shape this spec serves: each cluster is a **stack** of cards. The ca
 ### Identity model: joint key on `(canonical_name, role-tagged ingredient set)`
 
 ```
-EXCLUDED_ROLES = {'dilution'}
+# Allow-list, not deny-list. Adding a new role value elsewhere in the
+# codebase (for search filters, sensory tags, etc.) is safe by default —
+# the new role does NOT enter the cluster key until someone explicitly
+# adds it here and bumps DEDUP_VERSION.
+INCLUDED_ROLES = {
+    'base_spirit', 'modifier', 'citrus', 'sweetener',
+    'bitters', 'wash', 'other',
+}
 
 def in_cluster_key(ing):
-    if ing.role in EXCLUDED_ROLES:
-        return False
     if ing.role == 'garnish':
         return ing.taxonomy_node.is_defining_garnish
-    return True
+    return ing.role in INCLUDED_ROLES
 
 cluster_key = sha256(canonical_json({
     'canonical_name': canonical_name,
@@ -115,6 +120,10 @@ The UI renders the cluster's representative card on top, with the rest as expand
 | `dilution` | **no** | ice, soda water, hot water |
 | `garnish` | configurable | twist (no), cocktail onion (yes) |
 | `other` | yes | unclassifiable; flagged for review |
+
+**Role is a closed vocabulary tied to dedup.** Adding new values requires (a) a migration altering the CHECK constraint, (b) explicit consideration of whether the new role should enter the cluster key (see `INCLUDED_ROLES` above — additions there are *opt-in*, so an unrelated team adding a role for a search-filter feature won't accidentally shift cluster identities), and (c) a `DEDUP_VERSION` bump if the cluster-key membership changes.
+
+Substance *attributes* that aren't about how the ingredient is used in the drink (ABV, region, color, sensory profile, organic, allergen) belong on `taxonomy_nodes` (as columns or a separate tag table), not as `role` values. Mixing the two leads to category errors — a node is "Campari" with attributes "high-abv, bitter, Italian" and a usage role of "modifier"; conflating the latter two muddles both.
 
 Role classification is deterministic in code: a function over `(taxonomy_node_id, amount, unit, position)`. Three layers, in order:
 
