@@ -153,3 +153,33 @@ def test_recipes_canonical_name_source_check_constraint_rejects_unknown(db_conn)
             "update recipes set canonical_name_source = 'bogus' where id = %s",
             (recipe_id,),
         )
+
+
+def test_cocktail_aliases_table_exists(db_conn):
+    cols = {
+        row[0]: row[1]
+        for row in db_conn.execute(
+            """
+            select column_name, data_type
+            from information_schema.columns
+            where table_name = 'cocktail_aliases'
+            """
+        ).fetchall()
+    }
+    assert cols.get("alias") == "text"
+    assert cols.get("canonical_name") == "text"
+    assert cols.get("source") == "text"
+    assert cols.get("created_at") == "timestamp with time zone"
+
+
+def test_cocktail_aliases_pkey_is_alias_canonical(db_conn):
+    rows = db_conn.execute(
+        """
+        select a.attname
+        from pg_index i
+        join pg_attribute a on a.attrelid = i.indrelid and a.attnum = any(i.indkey)
+        where i.indrelid = 'cocktail_aliases'::regclass and i.indisprimary
+        order by a.attnum
+        """
+    ).fetchall()
+    assert [r[0] for r in rows] == ["alias", "canonical_name"]
