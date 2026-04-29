@@ -62,6 +62,7 @@ Stage CLIs (`fetch`, `classify`, `validate`, `extract`) share `--site` / `--limi
 | HTML validation | `VALIDATOR_VERSION` | [validation.py](scraper/src/validation.py) |
 | Drink scoring | `SCORER_VERSION` | [classify_drink.py](scraper/src/classify_drink.py) |
 | JSON-LD extraction | `EXTRACTOR_VERSION` | [extract.py](scraper/src/extract.py) |
+| Ingredient → taxonomy mapping | `MAPPER_VERSION` | [mapping/mapper.py](ingredients/src/ingredients/mapping/mapper.py) |
 
 ## Pipeline stages
 
@@ -103,6 +104,47 @@ cd ingredients && uv run python -m ingredients.cli --reset --except-version v1 -
 The eval set is `ingredients/src/ingredients/eval_set.py`. Add a new should-parse-as-X case whenever you teach the parser a new pattern; add a should-abstain case whenever you find an over-match.
 
 **Common, scraper, ingredients packages.** `common/` holds shared utilities (`supabase_client`, `progress`, `summary`, `cli_common`); both `scraper/` (Zone 1) and `ingredients/` (Zone 2) depend on it via the root-level uv workspace.
+
+## Ingredient → Taxonomy Mapper
+
+The mapper resolves `recipe_ingredients.name` strings to `taxonomy_nodes.id` references in two phases:
+
+- **Phase 1** (alias + lexical) runs eagerly with no external deps. Misses are marked `mapper_source='pending_llm'`.
+- **Phase 2** (LLM) is operator-triggered. Provider chosen at invocation: `--provider claude` (Anthropic, modest cost) or `--provider ollama` (local qwen3:14b, free). The CLI prints residual count + top-N before any external call.
+
+**Versioning:** `MAPPER_VERSION` in [mapping/mapper.py](ingredients/src/ingredients/mapping/mapper.py). Stored on every mapped row.
+
+**Typical usage (from repo root):**
+
+```bash
+# Phase 1 — alias + lexical against unresolved rows.
+cd ingredients && uv run python -m ingredients.cli map
+
+# Scoped, with a row cap.
+cd ingredients && uv run python -m ingredients.cli map --site punch --limit 500
+
+# Spot-check pending names without writing.
+cd ingredients && uv run python -m ingredients.cli map --sample 25
+
+# Run the eval set against the fixture taxonomy (needs TEST_DB_URL).
+cd ingredients && uv run python -m ingredients.cli map --review
+
+# Phase 2 — drain the pending_llm queue with a provider. Confirms before any cost.
+cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider claude
+cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider ollama --limit 100
+
+# Walk the form-proposal review queue.
+cd ingredients && uv run python -m ingredients.cli map review-proposals
+
+# After bumping MAPPER_VERSION, re-map everything left at the old version.
+cd ingredients && uv run python -m ingredients.cli map --reset --except-version v1 --yes
+```
+
+Brand/expression nodes auto-create silently when the LLM proposes one with an existing parent; provenance is recorded in `taxonomy_provenance`. Form nodes (lemon_zest, lime_oil, ...) queue in `taxonomy_proposals` for human review via `map review-proposals`. Auto-created nodes default to `is_cluster_node = false` (the column added by `[E]`); the antichain stays curator-controlled.
+
+The eval set is `ingredients/src/ingredients/mapping/eval_set.py`, run against the fixture taxonomy in `ingredients/src/ingredients/mapping/eval_fixture.py` so eval results don't drift with seed changes.
+
+`ANTHROPIC_API_KEY` is required for `--provider claude`; `OLLAMA_BASE_URL` defaults to `http://localhost:11434` for `--provider ollama`.
 
 ## Web UI
 
