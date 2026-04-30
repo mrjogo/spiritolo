@@ -224,9 +224,9 @@ insert into taxonomy_nodes (slug, display_name, role, is_cluster_node, role_defa
   ('amaro_meletti',    'Amaro Meletti',              'expression', true, 'modifier'),
   ('amaro_lucano',     'Amaro Lucano',               'expression', true, 'modifier'),
   ('amaro_ramazzotti', 'Amaro Ramazzotti',           'expression', true, 'modifier'),
-  ('amaro_ciociaro',   'Amaro CioCiaro',             'expression', true, 'modifier'),
-  ('braulio',          'Braulio',                    'expression', true, 'modifier'),
-  ('cardamaro',        'Cardamaro',                  'expression', true, 'modifier');
+  ('amaro_ciociaro',   'Amaro Ciociaro',             'expression', true, 'modifier'),
+  ('amaro_braulio',    'Amaro Braulio',              'expression', true, 'modifier'),
+  ('cardamaro',        'Cardamaro Vino Amaro',       'expression', true, 'modifier');
 
 insert into taxonomy_edges (parent_id, child_id)
 select p.id, c.id
@@ -242,7 +242,7 @@ from (values
   ('amaro', 'amaro_lucano'),
   ('amaro', 'amaro_ramazzotti'),
   ('amaro', 'amaro_ciociaro'),
-  ('amaro', 'braulio'),
+  ('amaro', 'amaro_braulio'),
   ('amaro', 'cardamaro')
 ) as e(parent_slug, child_slug)
 join taxonomy_nodes p on p.slug = e.parent_slug
@@ -264,6 +264,10 @@ from (values
   ('ramazzotti',                 'amaro_ramazzotti'),
   ('ciociaro',                   'amaro_ciociaro'),
   ('cio ciaro',                  'amaro_ciociaro'),
-  ('amaro cio ciaro',            'amaro_ciociaro')
+  ('amaro cio ciaro',            'amaro_ciociaro'),
+  ('amaro ciociaro',             'amaro_ciociaro'),
+  ('paolucci amaro ciociaro',    'amaro_ciociaro'),
+  ('braulio',                    'amaro_braulio'),
+  ('cardamaro',                  'cardamaro')
 ) as a(alias, slug)
 join taxonomy_nodes n on n.slug = a.slug;
