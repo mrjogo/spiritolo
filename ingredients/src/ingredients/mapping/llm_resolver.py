@@ -142,9 +142,16 @@ def run_phase2(
     limit: int | None = None,
 ) -> dict[str, int]:
     """Drain the pending_llm queue. Returns Counter-shaped summary keyed by action."""
+    from spiritolo_common.progress import make_progress
     counts: Counter[str] = Counter()
     names = fetch_pending_llm_names(conn, mapper_version=MAPPER_VERSION, limit=limit)
-    for normalized in names:
+    total = len(names)
+    if total == 0:
+        log.info("nothing pending; queue is empty")
+        return dict(counts)
+    log.info("Phase 2: resolving %d distinct names via %s", total, provider.model_id)
+    progress = make_progress(total=total)
+    for idx, normalized in enumerate(names, start=1):
         cands = _candidates_with_parents(conn, normalized)
         user_prompt = build_user_prompt(
             normalized_name=normalized, parser_unit=None, site=site, candidates=cands,
@@ -157,6 +164,7 @@ def run_phase2(
         if action_obj is None:
             # All retries exhausted; leave row at pending_llm and move on.
             counts["error"] += 1
+            progress(idx)
             continue
         action = action_obj["action"]
 
@@ -172,6 +180,7 @@ def run_phase2(
             if parent_id is None:
                 write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
                 counts["abstain"] += 1
+                progress(idx)
                 continue
             # _create_brand_node + write_resolution must be atomic: the node,
             # edge, provenance, and recipe_ingredients update land in ONE
@@ -212,4 +221,5 @@ def run_phase2(
         elif action == "abstain":
             write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
             counts["abstain"] += 1
+        progress(idx)
     return dict(counts)

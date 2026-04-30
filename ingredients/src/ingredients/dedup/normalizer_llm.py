@@ -40,11 +40,20 @@ def run_phase2(
     provider: LLMProvider,
     limit: int | None = None,
 ) -> dict[str, int]:
+    from spiritolo_common.progress import make_progress
+
     counts: Counter[str] = Counter()
     raw_names = fetch_pending_canonical_names(
         conn, normalizer_version=NORMALIZER_VERSION, limit=limit,
     )
-    for raw in raw_names:
+    total = len(raw_names)
+    if total == 0:
+        log.info("nothing pending; queue is empty")
+        return dict(counts)
+    log.info("Phase 2: resolving %d distinct names via %s", total, provider.model_id)
+    progress = make_progress(total=total)
+
+    for idx, raw in enumerate(raw_names, start=1):
         normalized = normalize_cocktail_name(raw)
         cands = lexical_candidates(conn, normalized, limit=20)
         user_prompt = build_user_prompt(
@@ -58,6 +67,7 @@ def run_phase2(
         )
         if action_obj is None:
             counts["error"] += 1
+            progress(idx)
             continue
         action = action_obj["action"]
 
@@ -85,4 +95,5 @@ def run_phase2(
                 conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION,
             )
             counts["abstain"] += 1
+        progress(idx)
     return dict(counts)

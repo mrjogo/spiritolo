@@ -7,9 +7,11 @@ the operator; nothing in this module makes external calls.
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 
 import psycopg
+from spiritolo_common.progress import make_progress
 
 from .alias_layer import resolve_alias
 from .db import (
@@ -20,6 +22,8 @@ from .normalize import normalize_name
 from .types import Resolved
 
 MAPPER_VERSION = "v1"
+
+log = logging.getLogger("mapper")
 
 
 def run_phase1(
@@ -35,7 +39,14 @@ def run_phase1(
     names = fetch_unique_pending_names(
         conn, mapper_version=MAPPER_VERSION, site=site, limit=limit,
     )
-    for raw in names:
+    total = len(names)
+    if total == 0:
+        log.info("nothing to map")
+        return dict(counts)
+    log.info("mapping %d distinct names (mapper_version=%s)", total, MAPPER_VERSION)
+
+    progress = make_progress(total=total)
+    for idx, raw in enumerate(names, start=1):
         normalized = normalize_name(raw)
         result = resolve_alias(conn, normalized)
         if isinstance(result, Resolved):
@@ -46,6 +57,7 @@ def run_phase1(
                     taxonomy_node_id=result.taxonomy_node_id,
                     source="alias", mapper_version=MAPPER_VERSION,
                 )
+            progress(idx)
             continue
 
         result = resolve_lexical(conn, normalized)
@@ -57,6 +69,7 @@ def run_phase1(
                     taxonomy_node_id=result.taxonomy_node_id,
                     source="lexical", mapper_version=MAPPER_VERSION,
                 )
+            progress(idx)
             continue
 
         counts["pending_llm"] += 1
@@ -64,4 +77,5 @@ def run_phase1(
             write_pending(
                 conn, normalized_name=normalized, mapper_version=MAPPER_VERSION,
             )
+        progress(idx)
     return dict(counts)

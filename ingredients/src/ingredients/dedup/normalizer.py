@@ -11,6 +11,7 @@ import logging
 from collections import Counter
 
 import psycopg
+from spiritolo_common.progress import make_progress
 
 from .alias_layer import resolve_alias
 from .db import (
@@ -38,12 +39,23 @@ def run_phase1(
     raw_names = fetch_unresolved_recipe_names(
         conn, normalizer_version=NORMALIZER_VERSION, site=site, limit=limit,
     )
-    for raw in raw_names:
+    total = len(raw_names)
+    if total == 0:
+        log.info("nothing to normalize")
+        return dict(counts)
+    log.info(
+        "normalizing %d distinct names (normalizer_version=%s)",
+        total, NORMALIZER_VERSION,
+    )
+
+    progress = make_progress(total=total)
+    for idx, raw in enumerate(raw_names, start=1):
         normalized = normalize_cocktail_name(raw)
         if not normalized:
             if not dry_run:
                 write_pending_normalize(conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION)
             counts["pending_llm"] += 1
+            progress(idx)
             continue
 
         result = resolve_alias(conn, normalized)
@@ -55,6 +67,7 @@ def run_phase1(
                     normalizer_version=NORMALIZER_VERSION,
                 )
             counts["alias"] += 1
+            progress(idx)
             continue
 
         result = resolve_lexical(conn, normalized)
@@ -66,11 +79,13 @@ def run_phase1(
                     normalizer_version=NORMALIZER_VERSION,
                 )
             counts["lexical"] += 1
+            progress(idx)
             continue
 
         # Pending → queue for Phase 2.
         if not dry_run:
             write_pending_normalize(conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION)
         counts["pending_llm"] += 1
+        progress(idx)
 
     return dict(counts)

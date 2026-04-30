@@ -175,13 +175,21 @@ def run_cluster_compute(
     + recipes.cluster_id + recipes.variant_key + recipe_ingredients.role.
     When dry_run=True, all DB writes and commit are skipped.
     """
+    from spiritolo_common.progress import make_progress
+
     counts: Counter[str] = Counter()
     recipes = _fetch_recipes_to_cluster(
         conn, dedup_version=DEDUP_VERSION, site=site, limit=limit,
     )
+    total = len(recipes)
+    if total == 0:
+        log.info("nothing to cluster")
+        return dict(counts)
+    log.info("clustering %d recipes (dedup_version=%s)", total, DEDUP_VERSION)
+    progress = make_progress(total=total)
     cluster_lookup: dict[str, int] = {}
 
-    for recipe_id, canonical_name, _raw_name in recipes:
+    for idx, (recipe_id, canonical_name, _raw_name) in enumerate(recipes, start=1):
         ingredients = _fetch_recipe_ingredients(conn, recipe_id)
 
         for ing in ingredients:
@@ -217,6 +225,7 @@ def run_cluster_compute(
         in_key_ings = [ing for ing in ingredients if in_cluster_key(ing)]
         if not in_key_ings:
             counts["skipped_no_ingredients"] += 1
+            progress(idx)
             continue
 
         cluster_key = compute_cluster_key(canonical_name, ingredients)
@@ -259,6 +268,7 @@ def run_cluster_compute(
                 (cluster_id, variant_key, DEDUP_VERSION, recipe_id),
             )
         counts["recipes_clustered"] += 1
+        progress(idx)
 
     if not dry_run:
         conn.execute(
