@@ -171,6 +171,37 @@ def test_resolver_respects_limit(fixture_taxonomy):
     assert pending == 1
 
 
+def test_resolver_stops_after_interrupt_request(fixture_taxonomy):
+    """First Ctrl-C lets the in-flight LLM call finish + write its result,
+    then the loop exits before processing remaining names."""
+    import os
+    import signal
+    from ingredients.mapping.llm_provider import ProviderResult
+
+    conn, ids = fixture_taxonomy
+    _seed_pending(conn, ["fancy gin variant", "another thing", "third name"])
+
+    class InterruptingProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.model_id = "stub-1"
+        def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+            self.calls += 1
+            if self.calls == 1:
+                # Simulate first Ctrl-C arriving during this LLM call.
+                os.kill(os.getpid(), signal.SIGINT)
+            return ProviderResult(
+                raw_text='{"action": "abstain"}', model_id=self.model_id,
+            )
+
+    provider = InterruptingProvider()
+    run_phase2(conn, provider=provider)
+    # The first call's result must have been written; subsequent names skipped.
+    assert provider.calls == 1, (
+        f"expected loop to break after first interrupt; got {provider.calls} calls"
+    )
+
+
 def test_brand_auto_create_rolls_back_if_resolution_fails(fixture_taxonomy, monkeypatch):
     """If the rows-update step fails after the node-create step, the
     new node + edge + provenance must roll back so we don't leak an

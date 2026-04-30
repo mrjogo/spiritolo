@@ -63,6 +63,46 @@ def test_phase2_propose_adds_alias(dedup_fixture, db_conn):
     assert alias[0] == "llm"
 
 
+def test_phase2_stops_after_interrupt_request(dedup_fixture, db_conn):
+    """First Ctrl-C lets the in-flight LLM call finish + write its result,
+    then the loop exits before processing remaining names."""
+    import os
+    import signal
+
+    conn, _ = dedup_fixture
+    for rid, source in (
+        (4101, 'http://x/i1'),
+        (4102, 'http://x/i2'),
+        (4103, 'http://x/i3'),
+    ):
+        db_conn.execute("""
+            insert into recipes (id, source_url, site, name, jsonld, fetched_at,
+                                 canonical_name, canonical_name_source, normalizer_version, normalized_at)
+            values (%s, %s, 'punch', 'Some Drink',
+                    '{}'::jsonb, now(),
+                    null, 'pending_llm', %s, now())
+            on conflict (source_url) do nothing
+        """, (rid, source, NORMALIZER_VERSION))
+
+    class InterruptingProvider:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.model_id = "stub-1.0"
+        def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+            self.calls += 1
+            if self.calls == 1:
+                os.kill(os.getpid(), signal.SIGINT)
+            return ProviderResult(
+                raw_text='{"action":"abstain"}', model_id=self.model_id,
+            )
+
+    provider = InterruptingProvider()
+    run_phase2(db_conn, provider=provider)
+    assert provider.calls == 1, (
+        f"expected loop to break after first interrupt; got {provider.calls} calls"
+    )
+
+
 def test_phase2_abstain(dedup_fixture, db_conn):
     conn, _ = dedup_fixture
     db_conn.execute("""

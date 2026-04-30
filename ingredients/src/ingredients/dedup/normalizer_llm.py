@@ -40,6 +40,7 @@ def run_phase2(
     provider: LLMProvider,
     limit: int | None = None,
 ) -> dict[str, int]:
+    from spiritolo_common.interrupt import InterruptHandler
     from spiritolo_common.progress import make_progress
 
     counts: Counter[str] = Counter()
@@ -53,47 +54,53 @@ def run_phase2(
     log.info("Phase 2: resolving %d distinct names via %s", total, provider.model_id)
     progress = make_progress(total=total)
 
-    for idx, raw in enumerate(raw_names, start=1):
-        normalized = normalize_cocktail_name(raw)
-        cands = lexical_candidates(conn, normalized, limit=20)
-        user_prompt = build_user_prompt(
-            raw_name=raw, normalized=normalized, candidates=cands,
-        )
-        action_obj = resolve_with_retry(
-            provider,
-            system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt,
-            normalized_name=normalized,
-            parse_fn=_parse_response,
-        )
-        if action_obj is None:
-            counts["error"] += 1
-            progress(idx)
-            continue
-        action = action_obj["action"]
+    with InterruptHandler() as interrupt:
+        for idx, raw in enumerate(raw_names, start=1):
+            if interrupt.requested:
+                # First Ctrl-C: in-flight LLM call (if any) has finished
+                # and its result was written by the per-call commit. Stop
+                # before paying for the next one.
+                break
+            normalized = normalize_cocktail_name(raw)
+            cands = lexical_candidates(conn, normalized, limit=20)
+            user_prompt = build_user_prompt(
+                raw_name=raw, normalized=normalized, candidates=cands,
+            )
+            action_obj = resolve_with_retry(
+                provider,
+                system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt,
+                normalized_name=normalized,
+                parse_fn=_parse_response,
+            )
+            if action_obj is None:
+                counts["error"] += 1
+                progress(idx)
+                continue
+            action = action_obj["action"]
 
-        if action == "chose":
-            canonical = action_obj["canonical_name"]
-            write_normalization(
-                conn, raw_name=raw, normalized=normalized,
-                canonical_name=canonical, source="llm",
-                normalizer_version=NORMALIZER_VERSION,
-            )
-            counts["chose"] += 1
-        elif action == "propose":
-            canonical = action_obj["canonical_name"]
-            add_cocktail_alias(
-                conn, alias=normalized, canonical_name=canonical, source="llm",
-            )
-            write_normalization(
-                conn, raw_name=raw, normalized=normalized,
-                canonical_name=canonical, source="llm",
-                normalizer_version=NORMALIZER_VERSION,
-            )
-            counts["propose"] += 1
-        elif action == "abstain":
-            write_normalize_abstain(
-                conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION,
-            )
-            counts["abstain"] += 1
-        progress(idx)
+            if action == "chose":
+                canonical = action_obj["canonical_name"]
+                write_normalization(
+                    conn, raw_name=raw, normalized=normalized,
+                    canonical_name=canonical, source="llm",
+                    normalizer_version=NORMALIZER_VERSION,
+                )
+                counts["chose"] += 1
+            elif action == "propose":
+                canonical = action_obj["canonical_name"]
+                add_cocktail_alias(
+                    conn, alias=normalized, canonical_name=canonical, source="llm",
+                )
+                write_normalization(
+                    conn, raw_name=raw, normalized=normalized,
+                    canonical_name=canonical, source="llm",
+                    normalizer_version=NORMALIZER_VERSION,
+                )
+                counts["propose"] += 1
+            elif action == "abstain":
+                write_normalize_abstain(
+                    conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION,
+                )
+                counts["abstain"] += 1
+            progress(idx)
     return dict(counts)
