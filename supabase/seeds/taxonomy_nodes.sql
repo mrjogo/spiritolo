@@ -204,12 +204,28 @@ join taxonomy_nodes n on n.slug = a.slug;
 -- technically amari. The amaro family parent stays non-cluster; recipes
 -- specifying generic "amaro" surface as underspecified in the dedup audit.
 --
--- Single expression nodes per amaro (no separate brand node), because the
--- brand and product share a name in cocktail vocabulary. If a brand later
--- needs explicit modeling (Branca makes Brancamenta and Carpano; Nonino
--- makes grappa and L'Aperitivo), the brand node is added retroactively as a
--- floating top-level node and the existing expression gets it as a parent.
+-- Brand nodes float at the top level (no parent) per docs/spirits-taxonomy.md;
+-- expressions are parented to [brand, amaro]. Where the cocktail-vocabulary
+-- brand name collides with the expression slug (Campari, Aperol, Cynar — the
+-- products with no descriptor on the bottle), the brand slug uses a `_brand`
+-- suffix so both nodes can coexist.
 update taxonomy_nodes set role_default = 'modifier' where slug = 'amaro';
+
+-- Brand nodes (top-level, no parent — brands span categories).
+insert into taxonomy_nodes (slug, display_name, role) values
+  ('campari_brand', 'Campari',         'brand'),  -- Davide Campari-Milano N.V.
+  ('aperol_brand',  'Aperol',          'brand'),  -- originally Barbieri (Padua, 1919); now Campari Group
+  ('cynar_brand',   'Cynar',           'brand'),  -- originally Pezziol; now Campari Group
+  ('branca',        'Branca',          'brand'),  -- Fratelli Branca Distillerie (Milan, 1845)
+  ('montenegro',    'Montenegro',      'brand'),  -- Gruppo Montenegro (Bologna, 1885)
+  ('nonino',        'Nonino',          'brand'),  -- Nonino Distillatori (Friuli)
+  ('averna',        'Averna',          'brand'),  -- originally Fratelli Averna (Sicily, 1868); now Campari Group
+  ('meletti',       'Meletti',         'brand'),  -- Meletti (Ascoli Piceno, 1870)
+  ('lucano',        'Lucano',          'brand'),  -- Amaro Lucano S.p.A. (Pisticci, Basilicata)
+  ('ramazzotti',    'Ramazzotti',      'brand'),  -- originally Ramazzotti (Milan, 1815); now Pernod Ricard
+  ('paolucci',      'Paolucci',        'brand'),  -- Paolucci (Sora, Lazio, 1873) — makes Amaro Ciociaro
+  ('braulio',       'Braulio',         'brand'),  -- Cantine Peloni (Bormio); now Caffo Group
+  ('bosca',         'Bosca',           'brand');  -- Bosca / Tosti (Canelli, Piemonte) — makes Cardamaro
 
 insert into taxonomy_nodes (slug, display_name, role, is_cluster_node, role_default) values
   -- Major amari named in the dedup spec.
@@ -228,22 +244,36 @@ insert into taxonomy_nodes (slug, display_name, role, is_cluster_node, role_defa
   ('amaro_braulio',    'Amaro Braulio',              'expression', true, 'modifier'),
   ('cardamaro',        'Cardamaro Vino Amaro',       'expression', true, 'modifier');
 
+-- Edges: each expression dual-parented to [brand, amaro family].
 insert into taxonomy_edges (parent_id, child_id)
 select p.id, c.id
 from (values
-  ('amaro', 'campari'),
-  ('amaro', 'aperol'),
-  ('amaro', 'cynar'),
-  ('amaro', 'fernet_branca'),
-  ('amaro', 'amaro_montenegro'),
-  ('amaro', 'amaro_nonino'),
-  ('amaro', 'amaro_averna'),
-  ('amaro', 'amaro_meletti'),
-  ('amaro', 'amaro_lucano'),
-  ('amaro', 'amaro_ramazzotti'),
-  ('amaro', 'amaro_ciociaro'),
-  ('amaro', 'amaro_braulio'),
-  ('amaro', 'cardamaro')
+  ('amaro',         'campari'),
+  ('campari_brand', 'campari'),
+  ('amaro',         'aperol'),
+  ('aperol_brand',  'aperol'),
+  ('amaro',         'cynar'),
+  ('cynar_brand',   'cynar'),
+  ('amaro',         'fernet_branca'),
+  ('branca',        'fernet_branca'),
+  ('amaro',         'amaro_montenegro'),
+  ('montenegro',    'amaro_montenegro'),
+  ('amaro',         'amaro_nonino'),
+  ('nonino',        'amaro_nonino'),
+  ('amaro',         'amaro_averna'),
+  ('averna',        'amaro_averna'),
+  ('amaro',         'amaro_meletti'),
+  ('meletti',       'amaro_meletti'),
+  ('amaro',         'amaro_lucano'),
+  ('lucano',        'amaro_lucano'),
+  ('amaro',         'amaro_ramazzotti'),
+  ('ramazzotti',    'amaro_ramazzotti'),
+  ('amaro',         'amaro_ciociaro'),
+  ('paolucci',      'amaro_ciociaro'),
+  ('amaro',         'amaro_braulio'),
+  ('braulio',       'amaro_braulio'),
+  ('amaro',         'cardamaro'),
+  ('bosca',         'cardamaro')
 ) as e(parent_slug, child_slug)
 join taxonomy_nodes p on p.slug = e.parent_slug
 join taxonomy_nodes c on c.slug = e.child_slug;

@@ -93,9 +93,10 @@ Hand-curate the well-known brand and expression nodes in the seed; the [D] mappe
 
 ### Slug naming
 
-- **Brand slug** is the brand or company name in snake_case: `angostura`, `peychauds`, `fee_brothers`, `bittermens`.
-- **Expression slug** is the manufacturer's full product name in snake_case: `angostura_aromatic_bitters` (not just `angostura_bitters` — Angostura also makes Orange Bitters and Cocoa Bitters), `fee_brothers_west_indian_orange_bitters`, `bittermens_xocolatl_mole_bitters`. Defensive specificity reserves room for siblings without forcing renames later.
-- **Display names** follow normal title case and match what the manufacturer prints on the bottle: `Angostura`, `Angostura Aromatic Bitters`, `Peychaud's Bitters`.
+- **Brand slug** is the brand or company name in snake_case: `angostura`, `peychauds`, `fee_brothers`, `bittermens`, `branca`, `nonino`.
+- **Expression slug** is the manufacturer's full product name in snake_case: `angostura_aromatic_bitters` (not just `angostura_bitters` — Angostura also makes Orange Bitters and Cocoa Bitters), `fee_brothers_west_indian_orange_bitters`, `bittermens_xocolatl_mole_bitters`, `fernet_branca`, `amaro_nonino`. Defensive specificity reserves room for siblings without forcing renames later.
+- **Slug collision (brand-as-substance with no descriptor).** A few brand-as-substance products are named with no product descriptor on the bottle (Campari, Aperol, Cynar, Suze, Bénédictine, Drambuie). The expression slug is the natural product name (`campari`, `aperol`, `cynar`); the brand slug appends `_brand` to disambiguate (`campari_brand`, `aperol_brand`, `cynar_brand`).
+- **Display names** follow normal title case and match what the manufacturer prints on the bottle: `Angostura`, `Angostura Aromatic Bitters`, `Peychaud's Bitters`, `Campari`. Brand and expression nodes can share a display name when the bottle calls both by the same name; `role` distinguishes them.
 - Aliases handle cocktail-vocabulary shortcuts (`'angostura'` → `angostura_aromatic_bitters` because cocktail text means that product when it says "angostura"; `'aromatic bitters'` → same, because the recipe community uses the generic interchangeably with the canonical Angostura product).
 
 ### Brand nodes are top-level
