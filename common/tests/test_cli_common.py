@@ -88,3 +88,47 @@ def test_confirm_reset_zero_rows_returns_true_without_prompting():
         stdin_is_tty=True,
         err=io.StringIO(),
     ) is True
+
+
+def test_confirm_reset_none_row_count_with_yes_proceeds():
+    """row_count=None covers callers that don't pre-count (e.g. cluster reset
+    spans multiple tables). With --yes, proceed without crashing on the
+    formatter."""
+    err = io.StringIO()
+    assert confirm_reset(
+        row_count=None,
+        scope_desc="all sites",
+        assume_yes=True,
+        stdin=io.StringIO(""),
+        stdin_is_tty=False,
+        err=err,
+    ) is True
+    msg = err.getvalue()
+    assert "Resetting rows" in msg  # generic count phrasing
+
+
+def test_confirm_reset_none_row_count_on_tty_prompts_generically():
+    """Without --yes on a TTY, prompt mentions 'rows' generically when no count."""
+    err = io.StringIO()
+    assert confirm_reset(
+        row_count=None,
+        scope_desc="site=punch",
+        assume_yes=False,
+        stdin=io.StringIO("y\n"),
+        stdin_is_tty=True,
+        err=err,
+    ) is True
+    assert "About to reset rows (site=punch)" in err.getvalue()
+
+
+def test_confirm_reset_none_row_count_without_yes_on_pipe_refuses():
+    err = io.StringIO()
+    assert confirm_reset(
+        row_count=None,
+        scope_desc="all sites",
+        assume_yes=False,
+        stdin=io.StringIO(""),
+        stdin_is_tty=False,
+        err=err,
+    ) is False
+    assert "--yes" in err.getvalue()

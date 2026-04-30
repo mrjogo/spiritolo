@@ -559,16 +559,18 @@ def run_normalize_names(args: argparse.Namespace) -> int:
     db = IngredientsDatabase()
     try:
         if args.reset:
-            from ingredients.mapping.admin import count_mapped_rows
-            to_clear = count_mapped_rows(
-                db.conn,
-                site=args.site,
-                except_version=getattr(args, "except_version", None),
-                older_than=getattr(args, "older_than", None),
-            )
+            # normalize-names operates on `recipes`, not recipe_ingredients.
+            # Count rows that actually have normalized data to clear.
+            except_version = getattr(args, "except_version", None)
+            to_clear = db.conn.execute("""
+                select count(*) from recipes
+                 where canonical_name_source is not null
+                   and (%s::text is null or site = %s)
+                   and (%s::text is null or normalizer_version <> %s)
+            """, (args.site, args.site, except_version, except_version)).fetchone()[0]
             scope = describe_reset_scope(
                 site=args.site,
-                except_version=getattr(args, "except_version", None),
+                except_version=except_version,
                 older_than=getattr(args, "older_than", None),
             )
             if not confirm_reset(
@@ -577,7 +579,6 @@ def run_normalize_names(args: argparse.Namespace) -> int:
             ):
                 log.error("reset aborted")
                 return 1
-            except_version = getattr(args, "except_version", None)
             db.conn.execute("""
                 update recipes
                    set canonical_name = null,
@@ -641,20 +642,12 @@ def run_cluster(args: argparse.Namespace) -> int:
             ):
                 log.error("reset aborted")
                 return 1
+            # Order matters: recipes.cluster_id has an FK to recipe_clusters.id,
+            # so the FK references must be nulled out before we can DELETE the
+            # cluster rows. Pre-image: also clear the role tags + variant_key
+            # on the affected recipes.
             except_version = getattr(args, "except_version", None)
             if except_version:
-                db.conn.execute("""
-                    delete from recipe_clusters
-                     where dedup_version <> %s or dedup_version is null
-                """, (except_version,))
-            else:
-                db.conn.execute("delete from recipe_clusters")
-            if except_version:
-                db.conn.execute("""
-                    update recipes
-                       set cluster_id = null, variant_key = null, dedup_version = null
-                     where dedup_version <> %s or dedup_version is null
-                """, (except_version,))
                 db.conn.execute("""
                     update recipe_ingredients
                        set role = null, role_source = null
@@ -663,15 +656,25 @@ def run_cluster(args: argparse.Namespace) -> int:
                           where dedup_version <> %s or dedup_version is null
                      )
                 """, (except_version,))
-            else:
                 db.conn.execute("""
                     update recipes
                        set cluster_id = null, variant_key = null, dedup_version = null
-                """)
+                     where dedup_version <> %s or dedup_version is null
+                """, (except_version,))
+                db.conn.execute("""
+                    delete from recipe_clusters
+                     where dedup_version <> %s or dedup_version is null
+                """, (except_version,))
+            else:
                 db.conn.execute("""
                     update recipe_ingredients
                        set role = null, role_source = null
                 """)
+                db.conn.execute("""
+                    update recipes
+                       set cluster_id = null, variant_key = null, dedup_version = null
+                """)
+                db.conn.execute("delete from recipe_clusters")
             db.conn.commit()
             log.info("cleared cluster columns")
             return 0

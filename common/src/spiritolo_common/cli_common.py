@@ -55,7 +55,7 @@ def describe_reset_scope(
 
 def confirm_reset(
     *,
-    row_count: int,
+    row_count: int | None,
     scope_desc: str,
     assume_yes: bool,
     stdin: TextIO | None = None,
@@ -65,6 +65,9 @@ def confirm_reset(
     """Uniform --reset confirmation heuristic:
 
     - row_count == 0: nothing to reset, return True without prompting.
+    - row_count is None: caller didn't pre-count (e.g., the reset deletes
+      across multiple tables); treat as "non-zero, unknown" and proceed
+      to the assume_yes / TTY branches with a generic message.
     - assume_yes=True (user passed --yes): log intent, return True.
     - Interactive TTY: prompt 'Reset N rows (scope)? [y/N]'. Default No.
     - Piped/redirected stdin without --yes: refuse and tell the user to pass
@@ -78,21 +81,23 @@ def confirm_reset(
     if row_count == 0:
         return True
 
+    count_str = f"{row_count:,} rows" if row_count is not None else "rows"
+
     if assume_yes:
         err_stream.write(
-            f"Resetting {row_count:,} rows ({scope_desc}); proceeding (--yes).\n"
+            f"Resetting {count_str} ({scope_desc}); proceeding (--yes).\n"
         )
         return True
 
     if not is_tty:
         err_stream.write(
-            f"Refusing to reset {row_count:,} rows ({scope_desc}) without --yes "
+            f"Refusing to reset {count_str} ({scope_desc}) without --yes "
             "on non-interactive stdin.\n"
         )
         return False
 
     err_stream.write(
-        f"About to reset {row_count:,} rows ({scope_desc}).\n"
+        f"About to reset {count_str} ({scope_desc}).\n"
         "Proceed? [y/N]: "
     )
     err_stream.flush()
