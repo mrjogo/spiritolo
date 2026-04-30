@@ -98,6 +98,52 @@ def write_abstain(
     return cur.rowcount
 
 
+def write_resolutions_batch(
+    conn: psycopg.Connection, *, items: list[tuple[str, int]],
+    source: MapperSource, mapper_version: str,
+) -> int:
+    """Bulk UPDATE for many (normalized_name, taxonomy_node_id) pairs sharing
+    one source. Caller commits."""
+    if not items:
+        return 0
+    names = [n for n, _ in items]
+    node_ids = [nid for _, nid in items]
+    cur = conn.execute(
+        """
+        update recipe_ingredients ri
+           set taxonomy_node_id = v.node_id,
+               mapper_source    = %s,
+               mapper_version   = %s,
+               mapper_at        = now()
+          from unnest(%s::text[], %s::bigint[]) as v(name, node_id)
+         where lower(trim(ri.name)) = v.name
+        """,
+        (source, mapper_version, names, node_ids),
+    )
+    return cur.rowcount
+
+
+def write_pendings_batch(
+    conn: psycopg.Connection, *, names: list[str], mapper_version: str,
+) -> int:
+    """Bulk pending_llm marker for many normalized names. Caller commits."""
+    if not names:
+        return 0
+    cur = conn.execute(
+        """
+        update recipe_ingredients ri
+           set taxonomy_node_id = null,
+               mapper_source    = 'pending_llm',
+               mapper_version   = %s,
+               mapper_at        = now()
+          from unnest(%s::text[]) as v(name)
+         where lower(trim(ri.name)) = v.name
+        """,
+        (mapper_version, names),
+    )
+    return cur.rowcount
+
+
 def fetch_pending_llm_names(
     conn: psycopg.Connection, *, mapper_version: str, limit: int | None = None,
 ) -> list[str]:
