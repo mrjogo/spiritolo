@@ -93,9 +93,10 @@ Hand-curate the well-known brand and expression nodes in the seed; the [D] mappe
 
 ### Slug naming
 
-- **Brand slug** is the brand or company name in snake_case: `angostura`, `peychauds`, `fee_brothers`, `bittermens`.
-- **Expression slug** is the manufacturer's full product name in snake_case: `angostura_aromatic_bitters` (not just `angostura_bitters` — Angostura also makes Orange Bitters and Cocoa Bitters), `fee_brothers_west_indian_orange_bitters`, `bittermens_xocolatl_mole_bitters`. Defensive specificity reserves room for siblings without forcing renames later.
-- **Display names** follow normal title case and match what the manufacturer prints on the bottle: `Angostura`, `Angostura Aromatic Bitters`, `Peychaud's Bitters`.
+- **Brand slug** is the brand or company name in snake_case, always — no suffix: `angostura`, `peychauds`, `fee_brothers`, `bittermens`, `branca`, `nonino`, `campari`, `aperol`, `cynar`.
+- **Expression slug** is the manufacturer's full product name in snake_case when the bottle has a descriptor: `angostura_aromatic_bitters` (not just `angostura_bitters` — Angostura also makes Orange Bitters and Cocoa Bitters), `fee_brothers_west_indian_orange_bitters`, `bittermens_xocolatl_mole_bitters`, `fernet_branca`, `amaro_nonino`. Defensive specificity reserves room for siblings without forcing renames later.
+- **Eponymous expressions (no bottle descriptor).** A few brand-as-substance products are sold with the brand name alone on the bottle (Campari, Aperol, Cynar, Suze, Drambuie, Bénédictine). For these, the expression slug appends the family-parent slug: `campari_amaro`, `aperol_amaro`, `cynar_amaro`, `suze_aperitif`, `drambuie_liqueur`, `benedictine_liqueur`. The brand slug stays clean.
+- **Display names** follow normal title case and match what the manufacturer prints on the bottle: `Angostura`, `Angostura Aromatic Bitters`, `Peychaud's Bitters`, `Campari`. Brand and expression nodes can share a display name when the bottle calls both by the same name; `role` distinguishes them, and aliases route cocktail-vocabulary text (`'campari'`, `'aperol'`) to the expression (the cluster identity) rather than the brand.
 - Aliases handle cocktail-vocabulary shortcuts (`'angostura'` → `angostura_aromatic_bitters` because cocktail text means that product when it says "angostura"; `'aromatic bitters'` → same, because the recipe community uses the generic interchangeably with the canonical Angostura product).
 
 ### Brand nodes are top-level
