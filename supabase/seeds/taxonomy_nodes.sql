@@ -109,9 +109,11 @@ insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) v
   ('chocolate_bitters',                'Chocolate Bitters',                true, 'bitters'),
   ('creole_bitters',                   'Creole Bitters',                   true, 'bitters');
 
--- Brand nodes. `regans` is single-product (orange bitters only) so it sits
--- under orange_bitters directly. The multi-product brands sit under `bitters`
--- and each of their expressions gets dual parentage [brand, type].
+-- Brand nodes. Brands are top-level (no parent) because they span categories:
+-- Fee Brothers makes amaretto syrup, Angostura makes rum, Bittermens makes
+-- tonic syrup, etc. Parenting a brand under any single category would imply a
+-- constraint on what they make. Each expression carries the type parent
+-- itself; the brand parent is just provenance.
 insert into taxonomy_nodes (slug, display_name, role) values
   ('angostura',        'Angostura',         'brand'),
   ('peychauds',        'Peychaud''s',       'brand'),
@@ -140,25 +142,16 @@ from (values
   ('bitters',                        'orange_bitters'),
   ('bitters',                        'chocolate_bitters'),
   ('bitters',                        'creole_bitters'),
-  -- brands. Single-product brand sits under its one type; multi-product brands
-  -- and the historically-iconic single-product brands (angostura, peychauds)
-  -- sit directly under `bitters` so the brand node itself is style-agnostic.
-  ('bitters',                        'angostura'),
-  ('bitters',                        'peychauds'),
-  ('orange_bitters',                 'regans'),
-  ('bitters',                        'fee_brothers'),
-  ('bitters',                        'bittermens'),
-  ('bitters',                        'the_bitter_truth'),
-  -- expressions: dual-parent [brand, type] so rollup lands at the type cluster.
+  -- expressions: dual-parent [brand, type]. Brand provides provenance;
+  -- type provides the cluster_node ancestor for rollup.
   ('angostura',                       'angostura_aromatic_bitters'),
   ('angostura_style_aromatic_bitters','angostura_aromatic_bitters'),
   ('angostura',                       'angostura_orange_bitters'),
   ('orange_bitters',                  'angostura_orange_bitters'),
   ('peychauds',                       'peychauds_bitters'),
   ('creole_bitters',                  'peychauds_bitters'),
-  -- regans is parented under its only type already, so its expression only
-  -- needs the brand parent (rollup walks brand → orange_bitters cluster).
   ('regans',                          'regans_orange_bitters'),
+  ('orange_bitters',                  'regans_orange_bitters'),
   ('fee_brothers',                    'fee_brothers_west_indian_orange_bitters'),
   ('orange_bitters',                  'fee_brothers_west_indian_orange_bitters'),
   ('bittermens',                      'bittermens_xocolatl_mole_bitters'),

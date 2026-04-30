@@ -98,6 +98,12 @@ Hand-curate the well-known brand and expression nodes in the seed; the [D] mappe
 - **Display names** follow normal title case and match what the manufacturer prints on the bottle: `Angostura`, `Angostura Aromatic Bitters`, `Peychaud's Bitters`.
 - Aliases handle cocktail-vocabulary shortcuts (`'angostura'` → `angostura_aromatic_bitters` because cocktail text means that product when it says "angostura"; `'aromatic bitters'` → same, because the recipe community uses the generic interchangeably with the canonical Angostura product).
 
+### Brand nodes are top-level
+
+A `role='brand'` node has **no parent** in the DAG. Brands span categories — Fee Brothers makes amaretto syrup as well as bitters; Angostura makes rum as well as bitters; Bittermens makes tonic syrup as well as bitters. Parenting a brand under any single category would imply a constraint on what the brand makes, which is wrong.
+
+Each expression carries the type parent itself; the brand parent is provenance, the type parent is the cluster-rollup path. So expressions are always dual-parented `[brand, type]` (or, for cluster-on-expression brand-as-substance items, `[brand, family parent]`).
+
 ## Antichain shape
 
 `taxonomy_nodes.is_cluster_node` marks the cluster-identity cut for the [E] dedup pipeline. **The cut does not have to sit at uniform DAG depth.** Different branches mark different levels.
@@ -112,26 +118,30 @@ Concrete example (the `bitters` family — uniformly type-level):
 
 ```
 bitters (parent, role_default='bitters')
-├── angostura_style_aromatic_bitters (is_cluster_node=true)            ← type-level cluster
-├── orange_bitters (is_cluster_node=true)                              ← type-level cluster
-├── chocolate_bitters (is_cluster_node=true)                           ← type-level cluster
-├── creole_bitters (is_cluster_node=true)                              ← type-level cluster
-├── angostura (role='brand')
-├── peychauds (role='brand')
-├── orange_bitters → regans (role='brand')                             single-product brand under its type
-├── fee_brothers (role='brand')
-├── bittermens (role='brand')
-├── the_bitter_truth (role='brand')
-├── angostura_aromatic_bitters (role='expression', parents: [angostura, angostura_style_aromatic_bitters])
-├── angostura_orange_bitters   (role='expression', parents: [angostura, orange_bitters])
-├── peychauds_bitters          (role='expression', parents: [peychauds, creole_bitters])
-├── regans_orange_bitters   (role='expression', parents: [regans])     brand already under type
-├── fee_brothers_west_indian_orange_bitters (parents: [fee_brothers, orange_bitters])
-├── bittermens_xocolatl_mole_bitters         (parents: [bittermens, chocolate_bitters])
-└── the_bitter_truth_creole_bitters          (parents: [the_bitter_truth, creole_bitters])
+├── angostura_style_aromatic_bitters (is_cluster_node=true)
+├── orange_bitters (is_cluster_node=true)
+├── chocolate_bitters (is_cluster_node=true)
+└── creole_bitters (is_cluster_node=true)
+
+(top-level, no parent — brands span categories)
+- angostura          (role='brand')
+- peychauds          (role='brand')
+- regans             (role='brand')
+- fee_brothers       (role='brand')
+- bittermens         (role='brand')
+- the_bitter_truth   (role='brand')
+
+(expressions: dual-parented [brand, type])
+- angostura_aromatic_bitters              parents: [angostura, angostura_style_aromatic_bitters]
+- angostura_orange_bitters                parents: [angostura, orange_bitters]
+- peychauds_bitters                       parents: [peychauds, creole_bitters]
+- regans_orange_bitters                   parents: [regans, orange_bitters]
+- fee_brothers_west_indian_orange_bitters parents: [fee_brothers, orange_bitters]
+- bittermens_xocolatl_mole_bitters        parents: [bittermens, chocolate_bitters]
+- the_bitter_truth_creole_bitters         parents: [the_bitter_truth, creole_bitters]
 ```
 
-Each expression rolls up to a type cluster_node deterministically: one parent is non-cluster (brand → bitters), the other parent (or its parent) is the type cluster. The antichain integrity rule prevents the case where two cluster ancestors exist on different paths.
+Each expression rolls up to its type cluster_node deterministically: the brand parent has no parent (dead-end for cluster search), the type parent is the cluster. The antichain integrity rule prevents the case where two cluster ancestors exist on different paths.
 
 Brand-as-substance is illustrative for items not yet seeded — Campari, Aperol, Chartreuse, etc. — where the curator may choose to put `is_cluster_node` on the expression because no broader type meaningfully groups it. Decide per-family.
 
