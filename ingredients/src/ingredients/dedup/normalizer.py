@@ -11,20 +11,53 @@ import logging
 from collections import Counter
 
 import psycopg
+from spiritolo_common.interrupt import InterruptHandler
 from spiritolo_common.progress import make_progress
 
-from .alias_layer import resolve_alias
+from .alias_layer import fetch_aliases_dict
 from .db import (
     fetch_unresolved_recipe_names,
-    write_normalization,
-    write_pending_normalize,
+    write_normalizations_batch,
+    write_pending_normalize_batch,
 )
 from .lexical_layer import resolve_lexical
 from .normalize import normalize_cocktail_name
-from .types import Pending, Resolved
+from .types import Resolved
 from .version import NORMALIZER_VERSION
 
+# How many names to buffer before flushing to the DB. Same trade-off as
+# the mapper: small enough that Ctrl-C only loses a fraction of a second
+# of work; large enough that round-trip overhead doesn't dominate.
+BATCH_FLUSH_SIZE = 500
+
 log = logging.getLogger("dedup.normalizer")
+
+
+def _flush(
+    conn: psycopg.Connection,
+    *,
+    alias_resolutions: list[tuple[str, str]],
+    lexical_resolutions: list[tuple[str, str]],
+    pendings: list[str],
+) -> None:
+    """Write all buffered decisions in one transaction, then clear buffers."""
+    if not (alias_resolutions or lexical_resolutions or pendings):
+        return
+    write_normalizations_batch(
+        conn, items=alias_resolutions,
+        source="alias", normalizer_version=NORMALIZER_VERSION,
+    )
+    write_normalizations_batch(
+        conn, items=lexical_resolutions,
+        source="lexical", normalizer_version=NORMALIZER_VERSION,
+    )
+    write_pending_normalize_batch(
+        conn, raw_names=pendings, normalizer_version=NORMALIZER_VERSION,
+    )
+    conn.commit()
+    alias_resolutions.clear()
+    lexical_resolutions.clear()
+    pendings.clear()
 
 
 def run_phase1(
@@ -48,44 +81,53 @@ def run_phase1(
         total, NORMALIZER_VERSION,
     )
 
+    # Snapshot aliases once; the alias layer is just an exact-match lookup,
+    # so eliminating ~1 round-trip per name is a big win.
+    aliases = fetch_aliases_dict(conn)
+
+    alias_resolutions: list[tuple[str, str]] = []
+    lexical_resolutions: list[tuple[str, str]] = []
+    pendings: list[str] = []
+
     progress = make_progress(total=total)
-    for idx, raw in enumerate(raw_names, start=1):
-        normalized = normalize_cocktail_name(raw)
-        if not normalized:
-            if not dry_run:
-                write_pending_normalize(conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION)
-            counts["pending_llm"] += 1
-            progress(idx)
-            continue
-
-        result = resolve_alias(conn, normalized)
-        if isinstance(result, Resolved):
-            if not dry_run:
-                write_normalization(
-                    conn, raw_name=raw, normalized=normalized,
-                    canonical_name=result.canonical_name, source=result.source,
-                    normalizer_version=NORMALIZER_VERSION,
-                )
-            counts["alias"] += 1
-            progress(idx)
-            continue
-
-        result = resolve_lexical(conn, normalized)
-        if isinstance(result, Resolved):
-            if not dry_run:
-                write_normalization(
-                    conn, raw_name=raw, normalized=normalized,
-                    canonical_name=result.canonical_name, source=result.source,
-                    normalizer_version=NORMALIZER_VERSION,
-                )
-            counts["lexical"] += 1
-            progress(idx)
-            continue
-
-        # Pending → queue for Phase 2.
+    with InterruptHandler() as interrupt:
+        try:
+            for idx, raw in enumerate(raw_names, start=1):
+                if interrupt.requested:
+                    break
+                normalized = normalize_cocktail_name(raw)
+                if not normalized:
+                    counts["pending_llm"] += 1
+                    pendings.append(raw)
+                elif (canonical := aliases.get(normalized)) is not None:
+                    counts["alias"] += 1
+                    alias_resolutions.append((raw, canonical))
+                else:
+                    result = resolve_lexical(conn, normalized)
+                    if isinstance(result, Resolved):
+                        counts["lexical"] += 1
+                        lexical_resolutions.append((raw, result.canonical_name))
+                    else:
+                        counts["pending_llm"] += 1
+                        pendings.append(raw)
+                progress(idx)
+                if not dry_run and (idx % BATCH_FLUSH_SIZE == 0):
+                    _flush(
+                        conn,
+                        alias_resolutions=alias_resolutions,
+                        lexical_resolutions=lexical_resolutions,
+                        pendings=pendings,
+                    )
+        except KeyboardInterrupt:
+            # Second Ctrl-C: do NOT flush; abort with whatever has been
+            # written so far (the most recent partial batch is lost).
+            raise
         if not dry_run:
-            write_pending_normalize(conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION)
-        counts["pending_llm"] += 1
-        progress(idx)
+            _flush(
+                conn,
+                alias_resolutions=alias_resolutions,
+                lexical_resolutions=lexical_resolutions,
+                pendings=pendings,
+            )
 
     return dict(counts)
