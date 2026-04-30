@@ -39,6 +39,28 @@ def test_in_cluster_key_unknown_role_excluded_by_default():
     assert not in_cluster_key(_ing(role="high_abv"))
 
 
+def test_in_cluster_key_excludes_unresolved_ingredient():
+    """Spec: rows where D didn't resolve taxonomy_node_id are treated as
+    'role=other' AND excluded from the cluster key (caller-side guard so
+    sorted() doesn't compare None to int)."""
+    assert not in_cluster_key(_ing(role="other", antichain_node_id=None))
+    # Same protection regardless of role
+    assert not in_cluster_key(_ing(role="base_spirit", antichain_node_id=None))
+
+
+def test_compute_cluster_key_skips_unresolved_ingredients():
+    """A recipe with a mix of resolved and unresolved ingredients clusters
+    on what's resolved. Smoke-test bug: real data had unresolved rows that
+    crashed sort()."""
+    resolved = _ing(role="base_spirit", antichain_node_id=1)
+    unresolved = _ing(role="other", antichain_node_id=None, taxonomy_node_id=None)
+    # Should not raise
+    key_with_unresolved = compute_cluster_key("negroni", [resolved, unresolved])
+    key_resolved_only = compute_cluster_key("negroni", [resolved])
+    # Same key: the unresolved row was excluded
+    assert key_with_unresolved == key_resolved_only
+
+
 def test_compute_cluster_key_independent_of_ingredient_ordering():
     ings1 = [_ing(role="base_spirit", antichain_node_id=1),
              _ing(role="modifier",    antichain_node_id=2)]

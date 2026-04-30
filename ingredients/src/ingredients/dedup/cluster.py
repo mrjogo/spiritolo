@@ -32,6 +32,13 @@ INCLUDED_ROLES = frozenset({
 
 
 def in_cluster_key(ing: dict[str, Any]) -> bool:
+    # Unresolved ingredient (D's mapper hasn't mapped it) → exclude per spec:
+    # "treat as role='other' and exclude from the cluster key (with a flag for
+    # audit)." Without this guard, sorted() on tuples containing None would
+    # raise TypeError under real-world data where some rows have
+    # taxonomy_node_id IS NULL.
+    if ing.get("antichain_node_id") is None:
+        return False
     role = ing.get("role")
     if role == "garnish":
         return bool(ing.get("is_defining_garnish"))
