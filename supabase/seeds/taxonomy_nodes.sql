@@ -204,34 +204,34 @@ join taxonomy_nodes n on n.slug = a.slug;
 -- technically amari. The amaro family parent stays non-cluster; recipes
 -- specifying generic "amaro" surface as underspecified in the dedup audit.
 --
--- Brand nodes float at the top level (no parent) per docs/spirits-taxonomy.md;
--- expressions are parented to [brand, amaro]. Where the cocktail-vocabulary
--- brand name collides with the expression slug (Campari, Aperol, Cynar — the
--- products with no descriptor on the bottle), the brand slug uses a `_brand`
--- suffix so both nodes can coexist.
+-- Brand nodes float at the top level (no parent); expressions are parented
+-- to [brand, amaro]. For eponymous products with no bottle descriptor
+-- (Campari, Aperol, Cynar), the expression slug appends the family-parent
+-- slug (`_amaro`) to disambiguate from the brand slug. Display name stays
+-- the bottle name.
 update taxonomy_nodes set role_default = 'modifier' where slug = 'amaro';
 
 -- Brand nodes (top-level, no parent — brands span categories).
 insert into taxonomy_nodes (slug, display_name, role) values
-  ('campari_brand', 'Campari',         'brand'),  -- Davide Campari-Milano N.V.
-  ('aperol_brand',  'Aperol',          'brand'),  -- originally Barbieri (Padua, 1919); now Campari Group
-  ('cynar_brand',   'Cynar',           'brand'),  -- originally Pezziol; now Campari Group
-  ('branca',        'Branca',          'brand'),  -- Fratelli Branca Distillerie (Milan, 1845)
-  ('montenegro',    'Montenegro',      'brand'),  -- Gruppo Montenegro (Bologna, 1885)
-  ('nonino',        'Nonino',          'brand'),  -- Nonino Distillatori (Friuli)
-  ('averna',        'Averna',          'brand'),  -- originally Fratelli Averna (Sicily, 1868); now Campari Group
-  ('meletti',       'Meletti',         'brand'),  -- Meletti (Ascoli Piceno, 1870)
-  ('lucano',        'Lucano',          'brand'),  -- Amaro Lucano S.p.A. (Pisticci, Basilicata)
-  ('ramazzotti',    'Ramazzotti',      'brand'),  -- originally Ramazzotti (Milan, 1815); now Pernod Ricard
-  ('paolucci',      'Paolucci',        'brand'),  -- Paolucci (Sora, Lazio, 1873) — makes Amaro Ciociaro
-  ('braulio',       'Braulio',         'brand'),  -- Cantine Peloni (Bormio); now Caffo Group
-  ('bosca',         'Bosca',           'brand');  -- Bosca / Tosti (Canelli, Piemonte) — makes Cardamaro
+  ('campari',     'Campari',         'brand'),  -- Davide Campari-Milano N.V.
+  ('aperol',      'Aperol',          'brand'),  -- originally Barbieri (Padua, 1919); now Campari Group
+  ('cynar',       'Cynar',           'brand'),  -- originally Pezziol; now Campari Group
+  ('branca',      'Branca',          'brand'),  -- Fratelli Branca Distillerie (Milan, 1845)
+  ('montenegro',  'Montenegro',      'brand'),  -- Gruppo Montenegro (Bologna, 1885)
+  ('nonino',      'Nonino',          'brand'),  -- Nonino Distillatori (Friuli)
+  ('averna',      'Averna',          'brand'),  -- originally Fratelli Averna (Sicily, 1868); now Campari Group
+  ('meletti',     'Meletti',         'brand'),  -- Meletti (Ascoli Piceno, 1870)
+  ('lucano',      'Lucano',          'brand'),  -- Amaro Lucano S.p.A. (Pisticci, Basilicata)
+  ('ramazzotti',  'Ramazzotti',      'brand'),  -- originally Ramazzotti (Milan, 1815); now Pernod Ricard
+  ('paolucci',    'Paolucci',        'brand'),  -- Paolucci (Sora, Lazio, 1873) — makes Amaro Ciociaro
+  ('braulio',     'Braulio',         'brand'),  -- Cantine Peloni (Bormio); now Caffo Group
+  ('bosca',       'Bosca',           'brand');  -- Bosca / Tosti (Canelli, Piemonte) — makes Cardamaro
 
 insert into taxonomy_nodes (slug, display_name, role, is_cluster_node, role_default) values
   -- Major amari named in the dedup spec.
-  ('campari',          'Campari',                    'expression', true, 'modifier'),
-  ('aperol',           'Aperol',                     'expression', true, 'modifier'),
-  ('cynar',            'Cynar',                      'expression', true, 'modifier'),
+  ('campari_amaro',    'Campari',                    'expression', true, 'modifier'),
+  ('aperol_amaro',     'Aperol',                     'expression', true, 'modifier'),
+  ('cynar_amaro',      'Cynar',                      'expression', true, 'modifier'),
   ('fernet_branca',    'Fernet-Branca',              'expression', true, 'modifier'),
   ('amaro_montenegro', 'Amaro Montenegro',           'expression', true, 'modifier'),
   ('amaro_nonino',     'Amaro Nonino Quintessentia', 'expression', true, 'modifier'),
@@ -248,12 +248,12 @@ insert into taxonomy_nodes (slug, display_name, role, is_cluster_node, role_defa
 insert into taxonomy_edges (parent_id, child_id)
 select p.id, c.id
 from (values
-  ('amaro',         'campari'),
-  ('campari_brand', 'campari'),
-  ('amaro',         'aperol'),
-  ('aperol_brand',  'aperol'),
-  ('amaro',         'cynar'),
-  ('cynar_brand',   'cynar'),
+  ('amaro',         'campari_amaro'),
+  ('campari',       'campari_amaro'),
+  ('amaro',         'aperol_amaro'),
+  ('aperol',        'aperol_amaro'),
+  ('amaro',         'cynar_amaro'),
+  ('cynar',         'cynar_amaro'),
   ('amaro',         'fernet_branca'),
   ('branca',        'fernet_branca'),
   ('amaro',         'amaro_montenegro'),
@@ -278,11 +278,16 @@ from (values
 join taxonomy_nodes p on p.slug = e.parent_slug
 join taxonomy_nodes c on c.slug = e.child_slug;
 
--- Aliases: cocktail-vocabulary shortcuts (the "Amaro" prefix is often dropped
--- in recipe text) and the brand-as-substance "fernet" shorthand.
+-- Aliases: cocktail-vocabulary shortcuts. The eponymous shorthands
+-- ('campari', 'aperol', 'cynar', 'fernet') resolve to the expression node
+-- (the cluster identity) rather than the brand node, matching cocktail
+-- vocabulary intent.
 insert into taxonomy_aliases (alias, node_id)
 select a.alias, n.id
 from (values
+  ('campari',                    'campari_amaro'),
+  ('aperol',                     'aperol_amaro'),
+  ('cynar',                      'cynar_amaro'),
   ('fernet',                     'fernet_branca'),
   ('fernet branca',              'fernet_branca'),
   ('montenegro',                 'amaro_montenegro'),
