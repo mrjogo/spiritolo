@@ -194,3 +194,76 @@ from (values
   ('bitter truth creole bitters',              'the_bitter_truth_creole_bitters')
 ) as a(alias, slug)
 join taxonomy_nodes n on n.slug = a.slug;
+
+-- Amari.
+-- Brand-as-substance applies across the family: each major amaro is its own
+-- cluster identity at the expression level because cocktail vocabulary names
+-- each as a substance ("a Cynar", "Campari", "Fernet"), not as a generic
+-- class. No broader type meaningfully groups them — Campari, Cynar, and
+-- Fernet-Branca are radically different flavor profiles even though all are
+-- technically amari. The amaro family parent stays non-cluster; recipes
+-- specifying generic "amaro" surface as underspecified in the dedup audit.
+--
+-- Single expression nodes per amaro (no separate brand node), because the
+-- brand and product share a name in cocktail vocabulary. If a brand later
+-- needs explicit modeling (Branca makes Brancamenta and Carpano; Nonino
+-- makes grappa and L'Aperitivo), the brand node is added retroactively as a
+-- floating top-level node and the existing expression gets it as a parent.
+update taxonomy_nodes set role_default = 'modifier' where slug = 'amaro';
+
+insert into taxonomy_nodes (slug, display_name, role, is_cluster_node, role_default) values
+  -- Major amari named in the dedup spec.
+  ('campari',          'Campari',                    'expression', true, 'modifier'),
+  ('aperol',           'Aperol',                     'expression', true, 'modifier'),
+  ('cynar',            'Cynar',                      'expression', true, 'modifier'),
+  ('fernet_branca',    'Fernet-Branca',              'expression', true, 'modifier'),
+  ('amaro_montenegro', 'Amaro Montenegro',           'expression', true, 'modifier'),
+  ('amaro_nonino',     'Amaro Nonino Quintessentia', 'expression', true, 'modifier'),
+  -- Long tail commonly seen in cocktail recipes.
+  ('amaro_averna',     'Amaro Averna',               'expression', true, 'modifier'),
+  ('amaro_meletti',    'Amaro Meletti',              'expression', true, 'modifier'),
+  ('amaro_lucano',     'Amaro Lucano',               'expression', true, 'modifier'),
+  ('amaro_ramazzotti', 'Amaro Ramazzotti',           'expression', true, 'modifier'),
+  ('amaro_ciociaro',   'Amaro CioCiaro',             'expression', true, 'modifier'),
+  ('braulio',          'Braulio',                    'expression', true, 'modifier'),
+  ('cardamaro',        'Cardamaro',                  'expression', true, 'modifier');
+
+insert into taxonomy_edges (parent_id, child_id)
+select p.id, c.id
+from (values
+  ('amaro', 'campari'),
+  ('amaro', 'aperol'),
+  ('amaro', 'cynar'),
+  ('amaro', 'fernet_branca'),
+  ('amaro', 'amaro_montenegro'),
+  ('amaro', 'amaro_nonino'),
+  ('amaro', 'amaro_averna'),
+  ('amaro', 'amaro_meletti'),
+  ('amaro', 'amaro_lucano'),
+  ('amaro', 'amaro_ramazzotti'),
+  ('amaro', 'amaro_ciociaro'),
+  ('amaro', 'braulio'),
+  ('amaro', 'cardamaro')
+) as e(parent_slug, child_slug)
+join taxonomy_nodes p on p.slug = e.parent_slug
+join taxonomy_nodes c on c.slug = e.child_slug;
+
+-- Aliases: cocktail-vocabulary shortcuts (the "Amaro" prefix is often dropped
+-- in recipe text) and the brand-as-substance "fernet" shorthand.
+insert into taxonomy_aliases (alias, node_id)
+select a.alias, n.id
+from (values
+  ('fernet',                     'fernet_branca'),
+  ('fernet branca',              'fernet_branca'),
+  ('montenegro',                 'amaro_montenegro'),
+  ('nonino',                     'amaro_nonino'),
+  ('amaro nonino',               'amaro_nonino'),
+  ('averna',                     'amaro_averna'),
+  ('meletti',                    'amaro_meletti'),
+  ('lucano',                     'amaro_lucano'),
+  ('ramazzotti',                 'amaro_ramazzotti'),
+  ('ciociaro',                   'amaro_ciociaro'),
+  ('cio ciaro',                  'amaro_ciociaro'),
+  ('amaro cio ciaro',            'amaro_ciociaro')
+) as a(alias, slug)
+join taxonomy_nodes n on n.slug = a.slug;
