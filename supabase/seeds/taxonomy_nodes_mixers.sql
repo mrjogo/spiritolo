@@ -4,16 +4,21 @@
 -- when recipes call out Fever-Tree, Schweppes, Goslings, Coca-Cola, etc.).
 --
 -- Role defaults:
---   * 'dilution' for soda_water and tonic_water — these primarily dilute
---     the drink (G&T uses tonic as a stretching agent; Highball uses soda).
---   * 'modifier' for ginger_beer, ginger_ale, cola, lemonade — these add
---     flavor and sugar substantively, not just dilution.
+--   * 'dilution' for soda_water only — pure carbonated water, no flavor,
+--     genuinely a stretching agent.
+--   * 'modifier' for tonic_water, ginger_beer, ginger_ale, cola, lemonade
+--     — these all carry meaningful flavor and sugar that substantively
+--     shape the drink's character. A Moscow Mule is "vodka + ginger
+--     beer," not "vodka diluted with ginger beer"; a G&T is defined by
+--     the bitter quinine, not by water-stretching the gin. Cocktail-
+--     functionally these behave the same way Campari or vermouth does
+--     in their drinks — they ARE the modifying flavor, not dilution.
 insert into taxonomy_nodes (slug, display_name, role_default) values
-  ('mixer', 'Mixer', 'dilution');
+  ('mixer', 'Mixer', 'modifier');
 
 insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
   ('soda_water',  'Soda Water',  true, 'dilution'),
-  ('tonic_water', 'Tonic Water', true, 'dilution'),
+  ('tonic_water', 'Tonic Water', true, 'modifier'),
   ('ginger_beer', 'Ginger Beer', true, 'modifier'),
   ('ginger_ale',  'Ginger Ale',  true, 'modifier'),
   ('cola',        'Cola',        true, 'modifier'),
