@@ -112,6 +112,54 @@ def write_pending_normalize(
     return cur.rowcount
 
 
+def write_normalizations_batch(
+    conn: psycopg.Connection, *,
+    items: list[tuple[str, str]],
+    source: NormalizerSource,
+    normalizer_version: str,
+) -> int:
+    """Bulk UPDATE for many (raw_name, canonical_name) pairs sharing one
+    source. Caller commits."""
+    if not items:
+        return 0
+    raw_names = [r for r, _ in items]
+    canonical_names = [c for _, c in items]
+    cur = conn.execute(
+        """
+        update recipes r
+           set canonical_name        = v.canonical,
+               canonical_name_source = %s,
+               normalizer_version    = %s,
+               normalized_at         = now()
+          from unnest(%s::text[], %s::text[]) as v(raw, canonical)
+         where r.name = v.raw
+        """,
+        (source, normalizer_version, raw_names, canonical_names),
+    )
+    return cur.rowcount
+
+
+def write_pending_normalize_batch(
+    conn: psycopg.Connection, *, raw_names: list[str], normalizer_version: str,
+) -> int:
+    """Bulk pending_llm marker for many raw names. Caller commits."""
+    if not raw_names:
+        return 0
+    cur = conn.execute(
+        """
+        update recipes r
+           set canonical_name        = null,
+               canonical_name_source = 'pending_llm',
+               normalizer_version    = %s,
+               normalized_at         = now()
+          from unnest(%s::text[]) as v(raw)
+         where r.name = v.raw
+        """,
+        (normalizer_version, raw_names),
+    )
+    return cur.rowcount
+
+
 def write_normalize_abstain(
     conn: psycopg.Connection, *, raw_name: str, normalizer_version: str,
 ) -> int:

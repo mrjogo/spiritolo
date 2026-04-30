@@ -8,6 +8,7 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from spiritolo_common.interrupt import InterruptHandler
 from spiritolo_common.progress import make_progress
 from spiritolo_common.summary import print_summary
 
@@ -140,7 +141,6 @@ def fetch_pages(
     paused_sites: set[str] = set()
     changes: dict[str, Counter] = {}
     state_lock = threading.Lock()
-    shutdown = threading.Event()
 
     def bump(site_name: str, category: str) -> None:
         # Caller already holds state_lock when needed for the surrounding
@@ -175,9 +175,10 @@ def fetch_pages(
         },
     )
     progress = make_progress(total=total)
+    interrupt = InterruptHandler()
 
     def process_one(row: dict) -> None:
-        if shutdown.is_set():
+        if interrupt.requested:
             return
         page_site = row["site"]
         url = row["url"]
@@ -208,7 +209,7 @@ def fetch_pages(
         try:
             html = client.fetch(url)
         except (QuotaExhaustedError, AuthError):
-            shutdown.set()
+            interrupt.request()
             raise
         except Exception as e:
             db.mark_failed(url, str(e))
@@ -278,19 +279,28 @@ def fetch_pages(
     executor = ThreadPoolExecutor(max_workers=n_workers)
     abort_message: str | None = None
     done = 0
-    try:
-        futures = [executor.submit(process_one, row) for row in pending]
-        for f in as_completed(futures):
-            try:
-                f.result()
-            except (QuotaExhaustedError, AuthError) as e:
-                shutdown.set()
-                abort_message = f"\nABORTED: {type(e).__name__}: {e}"
-                break
-            done += 1
-            progress(done)
-    finally:
-        executor.shutdown(wait=True, cancel_futures=True)
+    with interrupt:
+        try:
+            futures = [executor.submit(process_one, row) for row in pending]
+            for f in as_completed(futures):
+                try:
+                    f.result()
+                except (QuotaExhaustedError, AuthError) as e:
+                    interrupt.request()
+                    abort_message = f"\nABORTED: {type(e).__name__}: {e}"
+                    break
+                done += 1
+                progress(done)
+                if interrupt.requested:
+                    # First Ctrl-C (or worker called interrupt.request()):
+                    # stop draining results; the finally cancels queued
+                    # futures and waits for in-flight ones.
+                    break
+        finally:
+            # cancel queued futures, wait for in-flight ones to finish.
+            # Second Ctrl-C raises KeyboardInterrupt, which interrupts this
+            # wait and exits without draining further.
+            executor.shutdown(wait=True, cancel_futures=True)
 
     if abort_message:
         print(abort_message)

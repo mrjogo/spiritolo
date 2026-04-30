@@ -216,6 +216,53 @@ def test_cluster_compute_dry_run_does_not_write(dedup_fixture, db_conn):
     assert cluster_count == 0, f"dry_run wrote {cluster_count} recipe_clusters row(s)"
 
 
+def test_run_cluster_compute_commits_per_batch(dedup_fixture, db_conn, monkeypatch):
+    """With BATCH_FLUSH_SIZE smaller than the recipe count, run_cluster_compute
+    must commit periodically rather than only at the end. Guards against the
+    pre-batching behavior where Ctrl-C lost the entire run."""
+    conn, ids = dedup_fixture
+    # 5 distinct recipes — different IDs so they don't collapse into one cluster.
+    for rid in range(6001, 6006):
+        db_conn.execute("""
+            insert into recipes (id, source_url, site, name, jsonld, fetched_at,
+                                 canonical_name, canonical_name_source, normalizer_version, normalized_at)
+            values (%s, %s, 'punch', 'Negroni', '{}'::jsonb, now(),
+                    'negroni', 'alias', 'v1', now())
+            on conflict (source_url) do nothing
+        """, (rid, f"http://x/batch/{rid}"))
+        for pos, slug, amount in (
+            (1, "london_dry_gin",  1.0),
+            (2, "campari",         1.0),
+            (3, "sweet_vermouth",  1.0),
+        ):
+            db_conn.execute("""
+                insert into recipe_ingredients
+                    (recipe_id, position, raw_text, amount, unit,
+                     parse_status, parser_version, taxonomy_node_id,
+                     mapper_source, mapper_version)
+                values (%s, %s, 'x', %s, 'oz', 'parsed', 'v1', %s, 'alias', 'v1')
+                on conflict (recipe_id, position) do nothing
+            """, (rid, pos, amount, ids[slug]))
+
+    from ingredients.dedup import cluster as cluster_mod
+    monkeypatch.setattr(cluster_mod, "BATCH_FLUSH_SIZE", 2)
+
+    commit_count = [0]
+    original_commit = db_conn.commit
+    def counting_commit():
+        commit_count[0] += 1
+        original_commit()
+    monkeypatch.setattr(db_conn, "commit", counting_commit)
+
+    cluster_mod.run_cluster_compute(db_conn)
+
+    # 5 recipes / batch=2 → at least 2 mid-loop flushes plus the final aggregate
+    # commit. Pre-batching code commits exactly once (only at the end).
+    assert commit_count[0] >= 3, (
+        f"expected periodic commits (batch=2, 5 recipes); got {commit_count[0]}"
+    )
+
+
 def test_run_cluster_compute_ignores_ice(dedup_fixture, db_conn):
     conn, ids = dedup_fixture
     db_conn.execute("""

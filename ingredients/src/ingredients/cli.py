@@ -23,6 +23,7 @@ from collections import Counter
 from spiritolo_common.cli_common import (
     add_reset_args, confirm_reset, describe_reset_scope,
 )
+from spiritolo_common.interrupt import InterruptHandler
 from spiritolo_common.progress import make_progress
 from spiritolo_common.summary import print_summary
 
@@ -256,18 +257,24 @@ def run_worker(args: argparse.Namespace) -> int:
         progress = make_progress(total=total)
         changes: dict[str, Counter] = {}
 
-        for idx, recipe in enumerate(queue, start=1):
-            site = recipe["site"]
-            rows = build_rows_for_recipe(recipe["recipe_ingredient"], site=site)
-            if not args.dry_run:
-                db.write_recipe_parses(
-                    recipe_id=recipe["id"], rows=rows,
-                    parser_version=PARSER_VERSION,
-                )
-            counter = changes.setdefault(site, Counter())
-            for r in rows:
-                counter[r["parse_status"]] += 1
-            progress(idx)
+        with InterruptHandler() as interrupt:
+            for idx, recipe in enumerate(queue, start=1):
+                if interrupt.requested:
+                    # First Ctrl-C: per-recipe write_recipe_parses commits
+                    # atomically, so what's written stays. Stop before the
+                    # next recipe.
+                    break
+                site = recipe["site"]
+                rows = build_rows_for_recipe(recipe["recipe_ingredient"], site=site)
+                if not args.dry_run:
+                    db.write_recipe_parses(
+                        recipe_id=recipe["id"], rows=rows,
+                        parser_version=PARSER_VERSION,
+                    )
+                counter = changes.setdefault(site, Counter())
+                for r in rows:
+                    counter[r["parse_status"]] += 1
+                progress(idx)
 
         mode = "dry-run" if args.dry_run else "applied"
         print_summary("Parse ingredients", changes, mode=mode)

@@ -18,6 +18,51 @@ def test_build_rows_records_unparseable():
     assert r["raw_text"] == "¯\\_(ツ)_/¯"
 
 
+def test_run_worker_stops_after_interrupt(isolated_db, monkeypatch):
+    """First Ctrl-C lets the in-flight per-recipe parse + write finish, then
+    the loop exits before processing the next recipe."""
+    import os
+    import signal
+    from unittest.mock import patch
+    import argparse
+    from ingredients import cli as cli_mod
+
+    isolated_db.conn.execute("""
+        insert into recipes (id, source_url, site, jsonld, fetched_at) values
+            (7001, 'http://x/w1', 'punch', '{"recipeIngredient": ["1 oz gin"]}'::jsonb, now()),
+            (7002, 'http://x/w2', 'punch', '{"recipeIngredient": ["1 oz gin"]}'::jsonb, now()),
+            (7003, 'http://x/w3', 'punch', '{"recipeIngredient": ["1 oz gin"]}'::jsonb, now())
+    """)
+    isolated_db.conn.commit()
+
+    calls = [0]
+    real_build = cli_mod.build_rows_for_recipe
+    def interrupting_build(*args, **kwargs):
+        calls[0] += 1
+        result = real_build(*args, **kwargs)
+        if calls[0] == 1:
+            os.kill(os.getpid(), signal.SIGINT)
+        return result
+    monkeypatch.setattr(cli_mod, "build_rows_for_recipe", interrupting_build)
+
+    args = argparse.Namespace(
+        review=False, site=None, limit=None, dry_run=False,
+        reset=False, except_version=None, older_than=None, yes=False,
+    )
+    # Reuse isolated_db's connection; suppress close so the fixture can clean up.
+    isolated_db_close = isolated_db.close
+    isolated_db.close = lambda: None
+    try:
+        with patch("ingredients.cli.IngredientsDatabase", return_value=isolated_db):
+            cli_mod.run_worker(args)
+    finally:
+        isolated_db.close = isolated_db_close
+
+    assert calls[0] == 1, (
+        f"expected loop to break after first recipe; got {calls[0]} build calls"
+    )
+
+
 def test_build_rows_parsed_payload_shape():
     rows = build_rows_for_recipe(["2 oz gin"])
     assert len(rows) == 1

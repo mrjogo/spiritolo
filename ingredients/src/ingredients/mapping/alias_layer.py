@@ -21,3 +21,15 @@ def resolve_alias(conn: psycopg.Connection, normalized_name: str) -> Phase1Resul
     if row is None:
         return Pending()
     return Resolved(taxonomy_node_id=row[0], source="alias")
+
+
+def fetch_aliases_dict(conn: psycopg.Connection) -> dict[str, int]:
+    """Snapshot every alias -> node_id pair for in-memory lookup.
+    The table is small (~hundreds of rows); pulling once and matching in
+    Python beats one round-trip per name in the Phase 1 hot loop."""
+    return {
+        row[0]: row[1]
+        for row in conn.execute(
+            "select alias, node_id from taxonomy_aliases"
+        ).fetchall()
+    }

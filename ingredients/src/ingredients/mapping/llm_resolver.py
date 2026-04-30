@@ -142,74 +142,91 @@ def run_phase2(
     limit: int | None = None,
 ) -> dict[str, int]:
     """Drain the pending_llm queue. Returns Counter-shaped summary keyed by action."""
+    from spiritolo_common.interrupt import InterruptHandler
+    from spiritolo_common.progress import make_progress
     counts: Counter[str] = Counter()
     names = fetch_pending_llm_names(conn, mapper_version=MAPPER_VERSION, limit=limit)
-    for normalized in names:
-        cands = _candidates_with_parents(conn, normalized)
-        user_prompt = build_user_prompt(
-            normalized_name=normalized, parser_unit=None, site=site, candidates=cands,
-        )
-        action_obj = _resolve_with_retry(
-            provider,
-            system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt,
-            normalized_name=normalized,
-        )
-        if action_obj is None:
-            # All retries exhausted; leave row at pending_llm and move on.
-            counts["error"] += 1
-            continue
-        action = action_obj["action"]
-
-        if action == "chose":
-            write_resolution(
-                conn, normalized_name=normalized,
-                taxonomy_node_id=int(action_obj["node_id"]),
-                source="llm", mapper_version=MAPPER_VERSION,
+    total = len(names)
+    if total == 0:
+        log.info("nothing pending; queue is empty")
+        return dict(counts)
+    log.info("Phase 2: resolving %d distinct names via %s", total, provider.model_id)
+    progress = make_progress(total=total)
+    with InterruptHandler() as interrupt:
+        for idx, normalized in enumerate(names, start=1):
+            if interrupt.requested:
+                # First Ctrl-C: in-flight LLM call (if any) has already
+                # finished and its result was written by per-call commit.
+                # Stop before paying for the next one.
+                break
+            cands = _candidates_with_parents(conn, normalized)
+            user_prompt = build_user_prompt(
+                normalized_name=normalized, parser_unit=None, site=site, candidates=cands,
             )
-            counts["chose"] += 1
-        elif action == "propose_brand":
-            parent_id = _lookup_node_by_slug(conn, action_obj["parent_slug"])
-            if parent_id is None:
-                write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
-                counts["abstain"] += 1
+            action_obj = _resolve_with_retry(
+                provider,
+                system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt,
+                normalized_name=normalized,
+            )
+            if action_obj is None:
+                # All retries exhausted; leave row at pending_llm and move on.
+                counts["error"] += 1
+                progress(idx)
                 continue
-            # _create_brand_node + write_resolution must be atomic: the node,
-            # edge, provenance, and recipe_ingredients update land in ONE
-            # transaction. If write_resolution raises, we roll back so we
-            # don't leak an orphan taxonomy node.
-            try:
-                new_id = _create_brand_node(
-                    conn,
-                    slug=action_obj["slug"],
-                    display_name=action_obj["display_name"],
-                    parent_id=parent_id,
-                    role=action_obj["role"],
-                    raw_string=normalized,
-                    prompt_hash_value=prompt_hash(normalized, None, site, cands),
-                    model_id=provider.model_id,
-                )
+            action = action_obj["action"]
+
+            if action == "chose":
                 write_resolution(
-                    conn, normalized_name=normalized, taxonomy_node_id=new_id,
+                    conn, normalized_name=normalized,
+                    taxonomy_node_id=int(action_obj["node_id"]),
                     source="llm", mapper_version=MAPPER_VERSION,
                 )
-            except Exception:
-                conn.rollback()
-                raise
-            counts["propose_brand"] += 1
-        elif action == "propose_form":
-            parent_id = _lookup_node_by_slug(conn, action_obj["parent_slug"])
-            enqueue_form_proposal(
-                conn,
-                raw_string=normalized,
-                proposed_slug=action_obj["slug"],
-                proposed_display_name=action_obj["display_name"],
-                proposed_parent_id=parent_id,
-                candidates=cands,
-                mapper_version=MAPPER_VERSION,
-            )
-            # Row stays pending_llm awaiting human review.
-            counts["propose_form"] += 1
-        elif action == "abstain":
-            write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
-            counts["abstain"] += 1
+                counts["chose"] += 1
+            elif action == "propose_brand":
+                parent_id = _lookup_node_by_slug(conn, action_obj["parent_slug"])
+                if parent_id is None:
+                    write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
+                    counts["abstain"] += 1
+                    progress(idx)
+                    continue
+                # _create_brand_node + write_resolution must be atomic: the node,
+                # edge, provenance, and recipe_ingredients update land in ONE
+                # transaction. If write_resolution raises, we roll back so we
+                # don't leak an orphan taxonomy node.
+                try:
+                    new_id = _create_brand_node(
+                        conn,
+                        slug=action_obj["slug"],
+                        display_name=action_obj["display_name"],
+                        parent_id=parent_id,
+                        role=action_obj["role"],
+                        raw_string=normalized,
+                        prompt_hash_value=prompt_hash(normalized, None, site, cands),
+                        model_id=provider.model_id,
+                    )
+                    write_resolution(
+                        conn, normalized_name=normalized, taxonomy_node_id=new_id,
+                        source="llm", mapper_version=MAPPER_VERSION,
+                    )
+                except Exception:
+                    conn.rollback()
+                    raise
+                counts["propose_brand"] += 1
+            elif action == "propose_form":
+                parent_id = _lookup_node_by_slug(conn, action_obj["parent_slug"])
+                enqueue_form_proposal(
+                    conn,
+                    raw_string=normalized,
+                    proposed_slug=action_obj["slug"],
+                    proposed_display_name=action_obj["display_name"],
+                    proposed_parent_id=parent_id,
+                    candidates=cands,
+                    mapper_version=MAPPER_VERSION,
+                )
+                # Row stays pending_llm awaiting human review.
+                counts["propose_form"] += 1
+            elif action == "abstain":
+                write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
+                counts["abstain"] += 1
+            progress(idx)
     return dict(counts)

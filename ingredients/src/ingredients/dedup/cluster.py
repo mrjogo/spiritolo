@@ -18,6 +18,7 @@ from collections import Counter
 from typing import Any
 
 import psycopg
+from spiritolo_common.interrupt import InterruptHandler
 
 from .role_classifier import classify_role
 from .rollup import roll_up_to_antichain
@@ -29,6 +30,11 @@ INCLUDED_ROLES = frozenset({
     "base_spirit", "modifier", "citrus", "sweetener",
     "bitters", "dilution", "wash", "other",
 })
+
+# Number of recipes to process between commits. Each recipe contributes
+# ~5-10 buffered ingredient role updates plus one recipe cluster update,
+# so a flush of 100 recipes is ~500-1000 row updates per round-trip.
+BATCH_FLUSH_SIZE = 100
 
 
 def in_cluster_key(ing: dict[str, Any]) -> bool:
@@ -150,6 +156,17 @@ def _fetch_recipes_to_cluster(
     return [(row[0], row[1], row[2]) for row in conn.execute(sql, params).fetchall()]
 
 
+def _fetch_node_metadata(conn: psycopg.Connection) -> dict[int, tuple[str, bool]]:
+    """Snapshot every taxonomy node's slug + is_cluster_node into a dict.
+    Eliminates one round-trip per ingredient in the hot loop."""
+    return {
+        row[0]: (row[1], bool(row[2]))
+        for row in conn.execute(
+            "select id, slug, is_cluster_node from taxonomy_nodes"
+        ).fetchall()
+    }
+
+
 def _ingredient_set_jsonb(ingredients: list[dict[str, Any]]) -> list[dict[str, Any]]:
     items = sorted(
         {
@@ -164,6 +181,53 @@ def _ingredient_set_jsonb(ingredients: list[dict[str, Any]]) -> list[dict[str, A
     ]
 
 
+def _flush_role_updates(
+    conn: psycopg.Connection, role_updates: list[tuple[int, str, str]],
+) -> None:
+    """Bulk UPDATE recipe_ingredients role + role_source. Caller commits."""
+    if not role_updates:
+        return
+    ids = [r[0] for r in role_updates]
+    roles = [r[1] for r in role_updates]
+    sources = [r[2] for r in role_updates]
+    conn.execute(
+        """
+        update recipe_ingredients ri
+           set role = v.role,
+               role_source = v.role_source
+          from unnest(%s::bigint[], %s::text[], %s::text[])
+                as v(id, role, role_source)
+         where ri.id = v.id
+        """,
+        (ids, roles, sources),
+    )
+    role_updates.clear()
+
+
+def _flush_recipe_updates(
+    conn: psycopg.Connection, recipe_updates: list[tuple[int, int, str]],
+) -> None:
+    """Bulk UPDATE recipes cluster_id + variant_key + dedup_version. Caller commits."""
+    if not recipe_updates:
+        return
+    rids = [r[0] for r in recipe_updates]
+    cluster_ids = [r[1] for r in recipe_updates]
+    variant_keys = [r[2] for r in recipe_updates]
+    conn.execute(
+        """
+        update recipes r
+           set cluster_id    = v.cluster_id,
+               variant_key   = v.variant_key,
+               dedup_version = %s
+          from unnest(%s::bigint[], %s::bigint[], %s::text[])
+                as v(id, cluster_id, variant_key)
+         where r.id = v.id
+        """,
+        (DEDUP_VERSION, rids, cluster_ids, variant_keys),
+    )
+    recipe_updates.clear()
+
+
 def run_cluster_compute(
     conn: psycopg.Connection,
     *,
@@ -175,112 +239,144 @@ def run_cluster_compute(
     + recipes.cluster_id + recipes.variant_key + recipe_ingredients.role.
     When dry_run=True, all DB writes and commit are skipped.
     """
+    from spiritolo_common.progress import make_progress
+
     counts: Counter[str] = Counter()
     recipes = _fetch_recipes_to_cluster(
         conn, dedup_version=DEDUP_VERSION, site=site, limit=limit,
     )
+    total = len(recipes)
+    if total == 0:
+        log.info("nothing to cluster")
+        return dict(counts)
+    log.info("clustering %d recipes (dedup_version=%s)", total, DEDUP_VERSION)
+
+    # Snapshot taxonomy metadata + memoize antichain rollup. Each unique
+    # node_id rolls up to the same antichain ancestor every time, so the
+    # cache turns ~ingredients_per_recipe * recipes lookups into ~unique-nodes.
+    node_meta = _fetch_node_metadata(conn)
+    rollup_cache: dict[int, int] = {}
+
+    def rollup(node_id: int | None) -> int | None:
+        if node_id is None:
+            return None
+        cached = rollup_cache.get(node_id)
+        if cached is not None:
+            return cached
+        result = roll_up_to_antichain(conn, node_id)
+        rollup_cache[node_id] = result
+        return result
+
+    role_updates: list[tuple[int, str, str]] = []
+    recipe_updates: list[tuple[int, int, str]] = []
     cluster_lookup: dict[str, int] = {}
 
-    for recipe_id, canonical_name, _raw_name in recipes:
-        ingredients = _fetch_recipe_ingredients(conn, recipe_id)
+    progress = make_progress(total=total)
+    with InterruptHandler() as interrupt:
+        try:
+            for idx, (recipe_id, canonical_name, _raw_name) in enumerate(recipes, start=1):
+                if interrupt.requested:
+                    break
+                ingredients = _fetch_recipe_ingredients(conn, recipe_id)
 
-        for ing in ingredients:
-            role, role_source = classify_role(ing)
-            ing["role"] = role
-            ing["role_source"] = role_source
-            antichain_id = (
-                roll_up_to_antichain(conn, ing["taxonomy_node_id"])
-                if ing["taxonomy_node_id"] is not None
-                else None
-            )
-            ing["antichain_node_id"] = antichain_id
-            if antichain_id is not None:
-                slug_row = conn.execute(
-                    "select slug, is_cluster_node from taxonomy_nodes where id = %s",
-                    (antichain_id,),
-                ).fetchone()
-                ing["antichain_slug"] = slug_row[0] if slug_row else None
-                if slug_row and not slug_row[1]:
-                    counts["underspecified"] += 1
+                for ing in ingredients:
+                    role, role_source = classify_role(ing)
+                    ing["role"] = role
+                    ing["role_source"] = role_source
+                    antichain_id = rollup(ing["taxonomy_node_id"])
+                    ing["antichain_node_id"] = antichain_id
+                    if antichain_id is not None:
+                        meta = node_meta.get(antichain_id)
+                        ing["antichain_slug"] = meta[0] if meta else None
+                        if meta and not meta[1]:
+                            counts["underspecified"] += 1
 
+                if not dry_run:
+                    for ing in ingredients:
+                        role_updates.append(
+                            (ing["id"], ing["role"], ing["role_source"]),
+                        )
+
+                in_key_ings = [ing for ing in ingredients if in_cluster_key(ing)]
+                if not in_key_ings:
+                    counts["skipped_no_ingredients"] += 1
+                    progress(idx)
+                    if not dry_run and (idx % BATCH_FLUSH_SIZE == 0):
+                        _flush_role_updates(conn, role_updates)
+                        _flush_recipe_updates(conn, recipe_updates)
+                        conn.commit()
+                    continue
+
+                cluster_key = compute_cluster_key(canonical_name, ingredients)
+                if cluster_key in cluster_lookup:
+                    cluster_id = cluster_lookup[cluster_key]
+                else:
+                    if not dry_run:
+                        # Insert (or upsert) eagerly so we have the cluster_id
+                        # to attach to recipe rows in this and subsequent
+                        # iterations of the same batch. Commits land at the
+                        # next flush boundary — Ctrl-C between flushes rolls
+                        # back the new cluster, which is harmless: the next
+                        # run recreates it via on-conflict-do-update.
+                        row = conn.execute(
+                            """
+                            insert into recipe_clusters
+                                (cluster_key, canonical_name, ingredient_set, dedup_version)
+                            values (%s, %s, %s::jsonb, %s)
+                            on conflict (cluster_key) do update
+                                set canonical_name = excluded.canonical_name,
+                                    dedup_version  = excluded.dedup_version
+                            returning id
+                            """,
+                            (cluster_key, canonical_name,
+                             _canonical_json(_ingredient_set_jsonb(ingredients)),
+                             DEDUP_VERSION),
+                        ).fetchone()
+                        cluster_id = row[0]
+                    else:
+                        # dry_run: assign placeholder so cluster_lookup still
+                        # deduplicates within the batch (negative to avoid collisions).
+                        cluster_id = -(len(cluster_lookup) + 1)
+                    cluster_lookup[cluster_key] = cluster_id
+                    counts["clusters_created"] += 1
+
+                if not dry_run:
+                    variant_key = compute_variant_key(cluster_key, ingredients)
+                    recipe_updates.append((recipe_id, cluster_id, variant_key))
+                counts["recipes_clustered"] += 1
+                progress(idx)
+
+                if not dry_run and (idx % BATCH_FLUSH_SIZE == 0):
+                    _flush_role_updates(conn, role_updates)
+                    _flush_recipe_updates(conn, recipe_updates)
+                    conn.commit()
+        except KeyboardInterrupt:
+            # Second Ctrl-C: do NOT flush; abort with whatever has been
+            # committed in prior batches.
+            raise
         if not dry_run:
-            for ing in ingredients:
-                conn.execute(
-                    """
-                    update recipe_ingredients
-                       set role = %s, role_source = %s
-                     where id = %s
-                    """,
-                    (ing["role"], ing["role_source"], ing["id"]),
-                )
-
-        in_key_ings = [ing for ing in ingredients if in_cluster_key(ing)]
-        if not in_key_ings:
-            counts["skipped_no_ingredients"] += 1
-            continue
-
-        cluster_key = compute_cluster_key(canonical_name, ingredients)
-        if cluster_key in cluster_lookup:
-            cluster_id = cluster_lookup[cluster_key]
-        else:
-            if not dry_run:
-                row = conn.execute(
-                    """
-                    insert into recipe_clusters
-                        (cluster_key, canonical_name, ingredient_set, dedup_version)
-                    values (%s, %s, %s::jsonb, %s)
-                    on conflict (cluster_key) do update
-                        set canonical_name = excluded.canonical_name,
-                            dedup_version  = excluded.dedup_version
-                    returning id
-                    """,
-                    (cluster_key, canonical_name,
-                     _canonical_json(_ingredient_set_jsonb(ingredients)),
-                     DEDUP_VERSION),
-                ).fetchone()
-                cluster_id = row[0]
-            else:
-                # In dry_run mode assign a placeholder so cluster_lookup still
-                # deduplicates within the batch (negative to avoid collisions).
-                cluster_id = -(len(cluster_lookup) + 1)
-            cluster_lookup[cluster_key] = cluster_id
-            counts["clusters_created"] += 1
-
-        if not dry_run:
-            variant_key = compute_variant_key(cluster_key, ingredients)
+            _flush_role_updates(conn, role_updates)
+            _flush_recipe_updates(conn, recipe_updates)
             conn.execute(
                 """
-                update recipes
-                   set cluster_id    = %s,
-                       variant_key   = %s,
-                       dedup_version = %s
-                 where id = %s
+                update recipe_clusters c
+                   set recipe_count = sub.recipe_count,
+                       source_count = sub.source_count,
+                       representative_recipe_id = sub.rep_id
+                from (
+                    select cluster_id,
+                           count(*)              as recipe_count,
+                           count(distinct site)  as source_count,
+                           min(id)               as rep_id
+                    from recipes
+                    where cluster_id is not null
+                      and dedup_version = %s
+                    group by cluster_id
+                ) sub
+                where c.id = sub.cluster_id
                 """,
-                (cluster_id, variant_key, DEDUP_VERSION, recipe_id),
+                (DEDUP_VERSION,),
             )
-        counts["recipes_clustered"] += 1
-
-    if not dry_run:
-        conn.execute(
-            """
-            update recipe_clusters c
-               set recipe_count = sub.recipe_count,
-                   source_count = sub.source_count,
-                   representative_recipe_id = sub.rep_id
-            from (
-                select cluster_id,
-                       count(*)              as recipe_count,
-                       count(distinct site)  as source_count,
-                       min(id)               as rep_id
-                from recipes
-                where cluster_id is not null
-                  and dedup_version = %s
-                group by cluster_id
-            ) sub
-            where c.id = sub.cluster_id
-            """,
-            (DEDUP_VERSION,),
-        )
-        conn.commit()
+            conn.commit()
 
     return dict(counts)
