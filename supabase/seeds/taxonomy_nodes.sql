@@ -121,8 +121,11 @@ insert into taxonomy_nodes (slug, display_name, role) values
   ('the_bitter_truth', 'The Bitter Truth',  'brand');
 
 -- Expression nodes. None are cluster nodes; each rolls up to its type cluster.
+-- Slugs use the manufacturer's full product name in snake_case so future siblings
+-- have room (Angostura Orange Bitters lives next to Angostura Aromatic Bitters).
 insert into taxonomy_nodes (slug, display_name, role, role_default) values
-  ('angostura_bitters',                       'Angostura Aromatic Bitters',              'expression', 'bitters'),
+  ('angostura_aromatic_bitters',              'Angostura Aromatic Bitters',              'expression', 'bitters'),
+  ('angostura_orange_bitters',                'Angostura Orange Bitters',                'expression', 'bitters'),
   ('peychauds_bitters',                       'Peychaud''s Bitters',                     'expression', 'bitters'),
   ('regans_orange_bitters',                   'Regan''s Orange Bitters No. 6',           'expression', 'bitters'),
   ('fee_brothers_west_indian_orange_bitters', 'Fee Brothers West Indian Orange Bitters', 'expression', 'bitters'),
@@ -147,8 +150,10 @@ from (values
   ('bitters',                        'bittermens'),
   ('bitters',                        'the_bitter_truth'),
   -- expressions: dual-parent [brand, type] so rollup lands at the type cluster.
-  ('angostura',                       'angostura_bitters'),
-  ('angostura_style_aromatic_bitters','angostura_bitters'),
+  ('angostura',                       'angostura_aromatic_bitters'),
+  ('angostura_style_aromatic_bitters','angostura_aromatic_bitters'),
+  ('angostura',                       'angostura_orange_bitters'),
+  ('orange_bitters',                  'angostura_orange_bitters'),
   ('peychauds',                       'peychauds_bitters'),
   ('creole_bitters',                  'peychauds_bitters'),
   -- regans is parented under its only type already, so its expression only
@@ -166,15 +171,18 @@ join taxonomy_nodes c on c.slug = e.child_slug;
 
 -- Aliases: variants of canonical names. Product names are NEVER aliases —
 -- they are the expression nodes above. The 'aromatic bitters' generic and
--- 'angostura' shorthand alias to the angostura_bitters expression because
--- cocktail vocabulary equates them with the canonical Angostura product;
+-- 'angostura' shorthand alias to the angostura_aromatic_bitters expression
+-- because cocktail vocabulary equates them with that canonical product;
 -- the variant_key still preserves the specific brand call.
 insert into taxonomy_aliases (alias, node_id)
 select a.alias, n.id
 from (values
-  ('aromatic bitters',           'angostura_bitters'),
-  ('angostura',                  'angostura_bitters'),
-  ('angostura aromatic bitters', 'angostura_bitters'),
+  ('aromatic bitters',           'angostura_aromatic_bitters'),
+  ('angostura',                  'angostura_aromatic_bitters'),
+  ('angostura bitters',          'angostura_aromatic_bitters'),
+  ('angostura aromatic bitters', 'angostura_aromatic_bitters'),
+  ('angostura orange',           'angostura_orange_bitters'),
+  ('angostura orange bitters',   'angostura_orange_bitters'),
   ('peychauds',                  'peychauds_bitters'),
   ('peychaud''s',                'peychauds_bitters'),
   ('peychaud''s bitters',        'peychauds_bitters'),

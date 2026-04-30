@@ -91,6 +91,13 @@ Do **not** use aliases for:
 
 Hand-curate the well-known brand and expression nodes in the seed; the [D] mapper auto-creates the long tail when a recipe forces the issue.
 
+### Slug naming
+
+- **Brand slug** is the brand or company name in snake_case: `angostura`, `peychauds`, `fee_brothers`, `bittermens`.
+- **Expression slug** is the manufacturer's full product name in snake_case: `angostura_aromatic_bitters` (not just `angostura_bitters` — Angostura also makes Orange Bitters and Cocoa Bitters), `fee_brothers_west_indian_orange_bitters`, `bittermens_xocolatl_mole_bitters`. Defensive specificity reserves room for siblings without forcing renames later.
+- **Display names** follow normal title case and match what the manufacturer prints on the bottle: `Angostura`, `Angostura Aromatic Bitters`, `Peychaud's Bitters`.
+- Aliases handle cocktail-vocabulary shortcuts (`'angostura'` → `angostura_aromatic_bitters` because cocktail text means that product when it says "angostura"; `'aromatic bitters'` → same, because the recipe community uses the generic interchangeably with the canonical Angostura product).
+
 ## Antichain shape
 
 `taxonomy_nodes.is_cluster_node` marks the cluster-identity cut for the [E] dedup pipeline. **The cut does not have to sit at uniform DAG depth.** Different branches mark different levels.
@@ -115,8 +122,9 @@ bitters (parent, role_default='bitters')
 ├── fee_brothers (role='brand')
 ├── bittermens (role='brand')
 ├── the_bitter_truth (role='brand')
-├── angostura_bitters       (role='expression', parents: [angostura, angostura_style_aromatic_bitters])
-├── peychauds_bitters       (role='expression', parents: [peychauds, creole_bitters])
+├── angostura_aromatic_bitters (role='expression', parents: [angostura, angostura_style_aromatic_bitters])
+├── angostura_orange_bitters   (role='expression', parents: [angostura, orange_bitters])
+├── peychauds_bitters          (role='expression', parents: [peychauds, creole_bitters])
 ├── regans_orange_bitters   (role='expression', parents: [regans])     brand already under type
 ├── fee_brothers_west_indian_orange_bitters (parents: [fee_brothers, orange_bitters])
 ├── bittermens_xocolatl_mole_bitters         (parents: [bittermens, chocolate_bitters])
