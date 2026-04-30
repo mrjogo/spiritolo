@@ -5,13 +5,16 @@
 FROM mcr.microsoft.com/devcontainers/python:3.12
 # [/repo-mixin:devcontainer-python-uv]
 
-# [repo-mixin:devcontainer-claude] Install tmux for session persistence and jq for hook payloads.
-# Claude Code sessions survive IDE disconnects when run inside tmux.
-# jq parses hook stdin JSON so notifications include tool name and context.
+# Install tmux for session persistence (Claude Code sessions survive IDE
+# disconnects), jq for hook payloads (parses hook stdin JSON), and
+# postgresql-client for psql (needed to load supabase/seeds/recipes.sql,
+# a pg_dump file with `\restrict` and other meta-commands that raw psycopg
+# cannot parse).
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \
     jq \
+    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # [repo-mixin:devcontainer-python-uv] Verify non-root user exists before switching.

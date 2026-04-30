@@ -23,13 +23,26 @@ Run `cd scraper && uv run …` and `cd web && npm …` from the repo root.
 
 Devcontainer `.env`: `SUPABASE_DB_URL=postgresql://postgres:postgres@host.docker.internal:54322/postgres`. App code (psycopg, JS clients, browser) connects fine via this URL — glibc's resolver returns the IPv4 address (`192.168.65.254`) and there's no IPv6 record to trip over.
 
-**The `supabase` CLI is the exception.** Its Go-based resolver picks up an IPv6 form of `host.docker.internal` that isn't routable from the container, so commands that talk to the DB (`db reset`, `migration list`, etc.) need the IPv4 literal:
+**The `supabase` CLI is the exception.** Two gotchas, both of which surface as identical-looking `tls error (server refused TLS connection)` failures:
+
+1. Its Go-based resolver picks up an IPv6 form of `host.docker.internal` that isn't routable from the container — pass the IPv4 literal `192.168.65.254` instead.
+2. The CLI defaults to attempting TLS, which the local Postgres rejects — append `?sslmode=disable` to the URL.
+
+Both fixes together:
 
 ```bash
-supabase db reset --db-url "postgresql://postgres:postgres@192.168.65.254:54322/postgres" --yes
+DB_URL='postgresql://postgres:postgres@192.168.65.254:54322/postgres?sslmode=disable'
+supabase db reset       --db-url "$DB_URL" --yes
+supabase migration up   --db-url "$DB_URL" --include-all   # forward-apply, doesn't wipe data
+supabase migration list --db-url "$DB_URL"
+supabase db push        --db-url "$DB_URL" --include-all
 ```
 
-The trailing `tls error (server refused TLS connection)` is misleading — migrations succeed. Verify with a `select`.
+Use `migration up` when you want to add new migrations without losing local processed data; `db reset` wipes and replays everything. The reset auto-seeds only the files listed in `supabase/config.toml` under `db.seed.sql_paths` — `recipes.sql` is excluded because it's a `pg_dump` file. After a reset, restore recipes via `psql` directly:
+
+```bash
+psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/seeds/recipes.sql
+```
 
 **Test DB.** DB-integration tests (in `ingredients/tests/test_db.py`, et al) run against `TEST_DB_URL` — a *separate* Postgres database from `SUPABASE_DB_URL` — so `pytest` can `TRUNCATE … CASCADE` freely without nuking the dev data. Add this to `.env`:
 
