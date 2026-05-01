@@ -58,7 +58,14 @@ describe('TOP_LEVEL_ALLOWLIST', () => {
     expect(TOP_LEVEL_ALLOWLIST).toEqual(
       expect.arrayContaining([
         'whiskey',
+        'gin',
+        'rum',
+        'brandy',
+        'vodka',
+        'tequila',
+        'mezcal',
         'vermouth',
+        'amaro',
         'bitters',
         'liqueur',
         'syrup',
