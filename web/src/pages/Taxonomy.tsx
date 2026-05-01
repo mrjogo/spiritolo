@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../supabase';
 import type { TaxonomyViewRow } from '../components/taxonomy/shapeData';
+import '../components/taxonomy/taxonomy.css';
 
 type State =
   | { status: 'loading' }
@@ -37,9 +38,23 @@ export function Taxonomy() {
   if (state.status === 'error') {
     return <div className="page">Error: {state.message}</div>;
   }
+
   return (
-    <div className="page">
-      <p>{state.rows.length} nodes loaded.</p>
+    <div className="taxonomy-page">
+      <div className="taxonomy-page__corner taxonomy-page__corner--tl" />
+      <div className="taxonomy-page__corner taxonomy-page__corner--tr" />
+      <div className="taxonomy-page__corner taxonomy-page__corner--bl" />
+      <div className="taxonomy-page__corner taxonomy-page__corner--br" />
+
+      <div className="taxonomy-page__title">
+        <div className="taxonomy-page__title-eyebrow">— A COMPENDIUM OF —</div>
+        <div className="taxonomy-page__title-main">SPIRITS &amp; LIQUEURS</div>
+        <div className="taxonomy-page__title-rule" />
+      </div>
+
+      <div style={{ position: 'absolute', bottom: 24, left: 24, color: 'var(--tx-ivory)' }}>
+        {state.rows.length} nodes loaded.
+      </div>
     </div>
   );
 }

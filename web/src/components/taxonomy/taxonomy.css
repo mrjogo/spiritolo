@@ -1,0 +1,126 @@
+/* Palette tokens. Used directly and via the .taxonomy-page scope. */
+.taxonomy-page {
+  --tx-walnut-deep: #160d05;
+  --tx-walnut: #2a1d11;
+  --tx-walnut-edge: #0d0703;
+  --tx-gold: #c9a449;
+  --tx-gold-bright: #e0c073;
+  --tx-ivory: #e8d9b0;
+  --tx-ivory-bright: #f0e0b0;
+  --tx-cream: #f5e9c8;
+  --tx-cream-deep: #ecddb4;
+  --tx-brown-ink: #2c1d0c;
+  --tx-brown-mid: #3a2a14;
+  --tx-brown-soft: #5a3f1a;
+  --tx-brown-faint: #7a5520;
+  --tx-frame-edge: #8a6a35;
+
+  --tx-substance: var(--tx-ivory);
+  --tx-expression: #a85b3a;
+  --tx-brand: #7a9a82;
+  --tx-orphan: #a85b3a;
+
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  color: var(--tx-ivory);
+  background: radial-gradient(
+    ellipse at center,
+    var(--tx-walnut) 0%,
+    var(--tx-walnut-deep) 70%,
+    var(--tx-walnut-edge) 100%
+  );
+  position: relative;
+  min-height: calc(100vh - 56px); /* account for site header */
+  overflow: hidden;
+}
+
+.taxonomy-page__title {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.taxonomy-page__title-eyebrow {
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  letter-spacing: 0.4em;
+  color: var(--tx-gold);
+}
+
+.taxonomy-page__title-main {
+  font-family: 'Cinzel', serif;
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  color: var(--tx-ivory-bright);
+  margin-top: 4px;
+}
+
+.taxonomy-page__title-rule {
+  height: 1px;
+  width: 160px;
+  margin: 6px auto 0;
+  background: linear-gradient(90deg, transparent, var(--tx-gold), transparent);
+}
+
+.taxonomy-page__corner {
+  position: absolute;
+  width: 56px;
+  height: 56px;
+  border: 1.5px solid var(--tx-gold);
+  opacity: 0.85;
+  pointer-events: none;
+  z-index: 2;
+}
+.taxonomy-page__corner--tl { top: 12px; left: 12px;
+  border-right: none; border-bottom: none; }
+.taxonomy-page__corner--tr { top: 12px; right: 12px;
+  border-left: none; border-bottom: none; }
+.taxonomy-page__corner--bl { bottom: 12px; left: 12px;
+  border-right: none; border-top: none; }
+.taxonomy-page__corner--br { bottom: 12px; right: 12px;
+  border-left: none; border-top: none; }
+
+.taxonomy-page__corner::after {
+  content: '';
+  position: absolute;
+  width: 24px; height: 24px;
+  border: 1px solid var(--tx-gold);
+}
+.taxonomy-page__corner--tl::after { top: 6px; left: 6px;
+  border-right: none; border-bottom: none; }
+.taxonomy-page__corner--tr::after { top: 6px; right: 6px;
+  border-left: none; border-bottom: none; }
+.taxonomy-page__corner--bl::after { bottom: 6px; left: 6px;
+  border-right: none; border-top: none; }
+.taxonomy-page__corner--br::after { bottom: 6px; right: 6px;
+  border-left: none; border-top: none; }
+
+/* Cream "menu card" used by Legend, SearchBox, ZoomControls, SpecimenCard. */
+.tx-card {
+  background: linear-gradient(180deg, var(--tx-cream) 0%, var(--tx-cream-deep) 100%);
+  color: var(--tx-brown-ink);
+  border: 1px solid var(--tx-frame-edge);
+  box-shadow:
+    0 0 0 2px var(--tx-cream),
+    0 0 0 3px var(--tx-frame-edge),
+    0 6px 18px rgba(0, 0, 0, 0.4);
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  border-radius: 2px;
+}
+
+.tx-card__heading {
+  font-family: 'Cinzel', serif;
+  font-size: 9px;
+  letter-spacing: 0.25em;
+  font-weight: 600;
+  color: var(--tx-brown-faint);
+}
+
+.tx-rule {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--tx-gold) 20%, var(--tx-gold) 80%, transparent);
+}
