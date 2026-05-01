@@ -33,3 +33,6 @@ htmlcov/
 # Worktrees
 .worktrees/
 .claude/worktrees/
+
+# Brainstorm visual companion mockups
+.superpowers/
