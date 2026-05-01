@@ -26,7 +26,7 @@ export function Taxonomy() {
           setState({ status: 'error', message: error.message });
           return;
         }
-        setState({ status: 'loaded', rows: (data ?? []) as TaxonomyViewRow[] });
+        setState({ status: 'loaded', rows: (data ?? []) as unknown as TaxonomyViewRow[] });
       });
     return () => { cancelled = true; };
   }, []);
