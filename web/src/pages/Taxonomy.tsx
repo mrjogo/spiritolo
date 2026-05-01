@@ -3,10 +3,12 @@ import { supabase } from '../supabase';
 import { ForceCanvas } from '../components/taxonomy/ForceCanvas';
 import { Legend } from '../components/taxonomy/Legend';
 import {
+  effectiveRoleLabel,
   viewRowsToGraph,
   type TaxonomyNode,
   type TaxonomyViewRow,
 } from '../components/taxonomy/shapeData';
+import { TX_BROWN_SOFT } from '../components/taxonomy/palette';
 import '../components/taxonomy/taxonomy.css';
 
 type State =
@@ -92,24 +94,18 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         <div
           className="tx-card"
           style={{
-            position: 'absolute', top: 80, right: 14, zIndex: 3,
+            position: 'absolute', top: 150, right: 14, zIndex: 3,
             padding: '8px 12px', fontSize: 12, lineHeight: 1.5, width: 200,
           }}
         >
           <div style={{ fontFamily: "'Cinzel', serif", fontWeight: 600, letterSpacing: '0.12em' }}>
             {hovered.display_name}
           </div>
-          <div style={{ color: '#5a3f1a', fontStyle: 'italic' }}>
+          <div style={{ color: TX_BROWN_SOFT, fontStyle: 'italic' }}>
             {effectiveRoleLabel(hovered)} · {hovered.recipe_count} recipes · {hovered.aliases.length} aliases
           </div>
         </div>
       )}
     </div>
   );
-}
-
-function effectiveRoleLabel(n: TaxonomyNode): string {
-  if (n.role) return n.role;
-  if (n.role_default) return `${n.role_default}?`;
-  return 'unknown';
 }

@@ -25,6 +25,12 @@ export function effectiveRole(node: TaxonomyViewRow): TaxonomyRole {
   return (node.role ?? node.role_default ?? 'unknown') as TaxonomyRole;
 }
 
+export function effectiveRoleLabel(node: TaxonomyViewRow): string {
+  if (node.role) return node.role;
+  if (node.role_default) return `${node.role_default}?`;
+  return 'unknown';
+}
+
 export function viewRowsToGraph(rows: TaxonomyViewRow[]): {
   nodes: TaxonomyNode[];
   links: TaxonomyLink[];

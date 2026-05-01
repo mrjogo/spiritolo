@@ -1,4 +1,4 @@
-import { ROLE_FILL, TX_FRAME_EDGE } from './palette';
+import { ROLE_FILL, TX_BROWN_SOFT, TX_FRAME_EDGE } from './palette';
 
 export function Legend() {
   return (
@@ -13,7 +13,7 @@ export function Legend() {
       <LegendDot color={ROLE_FILL.substance} /> substance<br />
       <LegendDot color={ROLE_FILL.expression} /> expression<br />
       <LegendDot color={ROLE_FILL.brand} /> brand<br />
-      <div style={{ marginTop: 4, fontStyle: 'italic', color: '#5a3f1a' }}>
+      <div style={{ marginTop: 4, fontStyle: 'italic', color: TX_BROWN_SOFT }}>
         ◯ ring = cluster · ⌀ dashed = orphan
       </div>
     </div>

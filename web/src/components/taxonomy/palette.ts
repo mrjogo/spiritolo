@@ -10,6 +10,7 @@ export const TX_NODE_BG     = '#1a0f06';
 export const TX_ORPHAN_RING = '#a85b3a';
 export const TX_LINK        = 'rgba(201, 164, 73, 0.55)';
 export const TX_FRAME_EDGE  = '#8a6a35';
+export const TX_BROWN_SOFT  = '#5a3f1a';
 
 export const ROLE_FILL: Record<TaxonomyRole, string> = {
   substance:  '#e8d9b0',
