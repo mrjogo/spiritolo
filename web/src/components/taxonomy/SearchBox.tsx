@@ -1,4 +1,3 @@
-import { useEffect, useRef } from 'react';
 import { TX_BROWN_MID, TX_FRAME_EDGE } from './palette';
 
 interface Props {
@@ -8,15 +7,6 @@ interface Props {
 }
 
 export function SearchBox({ value, onChange, onSubmit }: Props) {
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  // Keep DOM in sync when parent updates value (e.g. on clear).
-  useEffect(() => {
-    if (inputRef.current && inputRef.current.value !== value) {
-      inputRef.current.value = value;
-    }
-  }, [value]);
-
   return (
     <div
       className="tx-card"
@@ -27,9 +17,8 @@ export function SearchBox({ value, onChange, onSubmit }: Props) {
     >
       <div className="tx-card__heading" style={{ marginBottom: 4 }}>SEARCH</div>
       <input
-        ref={inputRef}
         type="text"
-        defaultValue={value}
+        value={value}
         placeholder="rye, vermouth, …"
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') onSubmit(); }}
