@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { effectiveRole, viewRowsToGraph } from './shapeData';
+import { effectiveRole, viewRowsToGraph, isOrphan, matchesQuery, TOP_LEVEL_ALLOWLIST } from './shapeData';
 import type { TaxonomyViewRow } from './shapeData';
 
 const baseRow: TaxonomyViewRow = {
@@ -50,5 +50,56 @@ describe('viewRowsToGraph', () => {
     ];
     const { links } = viewRowsToGraph(rows);
     expect(links).toHaveLength(1);
+  });
+});
+
+describe('TOP_LEVEL_ALLOWLIST', () => {
+  it('includes the canonical roots of the DAG', () => {
+    expect(TOP_LEVEL_ALLOWLIST).toEqual(
+      expect.arrayContaining([
+        'whiskey',
+        'vermouth',
+        'bitters',
+        'liqueur',
+        'syrup',
+        'mixer',
+      ]),
+    );
+  });
+});
+
+describe('isOrphan', () => {
+  it('flags a node with no parents that is not on the allowlist', () => {
+    expect(isOrphan({ ...baseRow, slug: 'aperol', parent_ids: [] })).toBe(true);
+  });
+
+  it('does not flag a node with no parents that is on the allowlist', () => {
+    expect(isOrphan({ ...baseRow, slug: 'whiskey', parent_ids: [] })).toBe(false);
+  });
+
+  it('does not flag a node that has parents', () => {
+    expect(isOrphan({ ...baseRow, slug: 'rye_whiskey', parent_ids: [1] })).toBe(false);
+  });
+});
+
+describe('matchesQuery', () => {
+  it('returns true for a substring of slug', () => {
+    expect(matchesQuery({ ...baseRow, slug: 'rye_whiskey' }, 'rye')).toBe(true);
+  });
+
+  it('returns true for a substring of display_name', () => {
+    expect(matchesQuery({ ...baseRow, display_name: 'Rye Whiskey' }, 'whisk')).toBe(true);
+  });
+
+  it('returns true for a substring of any alias', () => {
+    expect(matchesQuery({ ...baseRow, aliases: ['rye', 'straight rye'] }, 'straight')).toBe(true);
+  });
+
+  it('is case-insensitive', () => {
+    expect(matchesQuery({ ...baseRow, slug: 'rye_whiskey' }, 'RYE')).toBe(true);
+  });
+
+  it('returns true for an empty query (no filter applied)', () => {
+    expect(matchesQuery({ ...baseRow }, '')).toBe(true);
   });
 });
