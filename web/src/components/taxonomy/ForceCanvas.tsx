@@ -20,12 +20,13 @@ interface Props {
   links: TaxonomyLink[];
   width: number;
   height: number;
+  dimmedIds?: Set<number>;
   onNodeClick: (node: TaxonomyNode) => void;
   onNodeHover: (node: TaxonomyNode | null) => void;
 }
 
 export function ForceCanvas({
-  nodes, links, width, height, onNodeClick, onNodeHover,
+  nodes, links, width, height, dimmedIds, onNodeClick, onNodeHover,
 }: Props) {
   const ref = useRef<ForceGraphMethods | undefined>(undefined);
 
@@ -47,7 +48,13 @@ export function ForceCanvas({
       cooldownTicks={120}
       onNodeClick={(n) => onNodeClick(n as TaxonomyNode)}
       onNodeHover={(n) => onNodeHover((n as TaxonomyNode | null) ?? null)}
-      nodeCanvasObject={(node, ctx) => drawNode(node as TaxonomyNode & { x: number; y: number }, ctx)}
+      nodeCanvasObject={(node, ctx) => {
+        const n = node as TaxonomyNode & { x: number; y: number };
+        const dimmed = dimmedIds?.has(n.id) ?? false;
+        ctx.globalAlpha = dimmed ? 0.18 : 1;
+        drawNode(n, ctx);
+        ctx.globalAlpha = 1;
+      }}
       nodeCanvasObjectMode={() => 'replace'}
     />
   );

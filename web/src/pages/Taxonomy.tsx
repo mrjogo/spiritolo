@@ -2,8 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../supabase';
 import { ForceCanvas } from '../components/taxonomy/ForceCanvas';
 import { Legend } from '../components/taxonomy/Legend';
+import { SearchBox } from '../components/taxonomy/SearchBox';
 import {
   effectiveRoleLabel,
+  matchesQuery,
   viewRowsToGraph,
   type TaxonomyNode,
   type TaxonomyViewRow,
@@ -56,6 +58,12 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
     h: window.innerHeight - 56,
   });
   const [hovered, setHovered] = useState<TaxonomyNode | null>(null);
+  const [query, setQuery] = useState('');
+
+  const dimmedIds = useMemo(() => {
+    if (query.trim() === '') return new Set<number>();
+    return new Set(rows.filter((r) => !matchesQuery(r, query)).map((r) => r.id));
+  }, [rows, query]);
 
   useEffect(() => {
     const handler = () => setSize({
@@ -79,11 +87,17 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         <div className="taxonomy-page__title-rule" />
       </div>
 
+      <SearchBox
+        value={query}
+        onChange={setQuery}
+        onSubmit={() => { /* focus top match in Task 14 */ }}
+      />
       <ForceCanvas
         nodes={nodes as TaxonomyNode[]}
         links={links}
         width={size.w}
         height={size.h}
+        dimmedIds={dimmedIds}
         onNodeClick={() => { /* Task 14 */ }}
         onNodeHover={setHovered}
       />
