@@ -69,6 +69,15 @@ def compute_cluster_key(canonical_name: str, ingredients: list[dict[str, Any]]) 
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _none_safe_sort_key(t: tuple[Any, ...]) -> tuple[Any, ...]:
+    """Wrap each tuple element so None is comparable with any concrete type.
+    Python 3 raises TypeError on `None < 1.5` etc; expanding each value to
+    `(is_none, value)` puts all-None entries first/last consistently and
+    avoids cross-type comparisons within the sort.
+    """
+    return tuple((v is None, v) for v in t)
+
+
 def compute_variant_key(cluster_key: str, ingredients: list[dict[str, Any]]) -> str:
     """Variant identity adds taxonomy_node_id (specific node), amount,
     amount_max, unit. Two recipes share a variant iff their amounts +
@@ -76,15 +85,18 @@ def compute_variant_key(cluster_key: str, ingredients: list[dict[str, Any]]) -> 
     """
     members = sorted(
         (
-            ing["role"],
-            ing["antichain_node_id"],
-            ing.get("taxonomy_node_id"),
-            ing.get("amount"),
-            ing.get("amount_max"),
-            ing.get("unit"),
-        )
-        for ing in ingredients
-        if in_cluster_key(ing)
+            (
+                ing["role"],
+                ing["antichain_node_id"],
+                ing.get("taxonomy_node_id"),
+                ing.get("amount"),
+                ing.get("amount_max"),
+                ing.get("unit"),
+            )
+            for ing in ingredients
+            if in_cluster_key(ing)
+        ),
+        key=_none_safe_sort_key,
     )
     payload = _canonical_json({
         "cluster_key": cluster_key,

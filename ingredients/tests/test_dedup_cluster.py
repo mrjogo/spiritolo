@@ -97,6 +97,26 @@ def test_compute_cluster_key_excludes_ice():
     assert compute_cluster_key("negroni", no_ice) == compute_cluster_key("negroni", with_ice)
 
 
+def test_compute_variant_key_handles_mixed_none_and_concrete_amounts():
+    """Some ingredients have amount=None (recipe didn't specify quantity);
+    sorted() over (role, antichain_id, taxonomy_id, amount, ...) tuples must
+    not fail with TypeError when one row has amount=None and another has a
+    float. Regression test for the cluster.py NoneType comparison bug."""
+    ingredients = [
+        _ing(role="base_spirit", antichain_node_id=1, amount=2.0, unit="oz"),
+        _ing(role="modifier",    antichain_node_id=2, amount=None, amount_max=None, unit=None),
+        _ing(role="citrus",      antichain_node_id=3, amount=0.75, unit="oz"),
+    ]
+    ck = compute_cluster_key("negroni", ingredients)
+    # Should not raise TypeError; should be a deterministic hash.
+    vk = compute_variant_key(ck, ingredients)
+    assert isinstance(vk, str) and len(vk) == 64
+
+    # Reordering inputs must produce the same variant_key (sort is the point).
+    reordered = list(reversed(ingredients))
+    assert compute_variant_key(ck, reordered) == vk
+
+
 # === Integration tests (require dedup_fixture + db_conn) ===
 
 def test_run_cluster_compute_groups_identical_negronis(dedup_fixture, db_conn):
