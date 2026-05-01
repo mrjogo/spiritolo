@@ -108,6 +108,8 @@ export function radialPositions(
 ): Map<number, { x: number; y: number }> {
   const out = new Map<number, { x: number; y: number }>();
   // Parents arc the top semicircle (-PI to 0); children arc the bottom (0 to PI).
+  // t = (i+1)/(n+1) keeps every neighbor strictly inside the open arc, so
+  // no parent lands at y=0 alongside the children's arc start.
   const placeArc = (
     list: RadialNeighbor[],
     arcStart: number,
@@ -115,16 +117,8 @@ export function radialPositions(
   ) => {
     if (list.length === 0) return;
     const sorted = [...list].sort((a, b) => a.id - b.id);
-    if (sorted.length === 1) {
-      const angle = (arcStart + arcEnd) / 2;
-      out.set(sorted[0].id, {
-        x: focused.x + radius * Math.cos(angle),
-        y: focused.y + radius * Math.sin(angle),
-      });
-      return;
-    }
     for (let i = 0; i < sorted.length; i++) {
-      const t = i / (sorted.length - 1);
+      const t = (i + 1) / (sorted.length + 1);
       const angle = arcStart + t * (arcEnd - arcStart);
       out.set(sorted[i].id, {
         x: focused.x + radius * Math.cos(angle),

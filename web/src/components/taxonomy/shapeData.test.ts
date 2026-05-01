@@ -160,4 +160,31 @@ describe('radialPositions', () => {
     const b = radialPositions(focused, [{ id: 1 }, { id: 4 }], [{ id: 3 }], 50);
     expect(Array.from(a.entries())).toEqual(Array.from(b.entries()));
   });
+
+  it('keeps every parent strictly above the focus, even with multiple parents', () => {
+    const positions = radialPositions(
+      focused,
+      [{ id: 1 }, { id: 2 }, { id: 4 }],
+      [],
+      50,
+    );
+    for (const id of [1, 2, 4]) {
+      expect(positions.get(id)!.y).toBeLessThan(focused.y);
+    }
+  });
+
+  it('does not overlap a parent and a child on the y=0 axis', () => {
+    const positions = radialPositions(
+      focused,
+      [{ id: 1 }, { id: 2 }],
+      [{ id: 3 }, { id: 4 }],
+      50,
+    );
+    for (const id of [1, 2]) {
+      expect(positions.get(id)!.y).toBeLessThan(focused.y);
+    }
+    for (const id of [3, 4]) {
+      expect(positions.get(id)!.y).toBeGreaterThan(focused.y);
+    }
+  });
 });
