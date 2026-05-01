@@ -21,6 +21,8 @@ export function SpecimenCard({ node, onDismiss }: Props) {
   return (
     <aside
       className="tx-card"
+      role="dialog"
+      aria-label={`Taxonomy specimen: ${node.display_name}`}
       style={{
         position: 'absolute', top: 0, right: 0, bottom: 0, width: 240, zIndex: 4,
         padding: '20px 18px', borderRadius: 0, borderRight: 'none',

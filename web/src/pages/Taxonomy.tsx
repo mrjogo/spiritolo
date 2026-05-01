@@ -20,6 +20,10 @@ import {
 import { TX_BROWN_SOFT } from '../components/taxonomy/palette';
 import '../components/taxonomy/taxonomy.css';
 
+// Mirrors --site-header-height in styles.css. Used to size the
+// taxonomy canvas to fill the viewport below the header.
+const SITE_HEADER_HEIGHT = 56;
+
 type State =
   | { status: 'loading' }
   | { status: 'error'; message: string }
@@ -62,7 +66,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   const { nodes, links } = useMemo(() => viewRowsToGraph(rows), [rows]);
   const [size, setSize] = useState({
     w: window.innerWidth,
-    h: window.innerHeight - 56,
+    h: window.innerHeight - SITE_HEADER_HEIGHT,
   });
   const [hovered, setHovered] = useState<TaxonomyNode | null>(null);
   const [query, setQuery] = useState('');
@@ -106,7 +110,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   useEffect(() => {
     const handler = () => setSize({
       w: window.innerWidth,
-      h: window.innerHeight - 56,
+      h: window.innerHeight - SITE_HEADER_HEIGHT,
     });
     window.addEventListener('resize', handler);
     return () => window.removeEventListener('resize', handler);
@@ -168,7 +172,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
       <FilterChips active={filters} onToggle={toggleFilter} />
       <ForceCanvas
         ref={canvasRef}
-        nodes={nodes as TaxonomyNode[]}
+        nodes={nodes}
         links={links}
         width={size.w}
         height={size.h}

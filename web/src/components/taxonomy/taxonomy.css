@@ -29,7 +29,7 @@
     var(--tx-walnut-edge) 100%
   );
   position: relative;
-  min-height: calc(100vh - 56px); /* account for site header */
+  min-height: calc(100vh - var(--site-header-height));
   overflow: hidden;
 }
 

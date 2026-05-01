@@ -1,6 +1,16 @@
 import { describe, it, expect } from 'vitest';
-import { effectiveRole, viewRowsToGraph, isOrphan, matchesQuery, TOP_LEVEL_ALLOWLIST, neighborsOf, radialPositions } from './shapeData';
-import type { TaxonomyViewRow } from './shapeData';
+import {
+  effectiveRole,
+  effectiveRoleLabel,
+  viewRowsToGraph,
+  isOrphan,
+  matchesQuery,
+  rowMatchesFilters,
+  TOP_LEVEL_ALLOWLIST,
+  neighborsOf,
+  radialPositions,
+} from './shapeData';
+import type { FilterKey, TaxonomyViewRow } from './shapeData';
 
 const baseRow: TaxonomyViewRow = {
   id: 1,
@@ -186,5 +196,56 @@ describe('radialPositions', () => {
     for (const id of [3, 4]) {
       expect(positions.get(id)!.y).toBeGreaterThan(focused.y);
     }
+  });
+});
+
+describe('effectiveRoleLabel', () => {
+  it('returns the asserted role unchanged when set', () => {
+    expect(effectiveRoleLabel({ ...baseRow, role: 'expression', role_default: null })).toBe('expression');
+  });
+
+  it('marks the inferred role with a trailing ? when only role_default is set', () => {
+    expect(effectiveRoleLabel({ ...baseRow, role: null, role_default: 'substance' })).toBe('substance?');
+  });
+
+  it('returns "unknown" when both are null', () => {
+    expect(effectiveRoleLabel({ ...baseRow, role: null, role_default: null })).toBe('unknown');
+  });
+});
+
+describe('rowMatchesFilters', () => {
+  it('returns true when no filters are active (empty set)', () => {
+    expect(rowMatchesFilters(baseRow, new Set())).toBe(true);
+  });
+
+  it('matches a role-chip via effectiveRole (substance via role_default fallback)', () => {
+    const row = { ...baseRow, role: null, role_default: 'substance' as const };
+    expect(rowMatchesFilters(row, new Set<FilterKey>(['substance']))).toBe(true);
+    expect(rowMatchesFilters(row, new Set<FilterKey>(['expression']))).toBe(false);
+  });
+
+  it('AND-combines: substance + expression matches nothing', () => {
+    const row = { ...baseRow, role: null, role_default: 'substance' as const };
+    expect(rowMatchesFilters(row, new Set<FilterKey>(['substance', 'expression']))).toBe(false);
+  });
+
+  it('flag chips: cluster matches only is_cluster_node = true', () => {
+    expect(rowMatchesFilters({ ...baseRow, is_cluster_node: true }, new Set<FilterKey>(['cluster']))).toBe(true);
+    expect(rowMatchesFilters({ ...baseRow, is_cluster_node: false }, new Set<FilterKey>(['cluster']))).toBe(false);
+  });
+
+  it('orphan chip uses isOrphan (no parents AND not on allowlist)', () => {
+    expect(rowMatchesFilters({ ...baseRow, slug: 'aperol', parent_ids: [] }, new Set<FilterKey>(['orphan']))).toBe(true);
+    expect(rowMatchesFilters({ ...baseRow, slug: 'whiskey', parent_ids: [] }, new Set<FilterKey>(['orphan']))).toBe(false);
+  });
+
+  it('"no aliases" chip matches only zero-alias rows', () => {
+    expect(rowMatchesFilters({ ...baseRow, aliases: [] }, new Set<FilterKey>(['no aliases']))).toBe(true);
+    expect(rowMatchesFilters({ ...baseRow, aliases: ['x'] }, new Set<FilterKey>(['no aliases']))).toBe(false);
+  });
+
+  it('"zero recipes" chip matches only recipe_count === 0', () => {
+    expect(rowMatchesFilters({ ...baseRow, recipe_count: 0 }, new Set<FilterKey>(['zero recipes']))).toBe(true);
+    expect(rowMatchesFilters({ ...baseRow, recipe_count: 5 }, new Set<FilterKey>(['zero recipes']))).toBe(false);
   });
 });

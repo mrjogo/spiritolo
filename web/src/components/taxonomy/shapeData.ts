@@ -14,7 +14,10 @@ export interface TaxonomyViewRow {
   recipe_count: number;
 }
 
-export interface TaxonomyNode extends TaxonomyViewRow {}
+// Alias rather than empty extension; react-force-graph will mutate
+// fx/fy/x/y/vx/vy on these objects at runtime, but the static type
+// stays identical to the row.
+export type TaxonomyNode = TaxonomyViewRow;
 
 export interface TaxonomyLink {
   source: number;

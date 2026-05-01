@@ -1,5 +1,9 @@
 * { box-sizing: border-box; }
 
+:root {
+  --site-header-height: 56px;
+}
+
 body {
   margin: 0;
   font-family: system-ui, -apple-system, sans-serif;
@@ -139,7 +143,7 @@ a { color: #0a58ca; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 56px;
+  height: var(--site-header-height);
   padding: 0 1rem;
   border-bottom: 1px solid #e5e5e5;
   background: #fff;
