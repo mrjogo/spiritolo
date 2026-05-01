@@ -159,3 +159,12 @@ a { color: #0a58ca; }
   gap: 1rem;
   font-size: 0.95rem;
 }
+
+.site-header__nav a {
+  color: #2c1d0c;
+  text-decoration: none;
+}
+.site-header__nav a:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
