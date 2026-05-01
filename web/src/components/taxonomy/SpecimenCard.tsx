@@ -55,17 +55,19 @@ export function SpecimenCard({ node, onDismiss }: Props) {
         <div>{node.recipe_count} drinks call for this</div>
 
         <div className="tx-card__heading" style={{ marginTop: 10 }}>SLUG</div>
-        <div
+        <button
+          type="button"
           onClick={copySlug}
-          role="button"
-          tabIndex={0}
+          aria-label={`Copy slug ${node.slug} to clipboard`}
           style={{
+            background: 'none', border: 'none', padding: 0,
+            color: 'inherit', textAlign: 'left',
             fontFamily: 'ui-monospace, monospace', fontSize: 12,
             cursor: 'pointer', userSelect: 'none',
           }}
         >
           ⊕ {node.slug}
-        </div>
+        </button>
       </div>
 
       <div

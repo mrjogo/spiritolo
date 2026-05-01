@@ -112,23 +112,29 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
     return () => window.removeEventListener('resize', handler);
   }, []);
 
-  // Pin radial neighbors when focused, release when unfocused
+  // Pin radial neighbors when focused, release when unfocused. We mutate
+  // fx/fy on nodes in place — react-force-graph reads these properties
+  // off the simulation graph each tick and pins matching nodes to the
+  // given coordinates. This is the lib's documented pin API; React-side
+  // immutability isn't observable here because the canvas owns its own
+  // dataIsEqual checks and the mutation does not feed back into React
+  // state. Disabling react-hooks/immutability for this block only.
+  /* eslint-disable react-hooks/immutability */
   useEffect(() => {
+    type PinNode = TaxonomyNode & { fx?: number | null; fy?: number | null };
     if (!focusedNode) {
-      for (const n of nodes as Array<TaxonomyNode & { fx?: number | null; fy?: number | null }>) {
-        n.fx = null; n.fy = null;
-      }
+      for (const n of nodes as PinNode[]) { n.fx = null; n.fy = null; }
       return;
     }
     const focusedRuntime = nodes.find((n) => n.id === focusedId) as { x?: number; y?: number } | undefined;
-    if (!focusedRuntime?.x || !focusedRuntime?.y) return;
+    if (focusedRuntime?.x == null || focusedRuntime.y == null) return;
     const { parents, children } = neighborsOf(focusedNode, byId);
     const positions = radialPositions(
       { id: focusedNode.id, x: focusedRuntime.x, y: focusedRuntime.y },
       parents, children,
       Math.min(size.w, size.h) * 0.22,
     );
-    for (const n of nodes as Array<TaxonomyNode & { fx?: number | null; fy?: number | null }>) {
+    for (const n of nodes as PinNode[]) {
       const p = positions.get(n.id);
       if (p) { n.fx = p.x; n.fy = p.y; }
       else if (n.id === focusedNode.id) { n.fx = focusedRuntime.x; n.fy = focusedRuntime.y; }
@@ -136,6 +142,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
     }
     canvasRef.current?.centerAt(focusedRuntime.x, focusedRuntime.y, 600);
   }, [focusedNode, nodes, byId, size, focusedId]);
+  /* eslint-enable react-hooks/immutability */
 
   return (
     <div className="taxonomy-page">
