@@ -73,3 +73,66 @@ export function matchesQuery(node: TaxonomyViewRow, query: string): boolean {
   if (node.display_name.toLowerCase().includes(q)) return true;
   return node.aliases.some((a) => a.toLowerCase().includes(q));
 }
+
+export interface NeighborSet {
+  focused: TaxonomyViewRow;
+  parents: TaxonomyViewRow[];
+  children: TaxonomyViewRow[];
+}
+
+export function neighborsOf(
+  node: TaxonomyViewRow,
+  byId: Map<number, TaxonomyViewRow>,
+): NeighborSet {
+  const lookup = (id: number) => byId.get(id);
+  const parents = node.parent_ids.map(lookup).filter((n): n is TaxonomyViewRow => !!n);
+  const children = node.child_ids.map(lookup).filter((n): n is TaxonomyViewRow => !!n);
+  return { focused: node, parents, children };
+}
+
+export interface RadialFocus {
+  id: number;
+  x: number;
+  y: number;
+}
+
+export interface RadialNeighbor {
+  id: number;
+}
+
+export function radialPositions(
+  focused: RadialFocus,
+  parents: RadialNeighbor[],
+  children: RadialNeighbor[],
+  radius: number,
+): Map<number, { x: number; y: number }> {
+  const out = new Map<number, { x: number; y: number }>();
+  // Parents arc the top semicircle (-PI to 0); children arc the bottom (0 to PI).
+  const placeArc = (
+    list: RadialNeighbor[],
+    arcStart: number,
+    arcEnd: number,
+  ) => {
+    if (list.length === 0) return;
+    const sorted = [...list].sort((a, b) => a.id - b.id);
+    if (sorted.length === 1) {
+      const angle = (arcStart + arcEnd) / 2;
+      out.set(sorted[0].id, {
+        x: focused.x + radius * Math.cos(angle),
+        y: focused.y + radius * Math.sin(angle),
+      });
+      return;
+    }
+    for (let i = 0; i < sorted.length; i++) {
+      const t = i / (sorted.length - 1);
+      const angle = arcStart + t * (arcEnd - arcStart);
+      out.set(sorted[i].id, {
+        x: focused.x + radius * Math.cos(angle),
+        y: focused.y + radius * Math.sin(angle),
+      });
+    }
+  };
+  placeArc(parents,  -Math.PI, 0);
+  placeArc(children, 0, Math.PI);
+  return out;
+}
