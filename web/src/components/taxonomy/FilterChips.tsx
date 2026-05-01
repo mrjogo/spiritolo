@@ -1,8 +1,7 @@
-import { TX_FRAME_EDGE, TX_GOLD, TX_NODE_BG, TX_BROWN_MID } from './palette';
+import { TX_BROWN_MID, TX_CREAM_RGBA, TX_FRAME_EDGE, TX_GOLD, TX_NODE_BG } from './palette';
+import type { FilterKey } from './shapeData';
 
-export type FilterKey =
-  | 'substance' | 'expression' | 'brand'
-  | 'cluster' | 'orphan' | 'no aliases' | 'zero recipes';
+export type { FilterKey };
 
 const ORDERED: FilterKey[] = [
   'substance', 'expression', 'brand',
@@ -36,7 +35,7 @@ export function FilterChips({ active, onToggle }: Props) {
               padding: '3px 8px',
               borderRadius: 10,
               border: `1px solid ${TX_FRAME_EDGE}`,
-              background: isActive ? TX_GOLD : 'rgba(245, 233, 200, 0.85)',
+              background: isActive ? TX_GOLD : TX_CREAM_RGBA,
               color: isActive ? TX_NODE_BG : TX_BROWN_MID,
               cursor: 'pointer',
               textTransform: 'uppercase',

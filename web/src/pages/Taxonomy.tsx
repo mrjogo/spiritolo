@@ -3,13 +3,13 @@ import { supabase } from '../supabase';
 import { ForceCanvas } from '../components/taxonomy/ForceCanvas';
 import { Legend } from '../components/taxonomy/Legend';
 import { SearchBox } from '../components/taxonomy/SearchBox';
-import { FilterChips, type FilterKey } from '../components/taxonomy/FilterChips';
+import { FilterChips } from '../components/taxonomy/FilterChips';
 import {
-  effectiveRole,
   effectiveRoleLabel,
-  isOrphan,
   matchesQuery,
+  rowMatchesFilters,
   viewRowsToGraph,
+  type FilterKey,
   type TaxonomyNode,
   type TaxonomyViewRow,
 } from '../components/taxonomy/shapeData';
@@ -143,14 +143,3 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   );
 }
 
-function rowMatchesFilters(r: TaxonomyViewRow, active: Set<FilterKey>): boolean {
-  for (const f of active) {
-    if (f === 'substance' || f === 'expression' || f === 'brand') {
-      if (effectiveRole(r) !== f) return false;
-    } else if (f === 'cluster' && !r.is_cluster_node) return false;
-    else if (f === 'orphan' && !isOrphan(r)) return false;
-    else if (f === 'no aliases' && r.aliases.length > 0) return false;
-    else if (f === 'zero recipes' && r.recipe_count > 0) return false;
-  }
-  return true;
-}

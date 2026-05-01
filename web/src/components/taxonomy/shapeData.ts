@@ -80,6 +80,27 @@ export function matchesQuery(node: TaxonomyViewRow, query: string): boolean {
   return node.aliases.some((a) => a.toLowerCase().includes(q));
 }
 
+export type FilterKey =
+  | 'substance' | 'expression' | 'brand'
+  | 'cluster' | 'orphan' | 'no aliases' | 'zero recipes';
+
+export function rowMatchesFilters(
+  row: TaxonomyViewRow,
+  active: Set<FilterKey>,
+): boolean {
+  for (const f of active) {
+    if (f === 'substance' || f === 'expression' || f === 'brand') {
+      if (effectiveRole(row) !== f) return false;
+      continue;
+    }
+    if (f === 'cluster' && !row.is_cluster_node) return false;
+    if (f === 'orphan' && !isOrphan(row)) return false;
+    if (f === 'no aliases' && row.aliases.length > 0) return false;
+    if (f === 'zero recipes' && row.recipe_count > 0) return false;
+  }
+  return true;
+}
+
 export interface NeighborSet {
   focused: TaxonomyViewRow;
   parents: TaxonomyViewRow[];

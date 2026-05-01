@@ -13,6 +13,7 @@ export const TX_FRAME_EDGE  = '#8a6a35';
 export const TX_BROWN_SOFT  = '#5a3f1a';
 export const TX_BROWN_INK   = '#2c1d0c';
 export const TX_BROWN_MID   = '#3a2a14';
+export const TX_CREAM_RGBA  = 'rgba(245, 233, 200, 0.85)'; // --tx-cream at 85% alpha
 
 export const ROLE_FILL: Record<TaxonomyRole, string> = {
   substance:  '#e8d9b0',
