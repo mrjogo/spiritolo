@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../supabase';
-import { ForceCanvas } from '../components/taxonomy/ForceCanvas';
+import { ForceCanvas, type ForceCanvasHandle } from '../components/taxonomy/ForceCanvas';
 import { Legend } from '../components/taxonomy/Legend';
 import { SearchBox } from '../components/taxonomy/SearchBox';
 import { FilterChips } from '../components/taxonomy/FilterChips';
+import { ZoomControls } from '../components/taxonomy/ZoomControls';
 import {
   effectiveRoleLabel,
   matchesQuery,
@@ -63,6 +64,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   const [hovered, setHovered] = useState<TaxonomyNode | null>(null);
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<Set<FilterKey>>(new Set());
+  const canvasRef = useRef<ForceCanvasHandle>(null);
 
   const dimmedIds = useMemo(() => {
     const dim = new Set<number>();
@@ -112,6 +114,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
       />
       <FilterChips active={filters} onToggle={toggleFilter} />
       <ForceCanvas
+        ref={canvasRef}
         nodes={nodes as TaxonomyNode[]}
         links={links}
         width={size.w}
@@ -119,6 +122,11 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         dimmedIds={dimmedIds}
         onNodeClick={() => { /* Task 14 */ }}
         onNodeHover={setHovered}
+      />
+      <ZoomControls
+        onZoomIn={() => canvasRef.current?.zoom(1.4)}
+        onZoomOut={() => canvasRef.current?.zoom(1 / 1.4)}
+        onFit={() => canvasRef.current?.fit()}
       />
 
       <Legend />

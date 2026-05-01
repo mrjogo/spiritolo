@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react';
 import ForceGraph2D, { type ForceGraphMethods } from 'react-force-graph-2d';
 import {
   effectiveRole,
@@ -15,6 +15,12 @@ import {
   nodeRadius,
 } from './palette';
 
+export interface ForceCanvasHandle {
+  zoom: (factor: number) => void;
+  fit: () => void;
+  centerAt: (x: number, y: number, ms?: number) => void;
+}
+
 interface Props {
   nodes: TaxonomyNode[];
   links: TaxonomyLink[];
@@ -25,16 +31,28 @@ interface Props {
   onNodeHover: (node: TaxonomyNode | null) => void;
 }
 
-export function ForceCanvas({
-  nodes, links, width, height, dimmedIds, onNodeClick, onNodeHover,
-}: Props) {
-  const ref = useRef<ForceGraphMethods | undefined>(undefined);
+export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCanvas(
+  { nodes, links, width, height, dimmedIds, onNodeClick, onNodeHover },
+  ref,
+) {
+  const inner = useRef<ForceGraphMethods | undefined>(undefined);
+
+  useImperativeHandle(ref, () => ({
+    zoom: (factor) => {
+      const g = inner.current;
+      if (!g) return;
+      const cur = g.zoom();
+      g.zoom(cur * factor, 250);
+    },
+    fit: () => inner.current?.zoomToFit(400, 60),
+    centerAt: (x, y, ms = 400) => inner.current?.centerAt(x, y, ms),
+  }), []);
 
   const data = useMemo(() => ({ nodes, links }), [nodes, links]);
 
   return (
     <ForceGraph2D
-      ref={ref}
+      ref={inner}
       graphData={data}
       width={width}
       height={height}
@@ -58,7 +76,7 @@ export function ForceCanvas({
       nodeCanvasObjectMode={() => 'replace'}
     />
   );
-}
+});
 
 function drawNode(
   node: TaxonomyNode & { x: number; y: number },
