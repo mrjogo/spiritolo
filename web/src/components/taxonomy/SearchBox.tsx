@@ -17,14 +17,16 @@ export function SearchBox({ value, onChange, onSubmit }: Props) {
     >
       <div className="tx-card__heading" style={{ marginBottom: 4 }}>SEARCH</div>
       <input
-        type="text"
+        type="search"
+        aria-label="Search taxonomy"
         value={value}
         placeholder="rye, vermouth, …"
+        className="tx-search-input"
         onChange={(e) => onChange(e.target.value)}
         onKeyDown={(e) => { if (e.key === 'Enter') onSubmit(); }}
         style={{
           width: '100%', background: 'transparent', border: 'none',
-          borderBottom: `1px solid ${TX_FRAME_EDGE}`, outline: 'none',
+          borderBottom: `1px solid ${TX_FRAME_EDGE}`,
           fontFamily: "'Cormorant Garamond', Georgia, serif",
           fontStyle: 'italic', fontSize: 14, color: TX_BROWN_MID, padding: '2px 0',
         }}

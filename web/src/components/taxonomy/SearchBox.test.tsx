@@ -31,7 +31,7 @@ describe('<SearchBox>', () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     render(<Harness onChange={onChange} />);
-    await user.type(screen.getByRole('textbox'), 'rye');
+    await user.type(screen.getByRole('searchbox'), 'rye');
     expect(onChange).toHaveBeenLastCalledWith('rye');
   });
 
@@ -39,7 +39,7 @@ describe('<SearchBox>', () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
     render(<Harness initial="rye" onSubmit={onSubmit} />);
-    await user.type(screen.getByRole('textbox'), '{Enter}');
+    await user.type(screen.getByRole('searchbox'), '{Enter}');
     expect(onSubmit).toHaveBeenCalled();
   });
 });

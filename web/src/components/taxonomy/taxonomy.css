@@ -124,3 +124,12 @@
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--tx-gold) 20%, var(--tx-gold) 80%, transparent);
 }
+
+/* Search input focus indicator: thicker gold border-bottom replaces the
+   default outline. padding-bottom shrinks 1px to keep the box stable. */
+.tx-search-input:focus {
+  outline: none;
+  border-bottom-color: var(--tx-gold);
+  border-bottom-width: 2px;
+  padding-bottom: 1px;
+}
