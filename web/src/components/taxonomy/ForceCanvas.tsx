@@ -5,20 +5,15 @@ import {
   isOrphan,
   type TaxonomyNode,
   type TaxonomyLink,
-  type TaxonomyRole,
 } from './shapeData';
-
-const ROLE_FILL: Record<TaxonomyRole, string> = {
-  substance:  '#e8d9b0',
-  expression: '#a85b3a',
-  brand:      '#7a9a82',
-  unknown:    '#888888',
-};
-
-const RING        = '#c9a449';
-const NODE_BG     = '#1a0f06';
-const ORPHAN_RING = '#a85b3a';
-const LINK        = 'rgba(201, 164, 73, 0.55)';
+import {
+  ROLE_FILL,
+  TX_GOLD,
+  TX_NODE_BG,
+  TX_ORPHAN_RING,
+  TX_LINK,
+  nodeRadius,
+} from './palette';
 
 interface Props {
   nodes: TaxonomyNode[];
@@ -44,8 +39,8 @@ export function ForceCanvas({
       height={height}
       backgroundColor="rgba(0,0,0,0)"
       nodeRelSize={4}
-      nodeVal={(n) => Math.sqrt((n as TaxonomyNode).recipe_count + 1) * 2.2}
-      linkColor={() => LINK}
+      nodeVal={(n) => nodeRadius(n as TaxonomyNode)}
+      linkColor={() => TX_LINK}
       linkWidth={0.6}
       linkCurvature={0.18}
       enableNodeDrag={false}
@@ -64,32 +59,34 @@ function drawNode(
 ) {
   const role = effectiveRole(node);
   const fill = ROLE_FILL[role];
-  const radius = Math.max(3, Math.sqrt(node.recipe_count + 1) * 2.2);
+  const radius = nodeRadius(node);
+  const outerR = radius + 2.5;
+  const haloR = radius + 1.7;
 
   // Outer dark cap
   ctx.beginPath();
-  ctx.arc(node.x, node.y, radius + 2.5, 0, 2 * Math.PI);
-  ctx.fillStyle = NODE_BG;
+  ctx.arc(node.x, node.y, outerR, 0, 2 * Math.PI);
+  ctx.fillStyle = TX_NODE_BG;
   ctx.fill();
 
   // Cluster halo (thin extra ring)
   if (node.is_cluster_node) {
     ctx.beginPath();
-    ctx.arc(node.x, node.y, radius + 1.7, 0, 2 * Math.PI);
-    ctx.strokeStyle = RING;
+    ctx.arc(node.x, node.y, haloR, 0, 2 * Math.PI);
+    ctx.strokeStyle = TX_GOLD;
     ctx.lineWidth = 0.4;
     ctx.stroke();
   }
 
-  // Gold ring
+  // Gold ring (or dashed red if orphan)
   ctx.beginPath();
-  ctx.arc(node.x, node.y, radius + 2.5, 0, 2 * Math.PI);
+  ctx.arc(node.x, node.y, outerR, 0, 2 * Math.PI);
   if (isOrphan(node)) {
-    ctx.strokeStyle = ORPHAN_RING;
+    ctx.strokeStyle = TX_ORPHAN_RING;
     ctx.setLineDash([2.2, 1.8]);
     ctx.lineWidth = 1.0;
   } else {
-    ctx.strokeStyle = RING;
+    ctx.strokeStyle = TX_GOLD;
     ctx.setLineDash([]);
     ctx.lineWidth = 1.0;
   }
