@@ -161,15 +161,22 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         <div className="taxonomy-page__title-rule" />
       </div>
 
-      <SearchBox
-        value={query}
-        onChange={setQuery}
-        onSubmit={() => {
-          const top = rows.find((r) => matchesQuery(r, query));
-          if (top) setFocusedId(top.id);
+      <div
+        style={{
+          position: 'absolute', top: 14, left: 14, zIndex: 3,
+          display: 'flex', flexDirection: 'column', gap: 8,
         }}
-      />
-      <FilterChips active={filters} onToggle={toggleFilter} />
+      >
+        <SearchBox
+          value={query}
+          onChange={setQuery}
+          onSubmit={() => {
+            const top = rows.find((r) => matchesQuery(r, query));
+            if (top) setFocusedId(top.id);
+          }}
+        />
+        <FilterChips active={filters} onToggle={toggleFilter} />
+      </div>
       <ForceCanvas
         ref={canvasRef}
         nodes={nodes}
@@ -177,6 +184,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         width={size.w}
         height={size.h}
         dimmedIds={dimmedIds}
+        focusedId={focusedId}
         onNodeClick={(n) => setFocusedId(n.id)}
         onNodeHover={setHovered}
         onBackgroundClick={() => setFocusedId(null)}

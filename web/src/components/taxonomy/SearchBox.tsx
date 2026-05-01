@@ -10,10 +10,7 @@ export function SearchBox({ value, onChange, onSubmit }: Props) {
   return (
     <div
       className="tx-card"
-      style={{
-        position: 'absolute', top: 14, left: 14, zIndex: 3,
-        padding: '8px 12px', width: 180,
-      }}
+      style={{ padding: '8px 12px', width: 180 }}
     >
       <div className="tx-card__heading" style={{ marginBottom: 4 }}>SEARCH</div>
       <input

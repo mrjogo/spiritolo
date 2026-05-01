@@ -13,8 +13,9 @@ export function Legend() {
       <LegendDot color={ROLE_FILL.substance} /> substance<br />
       <LegendDot color={ROLE_FILL.expression} /> expression<br />
       <LegendDot color={ROLE_FILL.brand} /> brand<br />
-      <div style={{ marginTop: 4, fontStyle: 'italic', color: TX_BROWN_SOFT }}>
-        ◯ ring = cluster · ⌀ dashed = orphan
+      <div style={{ marginTop: 4, fontStyle: 'italic', color: TX_BROWN_SOFT, lineHeight: 1.4 }}>
+        ◯ ring = cluster · ⌀ dashed = orphan<br />
+        ? = role inferred · ❦ = defining garnish
       </div>
     </div>
   );

@@ -16,8 +16,9 @@ interface Props {
 export function FilterChips({ active, onToggle }: Props) {
   return (
     <div
+      role="group"
+      aria-label="Filter nodes by role and flag"
       style={{
-        position: 'absolute', top: 70, left: 14, zIndex: 3,
         display: 'flex', flexWrap: 'wrap', gap: 4, maxWidth: 220,
       }}
     >

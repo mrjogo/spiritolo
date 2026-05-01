@@ -22,6 +22,10 @@ export function RecipeList() {
 
   useEffect(() => {
     let cancelled = false;
+    // Mark the previous result as pending (or reset to initial) when
+    // page/q changes — the existing rows stay on screen while the
+    // refetch is in flight to avoid a list flash.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setState((prev) =>
       prev.status === 'loaded'
         ? { ...prev, pending: true }
@@ -62,9 +66,8 @@ export function RecipeList() {
   }, [page, q]);
 
   // Keep input in sync if URL changes externally (back/forward navigation).
-  useEffect(() => {
-    setInputValue(q);
-  }, [q]);
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => { setInputValue(q); }, [q]);
 
   // Debounce inputValue → URL.
   useEffect(() => {
