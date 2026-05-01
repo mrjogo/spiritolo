@@ -29,10 +29,11 @@ interface Props {
   dimmedIds?: Set<number>;
   onNodeClick: (node: TaxonomyNode) => void;
   onNodeHover: (node: TaxonomyNode | null) => void;
+  onBackgroundClick?: () => void;
 }
 
 export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCanvas(
-  { nodes, links, width, height, dimmedIds, onNodeClick, onNodeHover },
+  { nodes, links, width, height, dimmedIds, onNodeClick, onNodeHover, onBackgroundClick },
   ref,
 ) {
   const inner = useRef<ForceGraphMethods | undefined>(undefined);
@@ -66,6 +67,7 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
       cooldownTicks={120}
       onNodeClick={(n) => onNodeClick(n as TaxonomyNode)}
       onNodeHover={(n) => onNodeHover((n as TaxonomyNode | null) ?? null)}
+      onBackgroundClick={onBackgroundClick}
       nodeCanvasObject={(node, ctx) => {
         const n = node as TaxonomyNode & { x: number; y: number };
         const dimmed = dimmedIds?.has(n.id) ?? false;

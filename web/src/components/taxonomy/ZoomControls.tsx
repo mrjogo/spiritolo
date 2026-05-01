@@ -5,14 +5,15 @@ interface Props {
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFit: () => void;
+  right?: number;
 }
 
-export function ZoomControls({ onZoomIn, onZoomOut, onFit }: Props) {
+export function ZoomControls({ onZoomIn, onZoomOut, onFit, right = 24 }: Props) {
   return (
     <div
       className="tx-card"
       style={{
-        position: 'absolute', bottom: 24, right: 24, zIndex: 3,
+        position: 'absolute', bottom: 24, right, zIndex: 3,
         padding: 0, display: 'flex',
         fontFamily: "'Cinzel', serif", fontSize: 13,
       }}

@@ -5,9 +5,12 @@ import { Legend } from '../components/taxonomy/Legend';
 import { SearchBox } from '../components/taxonomy/SearchBox';
 import { FilterChips } from '../components/taxonomy/FilterChips';
 import { ZoomControls } from '../components/taxonomy/ZoomControls';
+import { SpecimenCard } from '../components/taxonomy/SpecimenCard';
 import {
   effectiveRoleLabel,
   matchesQuery,
+  neighborsOf,
+  radialPositions,
   rowMatchesFilters,
   viewRowsToGraph,
   type FilterKey,
@@ -64,7 +67,21 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   const [hovered, setHovered] = useState<TaxonomyNode | null>(null);
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<Set<FilterKey>>(new Set());
+  const [focusedId, setFocusedId] = useState<number | null>(null);
   const canvasRef = useRef<ForceCanvasHandle>(null);
+
+  const byId = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
+  const focusedNode = focusedId ? (byId.get(focusedId) ?? null) : null;
+
+  const neighborIds = useMemo(() => {
+    if (!focusedNode) return null;
+    const { parents, children } = neighborsOf(focusedNode, byId);
+    return new Set<number>([
+      focusedNode.id,
+      ...parents.map((p) => p.id),
+      ...children.map((c) => c.id),
+    ]);
+  }, [focusedNode, byId]);
 
   const dimmedIds = useMemo(() => {
     const dim = new Set<number>();
@@ -72,10 +89,11 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
       let dimMe = false;
       if (query.trim() !== '' && !matchesQuery(r, query)) dimMe = true;
       if (filters.size > 0 && !rowMatchesFilters(r, filters)) dimMe = true;
+      if (neighborIds !== null && !neighborIds.has(r.id)) dimMe = true;
       if (dimMe) dim.add(r.id);
     }
     return dim;
-  }, [rows, query, filters]);
+  }, [rows, query, filters, neighborIds]);
 
   function toggleFilter(key: FilterKey) {
     setFilters((prev) => {
@@ -94,6 +112,31 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
     return () => window.removeEventListener('resize', handler);
   }, []);
 
+  // Pin radial neighbors when focused, release when unfocused
+  useEffect(() => {
+    if (!focusedNode) {
+      for (const n of nodes as Array<TaxonomyNode & { fx?: number | null; fy?: number | null }>) {
+        n.fx = null; n.fy = null;
+      }
+      return;
+    }
+    const focusedRuntime = nodes.find((n) => n.id === focusedId) as { x?: number; y?: number } | undefined;
+    if (!focusedRuntime?.x || !focusedRuntime?.y) return;
+    const { parents, children } = neighborsOf(focusedNode, byId);
+    const positions = radialPositions(
+      { id: focusedNode.id, x: focusedRuntime.x, y: focusedRuntime.y },
+      parents, children,
+      Math.min(size.w, size.h) * 0.22,
+    );
+    for (const n of nodes as Array<TaxonomyNode & { fx?: number | null; fy?: number | null }>) {
+      const p = positions.get(n.id);
+      if (p) { n.fx = p.x; n.fy = p.y; }
+      else if (n.id === focusedNode.id) { n.fx = focusedRuntime.x; n.fy = focusedRuntime.y; }
+      else { n.fx = null; n.fy = null; }
+    }
+    canvasRef.current?.centerAt(focusedRuntime.x, focusedRuntime.y, 600);
+  }, [focusedNode, nodes, byId, size, focusedId]);
+
   return (
     <div className="taxonomy-page">
       <div className="taxonomy-page__corner taxonomy-page__corner--tl" />
@@ -110,7 +153,10 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
       <SearchBox
         value={query}
         onChange={setQuery}
-        onSubmit={() => { /* focus top match in Task 14 */ }}
+        onSubmit={() => {
+          const top = rows.find((r) => matchesQuery(r, query));
+          if (top) setFocusedId(top.id);
+        }}
       />
       <FilterChips active={filters} onToggle={toggleFilter} />
       <ForceCanvas
@@ -120,18 +166,20 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         width={size.w}
         height={size.h}
         dimmedIds={dimmedIds}
-        onNodeClick={() => { /* Task 14 */ }}
+        onNodeClick={(n) => setFocusedId(n.id)}
         onNodeHover={setHovered}
+        onBackgroundClick={() => setFocusedId(null)}
       />
       <ZoomControls
         onZoomIn={() => canvasRef.current?.zoom(1.4)}
         onZoomOut={() => canvasRef.current?.zoom(1 / 1.4)}
         onFit={() => canvasRef.current?.fit()}
+        right={focusedNode ? 264 : 24}
       />
 
       <Legend />
 
-      {hovered && (
+      {hovered && !focusedNode && (
         <div
           className="tx-card"
           style={{
@@ -147,7 +195,10 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
           </div>
         </div>
       )}
+
+      {focusedNode && (
+        <SpecimenCard node={focusedNode} onDismiss={() => setFocusedId(null)} />
+      )}
     </div>
   );
 }
-
