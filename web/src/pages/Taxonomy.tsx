@@ -1,6 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../supabase';
-import type { TaxonomyViewRow } from '../components/taxonomy/shapeData';
+import { ForceCanvas } from '../components/taxonomy/ForceCanvas';
+import {
+  viewRowsToGraph,
+  type TaxonomyNode,
+  type TaxonomyViewRow,
+} from '../components/taxonomy/shapeData';
 import '../components/taxonomy/taxonomy.css';
 
 type State =
@@ -38,6 +43,24 @@ export function Taxonomy() {
   if (state.status === 'error') {
     return <div className="page">Error: {state.message}</div>;
   }
+  return <LoadedView rows={state.rows} />;
+}
+
+function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
+  const { nodes, links } = useMemo(() => viewRowsToGraph(rows), [rows]);
+  const [size, setSize] = useState({
+    w: window.innerWidth,
+    h: window.innerHeight - 56,
+  });
+
+  useEffect(() => {
+    const handler = () => setSize({
+      w: window.innerWidth,
+      h: window.innerHeight - 56,
+    });
+    window.addEventListener('resize', handler);
+    return () => window.removeEventListener('resize', handler);
+  }, []);
 
   return (
     <div className="taxonomy-page">
@@ -52,9 +75,14 @@ export function Taxonomy() {
         <div className="taxonomy-page__title-rule" />
       </div>
 
-      <div style={{ position: 'absolute', bottom: 24, left: 24, color: 'var(--tx-ivory)' }}>
-        {state.rows.length} nodes loaded.
-      </div>
+      <ForceCanvas
+        nodes={nodes as TaxonomyNode[]}
+        links={links}
+        width={size.w}
+        height={size.h}
+        onNodeClick={() => { /* wired in Task 14 */ }}
+        onNodeHover={() => { /* wired in Task 14 */ }}
+      />
     </div>
   );
 }

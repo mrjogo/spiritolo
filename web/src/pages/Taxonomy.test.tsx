@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
 vi.mock('../supabase', () => ({ supabase: { from: vi.fn() } }));
+vi.mock('../components/taxonomy/ForceCanvas', () => ({ ForceCanvas: () => null }));
 import { supabase } from '../supabase';
 import { Taxonomy } from './Taxonomy';
 
@@ -68,13 +69,13 @@ describe('<Taxonomy>', () => {
     expect(await screen.findByText(/db unreachable/i)).toBeInTheDocument();
   });
 
-  it('shows the loaded state with node count', async () => {
+  it('renders the deco title cartouche when loaded', async () => {
     mockTaxonomyResponse([row('whiskey'), row('gin'), row('rum')]);
     render(
       <MemoryRouter>
         <Taxonomy />
       </MemoryRouter>,
     );
-    expect(await screen.findByText(/3 nodes/i)).toBeInTheDocument();
+    expect(await screen.findByText(/spirits & liqueurs/i)).toBeInTheDocument();
   });
 });
