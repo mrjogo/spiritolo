@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { supabase } from '../supabase';
 import { ForceCanvas } from '../components/taxonomy/ForceCanvas';
+import { Legend } from '../components/taxonomy/Legend';
 import {
   viewRowsToGraph,
   type TaxonomyNode,
@@ -52,6 +53,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
     w: window.innerWidth,
     h: window.innerHeight - 56,
   });
+  const [hovered, setHovered] = useState<TaxonomyNode | null>(null);
 
   useEffect(() => {
     const handler = () => setSize({
@@ -80,9 +82,34 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         links={links}
         width={size.w}
         height={size.h}
-        onNodeClick={() => { /* wired in Task 14 */ }}
-        onNodeHover={() => { /* wired in Task 14 */ }}
+        onNodeClick={() => { /* Task 14 */ }}
+        onNodeHover={setHovered}
       />
+
+      <Legend />
+
+      {hovered && (
+        <div
+          className="tx-card"
+          style={{
+            position: 'absolute', top: 80, right: 14, zIndex: 3,
+            padding: '8px 12px', fontSize: 12, lineHeight: 1.5, width: 200,
+          }}
+        >
+          <div style={{ fontFamily: "'Cinzel', serif", fontWeight: 600, letterSpacing: '0.12em' }}>
+            {hovered.display_name}
+          </div>
+          <div style={{ color: '#5a3f1a', fontStyle: 'italic' }}>
+            {effectiveRoleLabel(hovered)} · {hovered.recipe_count} recipes · {hovered.aliases.length} aliases
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+function effectiveRoleLabel(n: TaxonomyNode): string {
+  if (n.role) return n.role;
+  if (n.role_default) return `${n.role_default}?`;
+  return 'unknown';
 }
