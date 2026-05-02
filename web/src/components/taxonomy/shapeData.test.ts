@@ -215,14 +215,14 @@ describe('rowMatchesFilters', () => {
     expect(rowMatchesFilters(baseRow, new Set())).toBe(true);
   });
 
-  it('matches a role-chip via effectiveRole (substance via role_default fallback)', () => {
-    const row = { ...baseRow, role: null, role_default: 'substance' as const };
-    expect(rowMatchesFilters(row, new Set<FilterKey>(['substance']))).toBe(true);
-    expect(rowMatchesFilters(row, new Set<FilterKey>(['expression']))).toBe(false);
+  it('matches a role-chip via effectiveRole (role asserted)', () => {
+    const row: TaxonomyViewRow = { ...baseRow, role: 'expression' };
+    expect(rowMatchesFilters(row, new Set<FilterKey>(['expression']))).toBe(true);
+    expect(rowMatchesFilters(row, new Set<FilterKey>(['substance']))).toBe(false);
   });
 
   it('AND-combines: substance + expression matches nothing', () => {
-    const row = { ...baseRow, role: null, role_default: 'substance' as const };
+    const row: TaxonomyViewRow = { ...baseRow, role: 'expression' };
     expect(rowMatchesFilters(row, new Set<FilterKey>(['substance', 'expression']))).toBe(false);
   });
 
