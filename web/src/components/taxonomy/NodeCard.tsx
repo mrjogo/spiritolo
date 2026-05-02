@@ -1,18 +1,22 @@
 import { useEffect } from 'react';
 import type { TaxonomyNode } from './shapeData';
-import { TX_BROWN_INK, TX_BROWN_MID, TX_BROWN_FAINT, TX_FRAME_EDGE } from './palette';
+import { TX_BROWN_INK, TX_BROWN_MID, TX_FRAME_EDGE } from './palette';
+
+export type NodeCardMode = 'hover' | 'pinned';
 
 interface Props {
   node: TaxonomyNode;
+  mode: NodeCardMode;
   onDismiss: () => void;
 }
 
-export function SpecimenCard({ node, onDismiss }: Props) {
+export function NodeCard({ node, mode, onDismiss }: Props) {
   useEffect(() => {
+    if (mode !== 'pinned') return;
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onDismiss(); };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [onDismiss]);
+  }, [mode, onDismiss]);
 
   const copySlug = async () => {
     try { await navigator.clipboard.writeText(node.slug); } catch { /* swallow */ }
@@ -21,13 +25,29 @@ export function SpecimenCard({ node, onDismiss }: Props) {
   return (
     <aside
       className="tx-card"
-      role="dialog"
-      aria-label={`Taxonomy specimen: ${node.display_name}`}
+      role={mode === 'pinned' ? 'dialog' : 'tooltip'}
+      aria-label={`Taxonomy node: ${node.display_name}`}
       style={{
-        position: 'absolute', top: 0, right: 0, bottom: 0, width: 240, zIndex: 4,
-        padding: '20px 18px', borderRadius: 0, borderRight: 'none',
+        position: 'absolute', top: 150, right: 14, width: 240, zIndex: 4,
+        padding: '20px 18px',
       }}
     >
+      {mode === 'pinned' && (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label="Close"
+          style={{
+            position: 'absolute', top: 6, right: 8,
+            background: 'none', border: 'none', cursor: 'pointer',
+            color: TX_BROWN_MID, fontSize: 16, lineHeight: 1,
+            fontFamily: "'Cinzel', serif",
+          }}
+        >
+          ×
+        </button>
+      )}
+
       <div style={{ textAlign: 'center' }}>
         <div className="tx-card__heading">— SPECIMEN —</div>
         <div
@@ -43,10 +63,10 @@ export function SpecimenCard({ node, onDismiss }: Props) {
 
       <div style={{ fontSize: 13, lineHeight: 1.55, color: TX_BROWN_MID }}>
         <div className="tx-card__heading" style={{ marginTop: 4 }}>PROPERTIES</div>
-        <Row label="role" value={node.role ?? '—'} />
-        <Row label="role default" value={node.role_default ?? '—'} />
-        <Row label="cluster node" value={node.is_cluster_node ? '✓' : '—'} />
-        <Row label="defining garnish" value={node.is_defining_garnish ? '✓' : '—'} />
+        <Row label="Role (taxonomy)" value={node.role ?? '—'} />
+        <Row label="Default Role (recipe ingredient)" value={node.role_default ?? '—'} />
+        <Row label="Clustering node" value={node.is_cluster_node ? '✓' : '—'} />
+        <Row label="Defining garnish" value={node.is_defining_garnish ? '✓' : '—'} />
 
         <div className="tx-card__heading" style={{ marginTop: 10 }}>
           ALIASES <span style={{ fontStyle: 'italic', color: TX_FRAME_EDGE }}>({node.aliases.length})</span>
@@ -71,24 +91,15 @@ export function SpecimenCard({ node, onDismiss }: Props) {
           ⊕ {node.slug}
         </button>
       </div>
-
-      <div
-        style={{
-          position: 'absolute', left: 0, right: 0, bottom: 16, textAlign: 'center',
-          fontFamily: "'Cinzel', serif", fontSize: 9, letterSpacing: '0.3em', color: TX_BROWN_FAINT,
-        }}
-      >
-        ESC TO DISMISS
-      </div>
     </aside>
   );
 }
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
       <span>{label}</span>
-      <span style={{ fontStyle: 'italic' }}>{value}</span>
+      <span style={{ fontStyle: 'italic', textAlign: 'right' }}>{value}</span>
     </div>
   );
 }

@@ -5,7 +5,7 @@ import { Legend } from '../components/taxonomy/Legend';
 import { SearchBox } from '../components/taxonomy/SearchBox';
 import { FilterChips } from '../components/taxonomy/FilterChips';
 import { ZoomControls } from '../components/taxonomy/ZoomControls';
-import { SpecimenCard } from '../components/taxonomy/SpecimenCard';
+import { NodeCard } from '../components/taxonomy/NodeCard';
 import {
   effectiveRoleLabel,
   matchesQuery,
@@ -215,7 +215,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
       )}
 
       {focusedNode && (
-        <SpecimenCard node={focusedNode} onDismiss={() => setFocusedId(null)} />
+        <NodeCard node={focusedNode} mode="pinned" onDismiss={() => setFocusedId(null)} />
       )}
     </div>
   );
