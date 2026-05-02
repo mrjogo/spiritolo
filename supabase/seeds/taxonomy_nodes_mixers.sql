@@ -13,10 +13,10 @@
 --     the bitter quinine, not by water-stretching the gin. Cocktail-
 --     functionally these behave the same way Campari or vermouth does
 --     in their drinks — they ARE the modifying flavor, not dilution.
-insert into taxonomy_nodes (slug, display_name, role_default) values
+insert into taxonomy_nodes (slug, display_name, default_role) values
   ('mixer', 'Mixer', 'modifier');
 
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('soda_water',  'Soda Water',  true, 'dilution'),
   ('tonic_water', 'Tonic Water', true, 'modifier'),
   ('ginger_beer', 'Ginger Beer', true, 'modifier'),

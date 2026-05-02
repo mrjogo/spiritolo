@@ -12,10 +12,10 @@
 -- (Campari, Aperol, Cynar), the expression slug appends the family-parent
 -- slug (`_amaro`) to disambiguate from the brand slug. Display name stays
 -- the bottle name.
-update taxonomy_nodes set role_default = 'modifier' where slug = 'amaro';
+update taxonomy_nodes set default_role = 'modifier' where slug = 'amaro';
 
 -- Brand nodes (top-level, no parent — brands span categories).
-insert into taxonomy_nodes (slug, display_name, role) values
+insert into taxonomy_nodes (slug, display_name, node_kind) values
   ('campari',     'Campari',         'brand'),  -- Davide Campari-Milano N.V.
   ('aperol',      'Aperol',          'brand'),  -- originally Barbieri (Padua, 1919); now Campari Group
   ('cynar',       'Cynar',           'brand'),  -- originally Pezziol; now Campari Group
@@ -30,7 +30,7 @@ insert into taxonomy_nodes (slug, display_name, role) values
   ('braulio',     'Braulio',         'brand'),  -- Cantine Peloni (Bormio); now Caffo Group
   ('bosca',       'Bosca',           'brand');  -- Bosca / Tosti (Canelli, Piemonte) — makes Cardamaro
 
-insert into taxonomy_nodes (slug, display_name, role, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, node_kind, is_cluster_node, default_role) values
   -- Major amari named in the dedup spec.
   ('campari_amaro',    'Campari',                    'expression', true, 'modifier'),
   ('aperol_amaro',     'Aperol',                     'expression', true, 'modifier'),

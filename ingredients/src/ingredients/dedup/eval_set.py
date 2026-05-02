@@ -142,13 +142,13 @@ def _evaluate_case(
     for slug, amount, unit, pos in case.ingredients:
         node_id = ids[slug]
         node_row = conn.execute(
-            "select role_default, is_defining_garnish from taxonomy_nodes where id = %s",
+            "select default_role, is_defining_garnish from taxonomy_nodes where id = %s",
             (node_id,),
         ).fetchone()
-        role_default, is_def_garnish = node_row
+        default_role, is_def_garnish = node_row
         ing = {
             "taxonomy_node_slug": slug, "taxonomy_node_id": node_id,
-            "role_default": role_default, "is_defining_garnish": is_def_garnish,
+            "default_role": default_role, "is_defining_garnish": is_def_garnish,
             "amount": amount, "unit": unit, "position": pos, "raw_text": "",
         }
         role, _ = classify_role(ing)

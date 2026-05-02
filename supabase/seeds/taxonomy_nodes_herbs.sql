@@ -3,7 +3,7 @@
 -- identity ingredient. A Mojito with mint vs basil is fundamentally a
 -- different drink even though both follow the same template.
 --
--- role_default = 'other' across — the dedup spec's role vocabulary doesn't
+-- default_role = 'other' across — the dedup spec's role vocabulary doesn't
 -- have a 'fresh' or 'muddle' role; 'other' is the catch-all. Mint is also
 -- often a 'garnish' on top, but the muddle (which carries the cluster
 -- weight) makes 'other' the safer default; the role classifier's
@@ -11,10 +11,10 @@
 --
 -- `ginger` is the fresh root, distinct from ginger_beer / ginger_ale (in
 -- the mixers family) and ginger_syrup (would go in syrups if added).
-insert into taxonomy_nodes (slug, display_name, role_default) values
+insert into taxonomy_nodes (slug, display_name, default_role) values
   ('fresh_produce', 'Fresh Produce', 'other');
 
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('mint',     'Mint',     true, 'other'),
   ('basil',    'Basil',    true, 'other'),
   ('ginger',   'Ginger',   true, 'other'),

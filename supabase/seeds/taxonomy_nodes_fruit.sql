@@ -15,7 +15,7 @@
 -- when it says "lemon", but muddled-fruit drinks (Old Cuban) genuinely
 -- need the produce form, so the underspecified flag is intentional.
 --
--- role_default values:
+-- default_role values:
 --   * Citrus juices: 'citrus' (per dedup spec).
 --   * Non-citrus juices (pineapple, cranberry): 'modifier' — they
 --     contribute substantively to drink character (Piña Colada,
@@ -44,7 +44,7 @@ join taxonomy_nodes p on p.slug = e.parent_slug
 join taxonomy_nodes c on c.slug = e.child_slug;
 
 -- Juice form-node cluster identities.
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('lemon_juice',      'Lemon Juice',      true, 'citrus'),
   ('lime_juice',       'Lime Juice',       true, 'citrus'),
   ('orange_juice',     'Orange Juice',     true, 'citrus'),

@@ -66,7 +66,7 @@ def _create_brand_node(
     slug: str,
     display_name: str,
     parent_id: int,
-    role: str,
+    node_kind: str,
     raw_string: str,
     prompt_hash_value: str,
     model_id: str,
@@ -74,9 +74,9 @@ def _create_brand_node(
     """Insert the new node + edge + provenance. is_cluster_node defaults
     to false (E's column); the antichain stays curator-controlled."""
     new_id = conn.execute(
-        "insert into taxonomy_nodes (slug, display_name, role) "
+        "insert into taxonomy_nodes (slug, display_name, node_kind) "
         "values (%s, %s, %s) returning id",
-        (slug, display_name, role),
+        (slug, display_name, node_kind),
     ).fetchone()[0]
     conn.execute(
         "insert into taxonomy_edges (parent_id, child_id) values (%s, %s)",
@@ -199,7 +199,7 @@ def run_phase2(
                         slug=action_obj["slug"],
                         display_name=action_obj["display_name"],
                         parent_id=parent_id,
-                        role=action_obj["role"],
+                        node_kind=action_obj["node_kind"],
                         raw_string=normalized,
                         prompt_hash_value=prompt_hash(normalized, None, site, cands),
                         model_id=provider.model_id,

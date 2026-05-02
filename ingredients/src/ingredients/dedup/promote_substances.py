@@ -1,10 +1,10 @@
 """One-shot post-D substance promotion.
 
-D's mapper auto-creates role='brand' or role='expression' nodes for
-strings that aren't in the seed. Some of those strings are commercially-
-branded *but functionally definitional* substances (Campari, Aperol,
-Angostura, Peychaud's, etc.). E's antichain modeling expects them as
-role=NULL substance nodes, with is_cluster_node=true.
+D's mapper auto-creates node_kind='brand' or node_kind='expression' nodes
+for strings that aren't in the seed. Some of those strings are
+commercially-branded *but functionally definitional* substances (Campari,
+Aperol, Angostura, Peychaud's, etc.). E's antichain modeling expects them
+as node_kind=NULL substance nodes, with is_cluster_node=true.
 
 This module:
   - Holds the curator-reviewed allowlist of substance names.
@@ -12,8 +12,8 @@ This module:
   - Promotes each (interactively in the CLI; programmatically via promote_node).
 
 Auto-created brand nodes already have the right node_id (recipe_ingredients
-rows reference them); no row updates are needed. Only role + is_cluster_node
-+ role_default + a provenance log entry change.
+rows reference them); no row updates are needed. Only node_kind +
+is_cluster_node + default_role + a provenance log entry change.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import psycopg
 # promotion. Each name is matched case-insensitively against
 # taxonomy_nodes.display_name.
 DEFINITIONAL_SUBSTANCES: list[tuple[str, str]] = [
-    # (display_name_lower, role_default)
+    # (display_name_lower, default_role)
     ("campari",            "modifier"),
     ("aperol",             "modifier"),
     ("amaro montenegro",   "modifier"),
@@ -51,31 +51,31 @@ DEFINITIONAL_SUBSTANCES: list[tuple[str, str]] = [
 
 def candidate_promotions(conn: psycopg.Connection) -> list[dict]:
     """Return auto-created nodes whose display_name matches an allowlist
-    entry AND whose current role is brand/expression."""
+    entry AND whose current node_kind is brand/expression."""
     names_lc = [n for n, _ in DEFINITIONAL_SUBSTANCES]
     rows = conn.execute(
         """
-        select n.id, n.slug, n.display_name, n.role, p.raw_string, p.source
+        select n.id, n.slug, n.display_name, n.node_kind, p.raw_string, p.source
         from taxonomy_nodes n
         left join taxonomy_provenance p on p.node_id = n.id
-        where n.role in ('brand', 'expression')
+        where n.node_kind in ('brand', 'expression')
           and lower(n.display_name) = any(%s)
         order by n.display_name
         """,
         (names_lc,),
     ).fetchall()
-    role_default_by_name = {
-        n.lower(): rd for n, rd in DEFINITIONAL_SUBSTANCES
+    default_role_by_name = {
+        n.lower(): dr for n, dr in DEFINITIONAL_SUBSTANCES
     }
     return [
         {
             "id": r[0],
             "slug": r[1],
             "display_name": r[2],
-            "current_role": r[3],
+            "current_node_kind": r[3],
             "provenance_raw_string": r[4],
             "provenance_source": r[5],
-            "proposed_role_default": role_default_by_name.get(r[2].lower()),
+            "proposed_default_role": default_role_by_name.get(r[2].lower()),
         }
         for r in rows
     ]
@@ -85,20 +85,20 @@ def promote_node(
     conn: psycopg.Connection,
     *,
     slug: str,
-    role_default: str,
+    default_role: str,
     promoter: str = "operator",
 ) -> None:
-    """Set role=NULL, is_cluster_node=true, role_default=<role_default>.
+    """Set node_kind=NULL, is_cluster_node=true, default_role=<default_role>.
     Logs the promotion in taxonomy_provenance for audit (using source='manual')."""
     conn.execute(
         """
         update taxonomy_nodes
-           set role = null,
+           set node_kind = null,
                is_cluster_node = true,
-               role_default = %s
+               default_role = %s
          where slug = %s
         """,
-        (role_default, slug),
+        (default_role, slug),
     )
     conn.execute(
         """

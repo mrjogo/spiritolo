@@ -4,18 +4,18 @@
 -- brand-as-substance for items where a single brand defines the substance
 -- (Chartreuse green/yellow, Bénédictine, Drambuie, Pimm's No. 1, Suze).
 -- The family parent `liqueur` stays non-cluster.
-insert into taxonomy_nodes (slug, display_name, role_default) values
+insert into taxonomy_nodes (slug, display_name, default_role) values
   ('liqueur', 'Liqueur', 'modifier');
 
 -- Type cluster nodes (broad substance categories with many interchangeable brands).
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('maraschino_liqueur', 'Maraschino Liqueur', true, 'modifier'),
   ('triple_sec',         'Triple Sec',         true, 'modifier'),  -- broader "orange liqueur"; Cointreau, Combier, Grand Marnier roll up
   ('creme_de_violette',  'Crème de Violette',  true, 'modifier'),
   ('creme_de_cassis',    'Crème de Cassis',    true, 'modifier');
 
 -- Brand nodes (top-level, no parent).
-insert into taxonomy_nodes (slug, display_name, role) values
+insert into taxonomy_nodes (slug, display_name, node_kind) values
   ('luxardo',     'Luxardo',     'brand'),  -- Luxardo (Torreglia, Italy; originally Zara/Zadar 1821)
   ('chartreuse',  'Chartreuse',  'brand'),  -- Chartreuse Diffusion S.A.S. / Carthusian monks (since 1737)
   ('cointreau',   'Cointreau',   'brand'),  -- Rémy Cointreau (Angers, France; merged 1990)
@@ -28,7 +28,7 @@ insert into taxonomy_nodes (slug, display_name, role) values
 -- Per dedup spec carve-out: each is its own cluster identity because cocktail
 -- vocabulary names them as substance (recipes say "Bénédictine", "Drambuie",
 -- "Suze", not "a French herbal liqueur").
-insert into taxonomy_nodes (slug, display_name, role, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, node_kind, is_cluster_node, default_role) values
   ('green_chartreuse',  'Green Chartreuse',     'expression', true, 'modifier'),
   ('yellow_chartreuse', 'Yellow Chartreuse',    'expression', true, 'modifier'),
   ('benedictine_dom',   'Bénédictine D.O.M.',   'expression', true, 'modifier'),
@@ -37,7 +37,7 @@ insert into taxonomy_nodes (slug, display_name, role, is_cluster_node, role_defa
   ('suze_liqueur',      'Suze',                 'expression', true, 'modifier');
 
 -- Non-cluster expressions (roll up to type cluster).
-insert into taxonomy_nodes (slug, display_name, role, role_default) values
+insert into taxonomy_nodes (slug, display_name, node_kind, default_role) values
   ('luxardo_maraschino_originale', 'Luxardo Maraschino Originale', 'expression', 'modifier'),
   ('cointreau_triple_sec',         'Cointreau',                    'expression', 'modifier');
 

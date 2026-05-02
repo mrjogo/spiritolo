@@ -21,7 +21,7 @@
 -- brandies, too varied for a single cluster). D's mapper auto-creates
 -- expressions when needed.
 
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('cognac',   'Cognac',   true, 'base_spirit'),
   ('armagnac', 'Armagnac', true, 'base_spirit'),
   ('calvados', 'Calvados', true, 'base_spirit'),
