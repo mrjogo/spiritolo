@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import ForceGraph2D, { type ForceGraphMethods } from 'react-force-graph-2d';
 import {
   effectiveKind,
@@ -47,6 +47,16 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
     fit: () => inner.current?.zoomToFit(400, 60),
     centerAt: (x, y, ms = 400) => inner.current?.centerAt(x, y, ms),
   }), []);
+
+  useEffect(() => {
+    const fg = inner.current;
+    if (!fg) return;
+    fg.d3Force('center', null);
+    // d3-force's charge accessor returns ForceFn | undefined; the underlying
+    // forceManyBody() exposes .strength(). Cast narrowly to that shape.
+    const charge = fg.d3Force('charge') as { strength(s: number): unknown } | undefined;
+    charge?.strength(-120);
+  }, []);
 
   const data = useMemo(() => ({ nodes, links }), [nodes, links]);
 
