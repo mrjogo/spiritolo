@@ -68,16 +68,16 @@ def test_resolver_auto_creates_brand_with_existing_parent(fixture_taxonomy):
         "bombay sapphire": (
             '{"action": "propose_brand", "slug": "bombay_sapphire", '
             '"display_name": "Bombay Sapphire", "parent_slug": "london_dry_gin", '
-            '"role": "brand"}'
+            '"node_kind": "brand"}'
         ),
     })
     summary = run_phase2(conn, provider=provider)
     new_node = conn.execute(
-        "select id, role from taxonomy_nodes where slug = 'bombay_sapphire'"
+        "select id, node_kind from taxonomy_nodes where slug = 'bombay_sapphire'"
     ).fetchone()
     assert new_node is not None
-    new_id, new_role = new_node
-    assert new_role == "brand"
+    new_id, new_node_kind = new_node
+    assert new_node_kind == "brand"
 
     # Edge to parent.
     parent_id_row = conn.execute(
@@ -106,7 +106,7 @@ def test_resolver_abstains_when_proposed_parent_missing(fixture_taxonomy):
     provider = StubProvider({
         "mystery liqueur": (
             '{"action": "propose_brand", "slug": "mystery", "display_name": "Mystery", '
-            '"parent_slug": "does_not_exist", "role": "brand"}'
+            '"parent_slug": "does_not_exist", "node_kind": "brand"}'
         ),
     })
     summary = run_phase2(conn, provider=provider)
@@ -228,7 +228,7 @@ def test_brand_auto_create_rolls_back_if_resolution_fails(fixture_taxonomy, monk
         "beefeater": (
             '{"action": "propose_brand", "slug": "beefeater", '
             '"display_name": "Beefeater", "parent_slug": "london_dry_gin", '
-            '"role": "brand"}'
+            '"node_kind": "brand"}'
         ),
     })
 

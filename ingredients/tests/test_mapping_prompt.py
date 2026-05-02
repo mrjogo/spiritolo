@@ -31,12 +31,12 @@ def test_parse_response_brand_proposal():
     raw = (
         '{"action": "propose_brand", "slug": "tanqueray", '
         '"display_name": "Tanqueray", "parent_slug": "london_dry_gin", '
-        '"role": "brand"}'
+        '"node_kind": "brand"}'
     )
     out = parse_response(raw)
     assert out["action"] == "propose_brand"
     assert out["slug"] == "tanqueray"
-    assert out["role"] == "brand"
+    assert out["node_kind"] == "brand"
 
 
 def test_parse_response_form_proposal():

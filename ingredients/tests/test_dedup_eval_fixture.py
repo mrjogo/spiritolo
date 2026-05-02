@@ -28,21 +28,21 @@ def test_seed_dedup_fixture_creates_taxonomy_and_aliases(db_conn):
     assert "rye_whiskey" in cluster_nodes
     assert "gin" not in cluster_nodes  # navigation parent, not antichain
 
-    # role_default
-    role_defaults = {
+    # default_role
+    default_roles = {
         row[0]: row[1]
         for row in db_conn.execute(
-            "select slug, role_default from taxonomy_nodes where role_default is not null"
+            "select slug, default_role from taxonomy_nodes where default_role is not null"
         ).fetchall()
     }
-    assert role_defaults.get("london_dry_gin") == "base_spirit"
-    assert role_defaults.get("campari") == "modifier"
-    assert role_defaults.get("sweet_vermouth") == "modifier"
-    assert role_defaults.get("angostura_bitters") == "bitters"
-    assert role_defaults.get("lemon_juice") == "citrus"
-    assert role_defaults.get("simple_syrup") == "sweetener"
-    assert role_defaults.get("soda_water") == "dilution"
-    assert role_defaults.get("ice") == "ice"
+    assert default_roles.get("london_dry_gin") == "base_spirit"
+    assert default_roles.get("campari") == "modifier"
+    assert default_roles.get("sweet_vermouth") == "modifier"
+    assert default_roles.get("angostura_bitters") == "bitters"
+    assert default_roles.get("lemon_juice") == "citrus"
+    assert default_roles.get("simple_syrup") == "sweetener"
+    assert default_roles.get("soda_water") == "dilution"
+    assert default_roles.get("ice") == "ice"
 
     # Cocktail aliases seeded
     aliases = {

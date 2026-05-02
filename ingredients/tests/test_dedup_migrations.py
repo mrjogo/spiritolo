@@ -26,15 +26,15 @@ def test_taxonomy_nodes_has_is_cluster_node_column(db_conn):
     assert "false" in (default or "").lower()
 
 
-def test_taxonomy_nodes_has_role_default_column(db_conn):
+def test_taxonomy_nodes_has_default_role_column(db_conn):
     row = db_conn.execute(
         """
         select data_type, is_nullable
         from information_schema.columns
-        where table_name = 'taxonomy_nodes' and column_name = 'role_default'
+        where table_name = 'taxonomy_nodes' and column_name = 'default_role'
         """
     ).fetchone()
-    assert row is not None, "role_default column missing"
+    assert row is not None, "default_role column missing"
     dtype, nullable = row
     assert dtype == "text"
     assert nullable == "YES"

@@ -58,7 +58,7 @@ def test_full_pipeline_against_fixture(fixture_taxonomy):
         "bombay sapphire": (
             '{"action": "propose_brand", "slug": "bombay_sapphire", '
             '"display_name": "Bombay Sapphire", "parent_slug": "london_dry_gin", '
-            '"role": "brand"}'
+            '"node_kind": "brand"}'
         ),
         "lemon zest": (
             '{"action": "propose_form", "slug": "lemon_zest", '
