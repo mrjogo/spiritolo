@@ -55,6 +55,15 @@ describe('viewRowsToGraph', () => {
     const { links } = viewRowsToGraph(rows);
     expect(links).toHaveLength(1);
   });
+
+  it('populates labelW and labelH on each node', () => {
+    const rows: TaxonomyViewRow[] = [
+      { ...baseRow, id: 1, slug: 'whiskey', display_name: 'Whiskey', child_ids: [] },
+    ];
+    const { nodes } = viewRowsToGraph(rows);
+    expect(nodes[0].labelW).toBeGreaterThan(0);
+    expect(nodes[0].labelH).toBeGreaterThan(0);
+  });
 });
 
 

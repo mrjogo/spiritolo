@@ -10,6 +10,7 @@ const node: TaxonomyNode = {
   is_cluster_node: true, is_defining_garnish: false,
   parent_ids: [10, 11], child_ids: [20, 21],
   aliases: ['rye', 'rye whisky'], recipe_count: 47,
+  labelW: 60, labelH: 11,
 };
 
 describe('<NodeCard>', () => {

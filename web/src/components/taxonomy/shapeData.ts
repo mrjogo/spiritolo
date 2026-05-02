@@ -14,10 +14,26 @@ export interface TaxonomyViewRow {
   recipe_count: number;
 }
 
-// Alias rather than empty extension; react-force-graph will mutate
-// fx/fy/x/y/vx/vy on these objects at runtime, but the static type
-// stays identical to the row.
-export type TaxonomyNode = TaxonomyViewRow;
+export const LABEL_FONT = "9px 'Cinzel', serif";
+export const LABEL_HEIGHT = 11;  // approx Cinzel cap+descender at 9px
+
+let measureCtx: CanvasRenderingContext2D | null = null;
+function getMeasureCtx(): CanvasRenderingContext2D {
+  if (measureCtx) return measureCtx;
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+  if (!ctx) throw new Error('canvas 2d context unavailable');
+  ctx.font = LABEL_FONT;
+  measureCtx = ctx;
+  return ctx;
+}
+
+// Extends TaxonomyViewRow with label dimensions baked in for the simulation's
+// collision shape. react-force-graph will mutate fx/fy/x/y/vx/vy at runtime.
+export interface TaxonomyNode extends TaxonomyViewRow {
+  labelW: number;
+  labelH: number;
+}
 
 export interface TaxonomyLink {
   source: number;
@@ -32,7 +48,12 @@ export function viewRowsToGraph(rows: TaxonomyViewRow[]): {
   nodes: TaxonomyNode[];
   links: TaxonomyLink[];
 } {
-  const nodes: TaxonomyNode[] = rows.map((r) => ({ ...r }));
+  const ctx = getMeasureCtx();
+  const nodes: TaxonomyNode[] = rows.map((r) => ({
+    ...r,
+    labelW: ctx.measureText(r.display_name).width,
+    labelH: LABEL_HEIGHT,
+  }));
   const links: TaxonomyLink[] = [];
   for (const row of rows) {
     for (const childId of row.child_ids) {

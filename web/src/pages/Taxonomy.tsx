@@ -72,7 +72,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   const [focusedId, setFocusedId] = useState<number | null>(null);
   const canvasRef = useRef<ForceCanvasHandle>(null);
 
-  const byId = useMemo(() => new Map(rows.map((r) => [r.id, r])), [rows]);
+  const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const focusedNode = focusedId ? (byId.get(focusedId) ?? null) : null;
 
   const neighborIds = useMemo(() => {
