@@ -9,7 +9,6 @@ import {
   ROLE_FILL,
   TX_GOLD,
   TX_NODE_BG,
-  TX_ORPHAN_RING,
   TX_LINK,
   nodeRadius,
 } from './palette';
@@ -108,22 +107,12 @@ function drawNode(
     ctx.stroke();
   }
 
-  // Gold ring (or dashed red if orphan)
+  // Gold ring
   ctx.beginPath();
   ctx.arc(node.x, node.y, outerR, 0, 2 * Math.PI);
-  // dashed-ring branch removed in Task 4.
-  const orphan = false;
-  if (orphan) {
-    ctx.strokeStyle = TX_ORPHAN_RING;
-    ctx.setLineDash([2.2, 1.8]);
-    ctx.lineWidth = 1.0;
-  } else {
-    ctx.strokeStyle = TX_GOLD;
-    ctx.setLineDash([]);
-    ctx.lineWidth = 1.0;
-  }
+  ctx.strokeStyle = TX_GOLD;
+  ctx.lineWidth = 1.0;
   ctx.stroke();
-  ctx.setLineDash([]);
 
   // Inner role-colored dot
   ctx.beginPath();
