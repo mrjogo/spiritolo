@@ -6,7 +6,7 @@ import { FilterChips, type FilterKey } from './FilterChips';
 describe('<FilterChips>', () => {
   it('renders one chip per filter key', () => {
     render(<FilterChips active={new Set()} onToggle={() => {}} />);
-    for (const label of ['substance', 'expression', 'brand', 'cluster', 'orphan', 'no aliases', 'zero recipes']) {
+    for (const label of ['substance', 'expression', 'brand', 'clustering node', 'orphan', 'no aliases', 'zero recipes']) {
       expect(screen.getByRole('button', { name: new RegExp(label, 'i') })).toBeInTheDocument();
     }
   });

@@ -8,6 +8,16 @@ const ORDERED: FilterKey[] = [
   'cluster', 'orphan', 'no aliases', 'zero recipes',
 ];
 
+const LABELS: Record<FilterKey, string> = {
+  substance: 'substance',
+  expression: 'expression',
+  brand: 'brand',
+  cluster: 'clustering node',
+  orphan: 'orphan',
+  'no aliases': 'no aliases',
+  'zero recipes': 'zero recipes',
+};
+
 interface Props {
   active: Set<FilterKey>;
   onToggle: (key: FilterKey) => void;
@@ -42,7 +52,7 @@ export function FilterChips({ active, onToggle }: Props) {
               textTransform: 'uppercase',
             }}
           >
-            {key}
+            {LABELS[key]}
           </button>
         );
       })}
