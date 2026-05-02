@@ -3,6 +3,7 @@ import ForceGraph2D, { type ForceGraphMethods } from 'react-force-graph-2d';
 import { bboxCollide } from 'd3-bboxCollide';
 import {
   effectiveKind,
+  LABEL_FONT,
   type TaxonomyNode,
   type TaxonomyLink,
 } from './shapeData';
@@ -12,8 +13,11 @@ import {
   TX_CLUSTER_RING,
   TX_NODE_BG,
   TX_LINK,
+  TX_BROWN_FAINT,
   nodeRadius,
 } from './palette';
+
+const SHOW_LABEL_AT = 1.2;
 
 export interface ForceCanvasHandle {
   zoom: (factor: number) => void;
@@ -95,11 +99,18 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
       onNodeClick={(n) => onNodeClick(n as TaxonomyNode)}
       onNodeHover={(n) => onNodeHover((n as TaxonomyNode | null) ?? null)}
       onBackgroundClick={onBackgroundClick}
-      nodeCanvasObject={(node, ctx) => {
+      nodeCanvasObject={(node, ctx, globalScale) => {
         const n = node as TaxonomyNode & { x: number; y: number };
         const dimmed = dimmedIds?.has(n.id) ?? false;
         ctx.globalAlpha = dimmed ? 0.18 : 1;
         drawNode(n, ctx);
+        if (globalScale > SHOW_LABEL_AT) {
+          ctx.font = LABEL_FONT;
+          ctx.fillStyle = TX_BROWN_FAINT;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'top';
+          ctx.fillText(n.display_name, n.x, n.y + nodeRadius(n) + 3);
+        }
         ctx.globalAlpha = 1;
       }}
       nodeCanvasObjectMode={() => 'replace'}
