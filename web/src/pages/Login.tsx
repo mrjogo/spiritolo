@@ -34,9 +34,10 @@ export function Login() {
     <main className="page page--login">
       <h1>Spiritolo</h1>
       <form onSubmit={onSubmit}>
-        <label>
+        <label htmlFor="email">
           Email
           <input
+            id="email"
             type="email"
             required
             value={email}
