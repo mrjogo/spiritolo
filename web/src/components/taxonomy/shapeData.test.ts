@@ -201,11 +201,8 @@ describe('effectiveRoleLabel', () => {
     expect(effectiveRoleLabel({ ...baseRow, role: 'expression', role_default: null })).toBe('expression');
   });
 
-  it('marks the inferred role with a trailing ? when only role_default is set', () => {
-    expect(effectiveRoleLabel({ ...baseRow, role: null, role_default: 'substance' })).toBe('substance?');
-  });
-
-  it('returns "unknown" when both are null', () => {
+  it('returns "unknown" when role is null, regardless of role_default', () => {
+    expect(effectiveRoleLabel({ ...baseRow, role: null, role_default: 'modifier' })).toBe('unknown');
     expect(effectiveRoleLabel({ ...baseRow, role: null, role_default: null })).toBe('unknown');
   });
 });
