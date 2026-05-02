@@ -184,7 +184,6 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         width={size.w}
         height={size.h}
         dimmedIds={dimmedIds}
-        focusedId={focusedId}
         onNodeClick={(n) => setFocusedId(n.id)}
         onNodeHover={setHovered}
         onBackgroundClick={() => setFocusedId(null)}
