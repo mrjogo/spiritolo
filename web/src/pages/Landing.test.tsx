@@ -34,6 +34,8 @@ describe('Landing', () => {
     useAuthMock.mockReturnValue({ user: null, loading: true });
     renderApp();
     expect(screen.queryByRole('heading', { name: /spiritolo/i })).toBeNull();
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(screen.queryByRole('link', { name: /sign in/i })).toBeNull();
   });
 
   it('redirects to /recipes when already logged in', () => {
