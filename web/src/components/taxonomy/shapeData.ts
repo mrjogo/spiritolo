@@ -28,10 +28,6 @@ export function effectiveRole(node: TaxonomyViewRow): TaxonomyRole {
   return (node.role ?? 'unknown') as TaxonomyRole;
 }
 
-export function effectiveRoleLabel(node: TaxonomyViewRow): string {
-  return node.role ?? 'unknown';
-}
-
 export function viewRowsToGraph(rows: TaxonomyViewRow[]): {
   nodes: TaxonomyNode[];
   links: TaxonomyLink[];

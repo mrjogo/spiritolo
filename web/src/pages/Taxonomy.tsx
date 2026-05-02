@@ -7,7 +7,6 @@ import { FilterChips } from '../components/taxonomy/FilterChips';
 import { ZoomControls } from '../components/taxonomy/ZoomControls';
 import { NodeCard } from '../components/taxonomy/NodeCard';
 import {
-  effectiveRoleLabel,
   matchesQuery,
   neighborsOf,
   radialPositions,
@@ -17,7 +16,6 @@ import {
   type TaxonomyNode,
   type TaxonomyViewRow,
 } from '../components/taxonomy/shapeData';
-import { TX_BROWN_SOFT } from '../components/taxonomy/palette';
 import '../components/taxonomy/taxonomy.css';
 
 // Mirrors --site-header-height in styles.css. Used to size the
@@ -197,26 +195,15 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
 
       <Legend />
 
-      {hovered && !focusedNode && (
-        <div
-          className="tx-card"
-          style={{
-            position: 'absolute', top: 150, right: 14, zIndex: 3,
-            padding: '8px 12px', fontSize: 12, lineHeight: 1.5, width: 200,
-          }}
-        >
-          <div style={{ fontFamily: "'Cinzel', serif", fontWeight: 600, letterSpacing: '0.12em' }}>
-            {hovered.display_name}
-          </div>
-          <div style={{ color: TX_BROWN_SOFT, fontStyle: 'italic' }}>
-            {effectiveRoleLabel(hovered)} · {hovered.recipe_count} recipes · {hovered.aliases.length} aliases
-          </div>
-        </div>
-      )}
-
-      {focusedNode && (
-        <NodeCard node={focusedNode} mode="pinned" onDismiss={() => setFocusedId(null)} />
-      )}
+      {(() => {
+        if (focusedNode) {
+          return <NodeCard node={focusedNode} mode="pinned" onDismiss={() => setFocusedId(null)} />;
+        }
+        if (hovered) {
+          return <NodeCard node={hovered} mode="hover" onDismiss={() => {}} />;
+        }
+        return null;
+      })()}
     </div>
   );
 }
