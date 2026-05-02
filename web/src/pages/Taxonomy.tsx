@@ -28,7 +28,7 @@ type State =
   | { status: 'loaded'; rows: TaxonomyViewRow[] };
 
 const COLUMNS =
-  'id, slug, display_name, role, role_default, ' +
+  'id, slug, display_name, node_kind, default_role, ' +
   'is_cluster_node, is_defining_garnish, ' +
   'parent_ids, child_ids, aliases, recipe_count';
 

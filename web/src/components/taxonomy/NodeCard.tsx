@@ -63,8 +63,8 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
 
       <div style={{ fontSize: 13, lineHeight: 1.55, color: TX_BROWN_MID }}>
         <div className="tx-card__heading" style={{ marginTop: 4 }}>PROPERTIES</div>
-        <Row label="Role (taxonomy)" value={node.role ?? '—'} />
-        <Row label="Default Role (recipe ingredient)" value={node.role_default ?? '—'} />
+        <Row label="Node kind" value={node.node_kind ?? '—'} />
+        <Row label="Default ingredient role" value={node.default_role ?? '—'} />
         <Row label="Clustering node" value={node.is_cluster_node ? '✓' : '—'} />
         <Row label="Defining garnish" value={node.is_defining_garnish ? '✓' : '—'} />
 

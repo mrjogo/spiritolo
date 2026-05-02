@@ -4,8 +4,8 @@ export interface TaxonomyViewRow {
   id: number;
   slug: string;
   display_name: string;
-  role: 'brand' | 'expression' | null;
-  role_default: string | null;
+  node_kind: 'brand' | 'expression' | null;
+  default_role: string | null;
   is_cluster_node: boolean;
   is_defining_garnish: boolean;
   parent_ids: number[];
@@ -24,8 +24,8 @@ export interface TaxonomyLink {
   target: number;
 }
 
-export function effectiveRole(node: TaxonomyViewRow): TaxonomyRole {
-  return (node.role ?? 'unknown') as TaxonomyRole;
+export function effectiveKind(node: TaxonomyViewRow): TaxonomyRole {
+  return (node.node_kind ?? 'unknown') as TaxonomyRole;
 }
 
 export function viewRowsToGraph(rows: TaxonomyViewRow[]): {
@@ -61,7 +61,7 @@ export function rowMatchesFilters(
 ): boolean {
   for (const f of active) {
     if (f === 'substance' || f === 'expression' || f === 'brand') {
-      if (effectiveRole(row) !== f) return false;
+      if (effectiveKind(row) !== f) return false;
       continue;
     }
     if (f === 'cluster' && !row.is_cluster_node) return false;

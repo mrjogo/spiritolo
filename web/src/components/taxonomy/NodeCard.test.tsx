@@ -6,7 +6,7 @@ import type { TaxonomyNode } from './shapeData';
 
 const node: TaxonomyNode = {
   id: 1, slug: 'rye_whiskey', display_name: 'Rye Whiskey',
-  role: 'expression', role_default: 'modifier',
+  node_kind: 'expression', default_role: 'modifier',
   is_cluster_node: true, is_defining_garnish: false,
   parent_ids: [10, 11], child_ids: [20, 21],
   aliases: ['rye', 'rye whisky'], recipe_count: 47,
@@ -18,8 +18,8 @@ describe('<NodeCard>', () => {
     expect(screen.getByText('RYE WHISKEY')).toBeInTheDocument();
     expect(screen.getByText(/47 drinks call for this/i)).toBeInTheDocument();
     expect(screen.getByText(/rye, rye whisky/)).toBeInTheDocument();
-    expect(screen.getByText(/role \(taxonomy\)/i)).toBeInTheDocument();
-    expect(screen.getByText(/default role \(recipe ingredient\)/i)).toBeInTheDocument();
+    expect(screen.getByText(/node kind/i)).toBeInTheDocument();
+    expect(screen.getByText(/default ingredient role/i)).toBeInTheDocument();
     expect(screen.getByText(/clustering node/i)).toBeInTheDocument();
   });
 

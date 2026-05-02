@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import {
-  effectiveRole,
+  effectiveKind,
   viewRowsToGraph,
   matchesQuery,
   rowMatchesFilters,
@@ -13,8 +13,8 @@ const baseRow: TaxonomyViewRow = {
   id: 1,
   slug: 'whiskey',
   display_name: 'Whiskey',
-  role: null,
-  role_default: 'substance',
+  node_kind: null,
+  default_role: 'substance',
   is_cluster_node: true,
   is_defining_garnish: false,
   parent_ids: [],
@@ -23,14 +23,14 @@ const baseRow: TaxonomyViewRow = {
   recipe_count: 12,
 };
 
-describe('effectiveRole', () => {
-  it('returns role when set', () => {
-    expect(effectiveRole({ ...baseRow, role: 'expression', role_default: null })).toBe('expression');
+describe('effectiveKind', () => {
+  it('returns node_kind when set', () => {
+    expect(effectiveKind({ ...baseRow, node_kind: 'expression', default_role: null })).toBe('expression');
   });
 
-  it('returns "unknown" when role is null, regardless of role_default', () => {
-    expect(effectiveRole({ ...baseRow, role: null, role_default: 'modifier' })).toBe('unknown');
-    expect(effectiveRole({ ...baseRow, role: null, role_default: null })).toBe('unknown');
+  it('returns "unknown" when node_kind is null, regardless of default_role', () => {
+    expect(effectiveKind({ ...baseRow, node_kind: null, default_role: 'modifier' })).toBe('unknown');
+    expect(effectiveKind({ ...baseRow, node_kind: null, default_role: null })).toBe('unknown');
   });
 });
 
@@ -163,14 +163,14 @@ describe('rowMatchesFilters', () => {
     expect(rowMatchesFilters(baseRow, new Set())).toBe(true);
   });
 
-  it('matches a role-chip via effectiveRole (role asserted)', () => {
-    const row: TaxonomyViewRow = { ...baseRow, role: 'expression' };
+  it('matches a role-chip via effectiveKind (kind asserted)', () => {
+    const row: TaxonomyViewRow = { ...baseRow, node_kind: 'expression' };
     expect(rowMatchesFilters(row, new Set<FilterKey>(['expression']))).toBe(true);
     expect(rowMatchesFilters(row, new Set<FilterKey>(['substance']))).toBe(false);
   });
 
   it('AND-combines: substance + expression matches nothing', () => {
-    const row: TaxonomyViewRow = { ...baseRow, role: 'expression' };
+    const row: TaxonomyViewRow = { ...baseRow, node_kind: 'expression' };
     expect(rowMatchesFilters(row, new Set<FilterKey>(['substance', 'expression']))).toBe(false);
   });
 

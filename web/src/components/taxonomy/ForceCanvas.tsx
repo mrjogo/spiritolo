@@ -1,7 +1,7 @@
 import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react';
 import ForceGraph2D, { type ForceGraphMethods } from 'react-force-graph-2d';
 import {
-  effectiveRole,
+  effectiveKind,
   type TaxonomyNode,
   type TaxonomyLink,
 } from './shapeData';
@@ -85,7 +85,7 @@ function drawNode(
   node: TaxonomyNode & { x: number; y: number },
   ctx: CanvasRenderingContext2D,
 ) {
-  const role = effectiveRole(node);
+  const role = effectiveKind(node);
   const fill = ROLE_FILL[role];
   const radius = nodeRadius(node);
   const outerR = radius + 2.5;
