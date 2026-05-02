@@ -3,10 +3,8 @@ import {
   effectiveRole,
   effectiveRoleLabel,
   viewRowsToGraph,
-  isOrphan,
   matchesQuery,
   rowMatchesFilters,
-  TOP_LEVEL_ALLOWLIST,
   neighborsOf,
   radialPositions,
 } from './shapeData';
@@ -60,41 +58,6 @@ describe('viewRowsToGraph', () => {
   });
 });
 
-describe('TOP_LEVEL_ALLOWLIST', () => {
-  it('includes the canonical roots of the DAG', () => {
-    expect(TOP_LEVEL_ALLOWLIST).toEqual(
-      expect.arrayContaining([
-        'whiskey',
-        'gin',
-        'rum',
-        'brandy',
-        'vodka',
-        'tequila',
-        'mezcal',
-        'vermouth',
-        'amaro',
-        'bitters',
-        'liqueur',
-        'syrup',
-        'mixer',
-      ]),
-    );
-  });
-});
-
-describe('isOrphan', () => {
-  it('flags a node with no parents that is not on the allowlist', () => {
-    expect(isOrphan({ ...baseRow, slug: 'aperol', parent_ids: [] })).toBe(true);
-  });
-
-  it('does not flag a node with no parents that is on the allowlist', () => {
-    expect(isOrphan({ ...baseRow, slug: 'whiskey', parent_ids: [] })).toBe(false);
-  });
-
-  it('does not flag a node that has parents', () => {
-    expect(isOrphan({ ...baseRow, slug: 'rye_whiskey', parent_ids: [1] })).toBe(false);
-  });
-});
 
 describe('matchesQuery', () => {
   it('returns true for a substring of slug', () => {
@@ -228,9 +191,10 @@ describe('rowMatchesFilters', () => {
     expect(rowMatchesFilters({ ...baseRow, is_cluster_node: false }, new Set<FilterKey>(['cluster']))).toBe(false);
   });
 
-  it('orphan chip uses isOrphan (no parents AND not on allowlist)', () => {
-    expect(rowMatchesFilters({ ...baseRow, slug: 'aperol', parent_ids: [] }, new Set<FilterKey>(['orphan']))).toBe(true);
-    expect(rowMatchesFilters({ ...baseRow, slug: 'whiskey', parent_ids: [] }, new Set<FilterKey>(['orphan']))).toBe(false);
+  it('orphan chip matches any node with no parents', () => {
+    expect(rowMatchesFilters({ ...baseRow, slug: 'aperol',  parent_ids: [] }, new Set<FilterKey>(['orphan']))).toBe(true);
+    expect(rowMatchesFilters({ ...baseRow, slug: 'whiskey', parent_ids: [] }, new Set<FilterKey>(['orphan']))).toBe(true);
+    expect(rowMatchesFilters({ ...baseRow, slug: 'rye_whiskey', parent_ids: [1] }, new Set<FilterKey>(['orphan']))).toBe(false);
   });
 
   it('"no aliases" chip matches only zero-alias rows', () => {

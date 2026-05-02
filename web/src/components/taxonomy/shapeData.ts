@@ -46,32 +46,6 @@ export function viewRowsToGraph(rows: TaxonomyViewRow[]): {
   return { nodes, links };
 }
 
-export const TOP_LEVEL_ALLOWLIST: readonly string[] = [
-  'whiskey',
-  'gin',
-  'rum',
-  'brandy',
-  'vodka',
-  'tequila',
-  'mezcal',
-  'vermouth',
-  'amaro',
-  'bitters',
-  'liqueur',
-  'fortified_wine',
-  'dairy',
-  'syrup',
-  'mixer',
-  'fresh_produce',
-  'citrus',
-  'cranberry',
-  'pineapple',
-];
-
-export function isOrphan(node: TaxonomyViewRow): boolean {
-  if (node.parent_ids.length > 0) return false;
-  return !TOP_LEVEL_ALLOWLIST.includes(node.slug);
-}
 
 export function matchesQuery(node: TaxonomyViewRow, query: string): boolean {
   const q = query.trim().toLowerCase();
@@ -95,7 +69,7 @@ export function rowMatchesFilters(
       continue;
     }
     if (f === 'cluster' && !row.is_cluster_node) return false;
-    if (f === 'orphan' && !isOrphan(row)) return false;
+    if (f === 'orphan' && row.parent_ids.length > 0) return false;
     if (f === 'no aliases' && row.aliases.length > 0) return false;
     if (f === 'zero recipes' && row.recipe_count > 0) return false;
   }

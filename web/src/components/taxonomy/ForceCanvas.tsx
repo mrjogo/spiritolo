@@ -2,7 +2,6 @@ import { forwardRef, useImperativeHandle, useMemo, useRef } from 'react';
 import ForceGraph2D, { type ForceGraphMethods } from 'react-force-graph-2d';
 import {
   effectiveRole,
-  isOrphan,
   type TaxonomyNode,
   type TaxonomyLink,
 } from './shapeData';
@@ -112,7 +111,9 @@ function drawNode(
   // Gold ring (or dashed red if orphan)
   ctx.beginPath();
   ctx.arc(node.x, node.y, outerR, 0, 2 * Math.PI);
-  if (isOrphan(node)) {
+  // dashed-ring branch removed in Task 4.
+  const orphan = false;
+  if (orphan) {
     ctx.strokeStyle = TX_ORPHAN_RING;
     ctx.setLineDash([2.2, 1.8]);
     ctx.lineWidth = 1.0;
