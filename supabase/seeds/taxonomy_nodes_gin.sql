@@ -5,9 +5,9 @@
 -- is EU-regulated; Plymouth has a 2015 geographical indication granted to
 -- Plymouth Gin Distillery; Old Tom is a historical sweetened style with no
 -- legal definition; Genever is the malt-wine-based Dutch progenitor.
-update taxonomy_nodes set role_default = 'base_spirit' where slug = 'gin';
+update taxonomy_nodes set default_role = 'base_spirit' where slug = 'gin';
 
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('london_dry_gin', 'London Dry Gin', true, 'base_spirit'),
   ('old_tom_gin',    'Old Tom Gin',    true, 'base_spirit'),
   ('plymouth_gin',   'Plymouth Gin',   true, 'base_spirit'),

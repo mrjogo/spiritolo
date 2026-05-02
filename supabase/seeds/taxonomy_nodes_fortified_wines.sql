@@ -11,18 +11,18 @@
 --   * Brand-as-substance for Lillet (each color) and Cocchi Americano per
 --     the dedup spec carve-out — cocktail vocabulary names them as
 --     substance.
-insert into taxonomy_nodes (slug, display_name, role_default) values
+insert into taxonomy_nodes (slug, display_name, default_role) values
   ('fortified_wine', 'Fortified Wine', 'modifier');
 
 -- Sub-family parents (non-cluster).
-insert into taxonomy_nodes (slug, display_name, role_default) values
+insert into taxonomy_nodes (slug, display_name, default_role) values
   ('sherry',         'Sherry',          'modifier'),
   ('port',           'Port',            'modifier'),
   ('madeira',        'Madeira',         'modifier'),
   ('aperitif_wine',  'Aperitif Wine',   'modifier');
 
 -- Sherry style cluster nodes.
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('fino_sherry',         'Fino Sherry',         true, 'modifier'),
   ('manzanilla_sherry',   'Manzanilla Sherry',   true, 'modifier'),
   ('amontillado_sherry',  'Amontillado Sherry',  true, 'modifier'),
@@ -31,26 +31,26 @@ insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) v
   ('pedro_ximenez',       'Pedro Ximénez Sherry', true, 'modifier');
 
 -- Port style cluster nodes.
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('ruby_port',    'Ruby Port',    true, 'modifier'),
   ('tawny_port',   'Tawny Port',   true, 'modifier'),
   ('white_port',   'White Port',   true, 'modifier'),
   ('vintage_port', 'Vintage Port', true, 'modifier');
 
 -- Madeira style cluster nodes (driest to sweetest).
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('sercial_madeira',  'Sercial Madeira',  true, 'modifier'),
   ('verdelho_madeira', 'Verdelho Madeira', true, 'modifier'),
   ('bual_madeira',     'Bual Madeira',     true, 'modifier'),
   ('malmsey_madeira',  'Malmsey Madeira',  true, 'modifier');
 
 -- Brand nodes (top-level, no parent).
-insert into taxonomy_nodes (slug, display_name, role) values
+insert into taxonomy_nodes (slug, display_name, node_kind) values
   ('lillet', 'Lillet', 'brand'),  -- Pernod Ricard (brand est. 1872; quinquina form was Kina Lillet until 1986 reformulation)
   ('cocchi', 'Cocchi', 'brand');  -- Giulio Cocchi (Asti, 1891); owned by Bava Family since 1978
 
 -- Brand-as-substance expression cluster nodes.
-insert into taxonomy_nodes (slug, display_name, role, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, node_kind, is_cluster_node, default_role) values
   ('lillet_blanc',     'Lillet Blanc',     'expression', true, 'modifier'),
   ('lillet_rose',      'Lillet Rosé',      'expression', true, 'modifier'),
   ('lillet_rouge',     'Lillet Rouge',     'expression', true, 'modifier'),

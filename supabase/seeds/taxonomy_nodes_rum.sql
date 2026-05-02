@@ -30,7 +30,7 @@
 -- intersection, D's mapper auto-creates a more specific expression and
 -- the cluster_key resolves at the dominant style.
 
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('white_rum',    'White Rum',     true, 'base_spirit'),
   ('dark_rum',     'Dark Rum',      true, 'base_spirit'),
   ('aged_rum',     'Aged Rum',      true, 'base_spirit'),

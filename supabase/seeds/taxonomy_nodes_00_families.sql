@@ -14,13 +14,13 @@
 -- are seeded later (mezcal espadín vs tobalá; vodka categories) the
 -- cluster annotation moves to the children.
 --
--- role_default values follow the dedup spec's role allowlist:
+-- default_role values follow the dedup spec's role allowlist:
 -- base_spirit / modifier / citrus / sweetener / bitters / dilution /
 -- ice / garnish / wash / other. Vermouth defaults to 'modifier' (the
 -- contextual rule promotes to 'base_spirit' in Reverse Manhattan /
 -- Bamboo / Adonis when amount ≥ 1.5 oz).
 
-insert into taxonomy_nodes (slug, display_name, role_default) values
+insert into taxonomy_nodes (slug, display_name, default_role) values
   ('whiskey',  'Whiskey',  'base_spirit'),
   ('gin',      'Gin',      'base_spirit'),
   ('rum',      'Rum',      'base_spirit'),
@@ -32,7 +32,7 @@ insert into taxonomy_nodes (slug, display_name, role_default) values
 
 -- Top-level cluster nodes (no subtypes seeded — cluster identity is the
 -- family itself; brands and finer-grained details survive at variant level).
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('vodka',  'Vodka',  true, 'base_spirit'),
   ('mezcal', 'Mezcal', true, 'base_spirit');
 

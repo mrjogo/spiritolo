@@ -2,13 +2,13 @@
 -- Antichain (is_cluster_node = true) sits at the type level uniformly across
 -- the bitters family: angostura_style_aromatic_bitters, orange_bitters,
 -- chocolate_bitters, creole_bitters. Brands sit under `bitters`; named
--- products are role='expression' nodes with two parents — their brand and
+-- products are node_kind='expression' nodes with two parents — their brand and
 -- their type — so the cluster-key rollup deterministically lands at the
 -- type cluster_node. Brand call (e.g. Angostura vs Bittercube Aromatic)
 -- survives at the variant level via the expression's taxonomy_node_id.
-update taxonomy_nodes set role_default = 'bitters' where slug = 'bitters';
+update taxonomy_nodes set default_role = 'bitters' where slug = 'bitters';
 
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('angostura_style_aromatic_bitters', 'Angostura-Style Aromatic Bitters', true, 'bitters'),
   ('orange_bitters',                   'Orange Bitters',                   true, 'bitters'),
   ('chocolate_bitters',                'Chocolate Bitters',                true, 'bitters'),
@@ -19,7 +19,7 @@ insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) v
 -- tonic syrup, etc. Parenting a brand under any single category would imply a
 -- constraint on what they make. Each expression carries the type parent
 -- itself; the brand parent is just provenance.
-insert into taxonomy_nodes (slug, display_name, role) values
+insert into taxonomy_nodes (slug, display_name, node_kind) values
   ('angostura',        'Angostura',         'brand'),
   ('peychauds',        'Peychaud''s',       'brand'),
   ('regans',           'Regan''s',          'brand'),
@@ -30,7 +30,7 @@ insert into taxonomy_nodes (slug, display_name, role) values
 -- Expression nodes. None are cluster nodes; each rolls up to its type cluster.
 -- Slugs use the manufacturer's full product name in snake_case so future siblings
 -- have room (Angostura Orange Bitters lives next to Angostura Aromatic Bitters).
-insert into taxonomy_nodes (slug, display_name, role, role_default) values
+insert into taxonomy_nodes (slug, display_name, node_kind, default_role) values
   ('angostura_aromatic_bitters',              'Angostura Aromatic Bitters',              'expression', 'bitters'),
   ('angostura_orange_bitters',                'Angostura Orange Bitters',                'expression', 'bitters'),
   ('peychauds_bitters',                       'Peychaud''s Bitters',                     'expression', 'bitters'),

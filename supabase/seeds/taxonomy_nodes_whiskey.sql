@@ -29,7 +29,7 @@
 -- identity in cocktail vocab — recipes calling for "scotch" treat
 -- single malt vs blended as variant-level brand call).
 
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('bourbon',           'Bourbon',           true, 'base_spirit'),
   ('rye_whiskey',       'Rye Whiskey',       true, 'base_spirit'),
   ('scotch_whisky',     'Scotch Whisky',     true, 'base_spirit'),

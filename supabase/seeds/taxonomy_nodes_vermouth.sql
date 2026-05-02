@@ -25,7 +25,7 @@
 --   * Carpano Antica Formula is the iconic premium sweet vermouth,
 --     also Branca-owned; auto-create on demand.
 
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('sweet_vermouth', 'Sweet Vermouth', true, 'modifier'),
   ('dry_vermouth',   'Dry Vermouth',   true, 'modifier'),
   ('blanc_vermouth', 'Blanc Vermouth', true, 'modifier');
