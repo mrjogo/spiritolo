@@ -477,11 +477,16 @@ Create `web/src/auth/RequireAuth.test.tsx`:
 ```tsx
 import { render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useSearchParams } from 'react-router-dom';
 import { RequireAuth } from './RequireAuth';
 
 const useAuthMock = vi.fn();
 vi.mock('./AuthProvider', () => ({ useAuth: () => useAuthMock() }));
+
+function LoginSpy() {
+  const [params] = useSearchParams();
+  return <div>login-page next={params.get('next') ?? 'none'}</div>;
+}
 
 function renderAt(path: string) {
   return render(
@@ -490,7 +495,7 @@ function renderAt(path: string) {
         <Route element={<RequireAuth />}>
           <Route path="/recipes" element={<div>recipes-page</div>} />
         </Route>
-        <Route path="/login" element={<div>login-page-{location.search}</div>} />
+        <Route path="/login" element={<LoginSpy />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -510,11 +515,12 @@ describe('RequireAuth', () => {
     expect(screen.getByText('recipes-page')).toBeInTheDocument();
   });
 
-  it('redirects to /login with next param when no user', () => {
+  it('redirects to /login with the encoded next param when no user', () => {
     useAuthMock.mockReturnValue({ user: null, loading: false });
-    renderAt('/recipes');
-    // The login page is rendered by the redirect target; assert it appears.
-    expect(screen.getByText(/login-page/)).toBeInTheDocument();
+    renderAt('/recipes?foo=bar');
+    expect(
+      screen.getByText('login-page next=/recipes?foo=bar'),
+    ).toBeInTheDocument();
   });
 });
 ```
