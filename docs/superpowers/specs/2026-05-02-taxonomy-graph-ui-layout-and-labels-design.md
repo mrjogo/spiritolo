@@ -35,14 +35,36 @@ Single curator (still). No public surface area. No backend changes.
 
 ## Non-goals
 
-- Renaming `taxonomy_nodes.role` and `role_default`. That work is
-  starting in a separate worktree
-  (`.worktrees/role-rename/docs/superpowers/specs/2026-05-02-taxonomy-role-rename-design.md`)
-  and the interim "Role (taxonomy)" / "Default Role (recipe ingredient)"
-  labels stay untouched here.
 - Mobile layout, accessibility audit, public read-only mode.
 - Drilling from a taxonomy node into a filtered recipe list.
 - Antichain-invariant violation highlighting.
+
+## Adjacent change merged in: `node_kind` / `default_role` rename
+
+While this round was being scoped, PR #38 landed on `main`, renaming
+`taxonomy_nodes.role` → `node_kind` and `role_default` →
+`default_role`. The curator-pass branch was branched before that, so
+the web code in `shapeData.ts`, `NodeCard.tsx`, `Taxonomy.tsx`'s
+`COLUMNS` SELECT, and the `taxonomy_public` view migration in this
+branch all still reference the old column names. The runtime would
+break at first query.
+
+Implementation Task 0 catches up the web code to the new names — a
+straight column rename:
+
+- `taxonomy_nodes.role` → `node_kind` everywhere it's referenced
+  (TS field, SELECT list, view definition, test fixtures).
+- `taxonomy_nodes.role_default` → `default_role`.
+
+Once the columns have honest names, the interim NodeCard labels
+become unnecessary verbose:
+
+- "Role (taxonomy)" → **"Node kind"**.
+- "Default Role (recipe ingredient)" → **"Default ingredient role"**.
+
+The legend's null-state line and the `?`-glyph removal stay coherent
+with the new naming: "role (taxonomy) not set" becomes "node kind
+not set" in section D's body.
 
 ## Design
 
@@ -129,7 +151,7 @@ Final body of [Legend.tsx](web/src/components/taxonomy/Legend.tsx):
   <LegendDot color={ROLE_FILL.brand} /> brand<br />
   <div style={{ marginTop: 4, fontStyle: 'italic', color: TX_BROWN_SOFT, lineHeight: 1.4 }}>
     ◯ rust ring = clustering node<br />
-    ◯ gray = role (taxonomy) not set
+    ◯ gray = node kind not set
   </div>
 </div>
 ```
