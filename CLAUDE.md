@@ -89,7 +89,7 @@ DAG of canonical ingredients. **Read [docs/spirits-taxonomy.md](docs/spirits-tax
 
 Two non-obvious rules worth surfacing here (full treatment in the doc):
 
-- **Brand and product names always get their own nodes** (`role='brand'` / `'expression'`), never aliases. Aliases are reserved for capitalization/punctuation/language variants of one canonical name, plus the brand-as-substance carve-out (`'aromatic bitters'` → `angostura_bitters`).
+- **Brand and product names always get their own nodes** (`node_kind='brand'` / `'expression'`), never aliases. Aliases are reserved for capitalization/punctuation/language variants of one canonical name, plus the brand-as-substance carve-out (`'aromatic bitters'` → `angostura_bitters`).
 - **`is_cluster_node` cuts the DAG asymmetrically.** A type node is the cluster identity in some branches (`orange_bitters`, `bourbon`); an expression node is the cluster identity in others (`angostura_bitters`, `peychauds_bitters` — brand-as-substance). The only invariant: no `is_cluster_node` node has an `is_cluster_node` ancestor.
 
 Add by editing `supabase/seeds/taxonomy_nodes.sql` (local dev only — Supabase doesn't apply seed files to prod) and re-running `supabase db reset`.

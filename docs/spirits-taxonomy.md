@@ -18,7 +18,7 @@ taxonomy_nodes (
   id            bigint PRIMARY KEY,
   slug          text UNIQUE NOT NULL,         -- 'rye_whiskey', 'lemon', 'buffalo_trace_eagle_rare_10'
   display_name  text NOT NULL,                -- 'Rye Whiskey'
-  role          text CHECK (role IN ('brand', 'expression')),  -- nullable; see Roles below
+  node_kind     text CHECK (node_kind IN ('brand', 'expression')),  -- nullable; see Node kinds below
   created_at    timestamptz NOT NULL DEFAULT now()
 )
 
@@ -42,26 +42,36 @@ taxonomy_aliases (
 
 Recursive CTEs (`WITH RECURSIVE`) traverse the DAG. Add a materialized closure table only if recursion becomes a hotspot — at expected node counts (low thousands), it won't.
 
-## Roles
+## Node kinds
 
-A `role` marks a node's *role in the data model* — what kind of thing-in-the-schema it is, not what kind of substance it represents. Substance lives in the DAG. Soft groupings (smoky, brown liquor) belong to the vector layer.
+`node_kind` marks what kind of taxonomy entry the node is — a structural
+classification in the data model, not a sensory or stylistic property.
+Substance lives in the DAG. Soft groupings (smoky, brown liquor) belong to
+the vector layer.
+
+The column is named `node_kind` to disambiguate from the unrelated `role`
+column on `recipe_ingredients` (and from `taxonomy_nodes.default_role`,
+which seeds *that* role). The two have nothing to do with each other.
 
 Closed vocabulary, enforced by `CHECK`:
 
-| Role | Meaning |
+| Node kind | Meaning |
 |---|---|
 | `brand` | Node represents a manufacturer's brand line (Buffalo Trace, Smirnoff). |
 | `expression` | Node represents a specific SKU / release (Eagle Rare 10, Smirnoff No. 21). |
 | `NULL` | Everything else — categories, types, fresh ingredients. |
 
-Adding a role requires a migration and a defensible reason. A candidate role must describe a node's *role in the schema*, never a sensory or stylistic property. If it describes how the node feels or groups by vibe, it's not a role.
+Adding a kind requires a migration and a defensible reason. A candidate
+kind must describe a node's *role in the schema*, never a sensory or
+stylistic property. If it describes how the node feels or groups by vibe,
+it's not a kind.
 
 ## What belongs as a node
 
 Add a node when the concept is:
 
 - **Definitional or regulatory** — `whiskey`, `bourbon`, `rye_whiskey`, `london_dry_gin`, `single_malt_scotch`, `vermouth`, `amaro`.
-- **A brand or expression** (`role = 'brand'` / `'expression'`) — `buffalo_trace`, `eagle_rare_10`. Hand-curate the well-known; let the [D] mapper auto-create the long tail when it exists.
+- **A brand or expression** (`node_kind = 'brand'` / `'expression'`) — `buffalo_trace`, `eagle_rare_10`. Hand-curate the well-known; let the [D] mapper auto-create the long tail when it exists.
 - **A category whose children share substitution semantics** — `citrus` (parent of `lemon`, `lime`), `berries` (parent of `strawberry`, `raspberry`).
 
 ## What does not belong as a node
@@ -87,7 +97,7 @@ An alias is a free-text variant that resolves to a single existing node. Use ali
 
 Do **not** use aliases for:
 
-- **Brand or product names.** "Regan's Orange Bitters", "Bittermens Xocolatl Mole Bitters", "Fee Brothers Whiskey Barrel-Aged" are real products. Each gets its own `role='expression'` node, parented under its `role='brand'` node and (for non-brand-as-substance items) under the appropriate type node. Aliasing a product name to a type erases brand provenance, collapses what the [E] dedup variant-key is meant to keep distinct, and pre-empts the [D] mapper's auto-create flow for the long tail.
+- **Brand or product names.** "Regan's Orange Bitters", "Bittermens Xocolatl Mole Bitters", "Fee Brothers Whiskey Barrel-Aged" are real products. Each gets its own `node_kind='expression'` node, parented under its `node_kind='brand'` node and (for non-brand-as-substance items) under the appropriate type node. Aliasing a product name to a type erases brand provenance, collapses what the [E] dedup variant-key is meant to keep distinct, and pre-empts the [D] mapper's auto-create flow for the long tail.
 
 Hand-curate the well-known brand and expression nodes in the seed; the [D] mapper auto-creates the long tail when a recipe forces the issue.
 
@@ -96,12 +106,12 @@ Hand-curate the well-known brand and expression nodes in the seed; the [D] mappe
 - **Brand slug** is the brand or company name in snake_case, always — no suffix: `angostura`, `peychauds`, `fee_brothers`, `bittermens`, `branca`, `nonino`, `campari`, `aperol`, `cynar`.
 - **Expression slug** is the manufacturer's full product name in snake_case when the bottle has a descriptor: `angostura_aromatic_bitters` (not just `angostura_bitters` — Angostura also makes Orange Bitters and Cocoa Bitters), `fee_brothers_west_indian_orange_bitters`, `bittermens_xocolatl_mole_bitters`, `fernet_branca`, `amaro_nonino`. Defensive specificity reserves room for siblings without forcing renames later.
 - **Eponymous expressions (no bottle descriptor).** A few brand-as-substance products are sold with the brand name alone on the bottle (Campari, Aperol, Cynar, Suze, Drambuie, Bénédictine). For these, the expression slug appends the family-parent slug: `campari_amaro`, `aperol_amaro`, `cynar_amaro`, `suze_aperitif`, `drambuie_liqueur`, `benedictine_liqueur`. The brand slug stays clean.
-- **Display names** follow normal title case and match what the manufacturer prints on the bottle: `Angostura`, `Angostura Aromatic Bitters`, `Peychaud's Bitters`, `Campari`. Brand and expression nodes can share a display name when the bottle calls both by the same name; `role` distinguishes them, and aliases route cocktail-vocabulary text (`'campari'`, `'aperol'`) to the expression (the cluster identity) rather than the brand.
+- **Display names** follow normal title case and match what the manufacturer prints on the bottle: `Angostura`, `Angostura Aromatic Bitters`, `Peychaud's Bitters`, `Campari`. Brand and expression nodes can share a display name when the bottle calls both by the same name; `node_kind` distinguishes them, and aliases route cocktail-vocabulary text (`'campari'`, `'aperol'`) to the expression (the cluster identity) rather than the brand.
 - Aliases handle cocktail-vocabulary shortcuts (`'angostura'` → `angostura_aromatic_bitters` because cocktail text means that product when it says "angostura"; `'aromatic bitters'` → same, because the recipe community uses the generic interchangeably with the canonical Angostura product).
 
 ### Brand nodes are top-level
 
-A `role='brand'` node has **no parent** in the DAG. Brands span categories — Fee Brothers makes amaretto syrup as well as bitters; Angostura makes rum as well as bitters; Bittermens makes tonic syrup as well as bitters. Parenting a brand under any single category would imply a constraint on what the brand makes, which is wrong.
+A `node_kind='brand'` node has **no parent** in the DAG. Brands span categories — Fee Brothers makes amaretto syrup as well as bitters; Angostura makes rum as well as bitters; Bittermens makes tonic syrup as well as bitters. Parenting a brand under any single category would imply a constraint on what the brand makes, which is wrong.
 
 Each expression carries the type parent itself; the brand parent is provenance, the type parent is the cluster-rollup path. So expressions are always dual-parented `[brand, type]` (or, for cluster-on-expression brand-as-substance items, `[brand, family parent]`).
 
@@ -118,19 +128,19 @@ Required invariant: no `is_cluster_node = true` node has an `is_cluster_node = t
 Concrete example (the `bitters` family — uniformly type-level):
 
 ```
-bitters (parent, role_default='bitters')
+bitters (parent, default_role='bitters')
 ├── angostura_style_aromatic_bitters (is_cluster_node=true)
 ├── orange_bitters (is_cluster_node=true)
 ├── chocolate_bitters (is_cluster_node=true)
 └── creole_bitters (is_cluster_node=true)
 
 (top-level, no parent — brands span categories)
-- angostura          (role='brand')
-- peychauds          (role='brand')
-- regans             (role='brand')
-- fee_brothers       (role='brand')
-- bittermens         (role='brand')
-- the_bitter_truth   (role='brand')
+- angostura          (node_kind='brand')
+- peychauds          (node_kind='brand')
+- regans             (node_kind='brand')
+- fee_brothers       (node_kind='brand')
+- bittermens         (node_kind='brand')
+- the_bitter_truth   (node_kind='brand')
 
 (expressions: dual-parented [brand, type])
 - angostura_aromatic_bitters              parents: [angostura, angostura_style_aromatic_bitters]
