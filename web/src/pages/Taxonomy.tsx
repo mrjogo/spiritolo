@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../supabase';
-import { ForceCanvas, type ForceCanvasHandle } from '../components/taxonomy/ForceCanvas';
+import { ForceCanvas, type DagMode, type ForceCanvasHandle } from '../components/taxonomy/ForceCanvas';
 import { Legend } from '../components/taxonomy/Legend';
 import { SearchBox } from '../components/taxonomy/SearchBox';
 import { FilterChips } from '../components/taxonomy/FilterChips';
@@ -70,6 +70,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<Set<FilterKey>>(new Set());
   const [focusedId, setFocusedId] = useState<number | null>(null);
+  const [dagMode, setDagMode] = useState<DagMode | undefined>(undefined);
   const canvasRef = useRef<ForceCanvasHandle>(null);
 
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
@@ -174,6 +175,30 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
           }}
         />
         <FilterChips active={filters} onToggle={toggleFilter} />
+        <select
+          value={dagMode ?? 'free'}
+          onChange={(e) => {
+            const v = e.target.value;
+            setDagMode(v === 'free' ? undefined : (v as DagMode));
+          }}
+          aria-label="Layout mode"
+          style={{
+            fontFamily: "'Cinzel', serif", fontSize: 10, letterSpacing: '0.18em',
+            padding: '4px 8px', borderRadius: 6,
+            border: '1px solid #8a6a35',
+            background: 'rgba(245, 233, 200, 0.85)',
+            color: '#3a2a14',
+            textTransform: 'uppercase', cursor: 'pointer',
+          }}
+        >
+          <option value="free">Layout: free</option>
+          <option value="td">Layout: top → down</option>
+          <option value="bu">Layout: bottom → up</option>
+          <option value="lr">Layout: left → right</option>
+          <option value="rl">Layout: right → left</option>
+          <option value="radialout">Layout: radial out</option>
+          <option value="radialin">Layout: radial in</option>
+        </select>
       </div>
       <ForceCanvas
         ref={canvasRef}
@@ -182,6 +207,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         width={size.w}
         height={size.h}
         dimmedIds={dimmedIds}
+        dagMode={dagMode}
         onNodeClick={(n) => setFocusedId(n.id)}
         onNodeHover={setHovered}
         onBackgroundClick={() => setFocusedId(null)}

@@ -19,6 +19,8 @@ import {
 
 const SHOW_LABEL_AT = 1.2;
 
+export type DagMode = 'td' | 'bu' | 'lr' | 'rl' | 'radialout' | 'radialin';
+
 export interface ForceCanvasHandle {
   zoom: (factor: number) => void;
   fit: () => void;
@@ -31,13 +33,14 @@ interface Props {
   width: number;
   height: number;
   dimmedIds?: Set<number>;
+  dagMode?: DagMode;
   onNodeClick: (node: TaxonomyNode) => void;
   onNodeHover: (node: TaxonomyNode | null) => void;
   onBackgroundClick?: () => void;
 }
 
 export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCanvas(
-  { nodes, links, width, height, dimmedIds, onNodeClick, onNodeHover, onBackgroundClick },
+  { nodes, links, width, height, dimmedIds, dagMode, onNodeClick, onNodeHover, onBackgroundClick },
   ref,
 ) {
   const inner = useRef<ForceGraphMethods | undefined>(undefined);
@@ -56,13 +59,6 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
   useEffect(() => {
     const fg = inner.current;
     if (!fg) return;
-
-    fg.d3Force('center', null);
-
-    // d3-force's charge accessor returns ForceFn | undefined; the underlying
-    // forceManyBody() exposes .strength(). Cast narrowly to that shape.
-    const charge = fg.d3Force('charge') as { strength(s: number): unknown } | undefined;
-    charge?.strength(-120);
 
     const PAD = 4;
     fg.d3Force(
@@ -86,6 +82,8 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
       width={width}
       height={height}
       backgroundColor="rgba(0,0,0,0)"
+      dagMode={dagMode}
+      dagLevelDistance={80}
       nodeRelSize={4}
       nodeVal={(n) => nodeRadius(n as TaxonomyNode)}
       linkColor={() => TX_LINK}
