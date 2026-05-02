@@ -118,7 +118,7 @@ def _fetch_recipe_ingredients(
                ri.unit,
                ri.taxonomy_node_id,
                n.slug,
-               n.role_default,
+               n.default_role,
                n.is_defining_garnish
         from recipe_ingredients ri
         left join taxonomy_nodes n on n.id = ri.taxonomy_node_id
@@ -137,7 +137,7 @@ def _fetch_recipe_ingredients(
             "unit": r[5],
             "taxonomy_node_id": r[6],
             "taxonomy_node_slug": r[7],
-            "role_default": r[8],
+            "default_role": r[8],
             "is_defining_garnish": bool(r[9]) if r[9] is not None else False,
         }
         for r in rows

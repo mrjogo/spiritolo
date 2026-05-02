@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import psycopg
 
-# Each tuple: (slug, display_name, role, is_cluster_node, role_default,
+# Each tuple: (slug, display_name, node_kind, is_cluster_node, default_role,
 #              is_defining_garnish, parent_slug_or_None)
 _NODES = [
     # Spirit families (parents — not antichain)
@@ -90,24 +90,24 @@ def seed_dedup_fixture(conn: psycopg.Connection) -> dict[str, int]:
     Returns slug -> node_id mapping for the inserted/existing nodes.
     """
     ids: dict[str, int] = {}
-    for slug, display, role, is_cluster, role_default, def_garnish, _parent in _NODES:
+    for slug, display, node_kind, is_cluster, default_role, def_garnish, _parent in _NODES:
         row = conn.execute(
             """
             insert into taxonomy_nodes
-                (slug, display_name, role, is_cluster_node, role_default,
+                (slug, display_name, node_kind, is_cluster_node, default_role,
                  is_defining_garnish)
             values (%s, %s, %s, %s, %s, %s)
             on conflict (slug) do update
                 set is_cluster_node = excluded.is_cluster_node,
-                    role_default    = excluded.role_default,
+                    default_role    = excluded.default_role,
                     is_defining_garnish = excluded.is_defining_garnish
             returning id
             """,
-            (slug, display, role, is_cluster, role_default, def_garnish),
+            (slug, display, node_kind, is_cluster, default_role, def_garnish),
         ).fetchone()
         ids[slug] = row[0]
 
-    for slug, display, role, is_cluster, role_default, def_garnish, parent in _NODES:
+    for slug, display, node_kind, is_cluster, default_role, def_garnish, parent in _NODES:
         if parent is None:
             continue
         conn.execute(

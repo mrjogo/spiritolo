@@ -8,7 +8,7 @@ Layout (relevant for cascade coverage):
             └── lemon_wheel
     gin                        [alias: 'gin', 'london dry gin']
       └── london_dry_gin
-            └── tanqueray      (role=brand, alias: 'tanqueray', 'tanqueray gin')
+            └── tanqueray      (node_kind=brand, alias: 'tanqueray', 'tanqueray gin')
     bourbon                    [alias: 'bourbon']
 
 Tests assert mapper outcomes against this fixture rather than the
@@ -35,11 +35,11 @@ def seed(conn: psycopg.Connection) -> dict[str, int]:
         ("bourbon",         "Bourbon",         None),
     ]
     ids: dict[str, int] = {}
-    for slug, name, role in nodes:
+    for slug, name, node_kind in nodes:
         row = conn.execute(
-            "insert into taxonomy_nodes (slug, display_name, role) "
+            "insert into taxonomy_nodes (slug, display_name, node_kind) "
             "values (%s, %s, %s) returning id",
-            (slug, name, role),
+            (slug, name, node_kind),
         ).fetchone()
         ids[slug] = row[0]
 
