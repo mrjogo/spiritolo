@@ -48,6 +48,12 @@ create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
 
+-- Backfill profile rows for any users that already existed when this migration
+-- was applied. The trigger above only fires for future inserts.
+insert into profiles (id)
+  select id from auth.users
+  on conflict (id) do nothing;
+
 ------------------------------------------------------------------------
 -- 2. Revoke all anon access to existing data tables and views
 ------------------------------------------------------------------------
