@@ -1,6 +1,6 @@
 """Deterministic role classification for recipe_ingredients rows.
 
-Inputs: (taxonomy_node_slug, role_default, amount, unit, position, raw_text).
+Inputs: (taxonomy_node_slug, default_role, amount, unit, position, raw_text).
 Output: (role, role_source) where role_source is 'default' (taxonomy), 'rule'
 (contextual override), or 'manual' (set by an explicit reviewer — never
 emitted by this function; reserved).
@@ -46,7 +46,7 @@ def _to_oz(amount: float | None, unit: str | None) -> float | None:
 
 
 def classify_role(ing: dict[str, Any]) -> tuple[str, str]:
-    role_default = ing.get("role_default")
+    default_role = ing.get("default_role")
     amount = ing.get("amount")
     unit = ing.get("unit")
     position = ing.get("position") or 99
@@ -59,7 +59,7 @@ def classify_role(ing: dict[str, Any]) -> tuple[str, str]:
 
     # Rule: position 1 with structural amount of bitters → base_spirit.
     if (
-        role_default == "bitters"
+        default_role == "bitters"
         and position == 1
         and oz is not None
         and oz >= _BASE_SPIRIT_OZ
@@ -69,7 +69,7 @@ def classify_role(ing: dict[str, Any]) -> tuple[str, str]:
     # Rule: position 1 with structural amount of modifier → base_spirit.
     # (Catches Reverse Manhattan, Adonis, Bamboo.)
     if (
-        role_default == "modifier"
+        default_role == "modifier"
         and position == 1
         and oz is not None
         and oz >= _BASE_SPIRIT_OZ
@@ -77,10 +77,10 @@ def classify_role(ing: dict[str, Any]) -> tuple[str, str]:
         return "base_spirit", "rule"
 
     # Default-from-taxonomy.
-    if role_default is not None:
-        return role_default, "default"
+    if default_role is not None:
+        return default_role, "default"
 
-    # Heuristic for nodes without role_default: position 1 + structural
+    # Heuristic for nodes without default_role: position 1 + structural
     # amount → base_spirit. Otherwise 'other' (audit will flag).
     if position == 1 and oz is not None and oz >= _BASE_SPIRIT_OZ:
         return "base_spirit", "rule"

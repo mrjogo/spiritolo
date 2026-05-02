@@ -19,7 +19,7 @@
 -- Mezcal lives in `taxonomy_nodes_00_families.sql` as a top-level
 -- cluster (no subtypes seeded).
 
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('blanco_tequila',      'Blanco Tequila',      true, 'base_spirit'),
   ('reposado_tequila',    'Reposado Tequila',    true, 'base_spirit'),
   ('anejo_tequila',       'Añejo Tequila',       true, 'base_spirit'),

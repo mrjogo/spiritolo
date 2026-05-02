@@ -22,7 +22,7 @@ def test_candidate_promotions_finds_auto_created_brands(dedup_fixture, db_conn):
     conn, ids = dedup_fixture
     db_conn.execute("""
         update taxonomy_nodes
-           set role = 'brand', is_cluster_node = false, role_default = null
+           set node_kind = 'brand', is_cluster_node = false, default_role = null
          where slug = 'campari'
     """)
     db_conn.execute("""
@@ -37,21 +37,21 @@ def test_candidate_promotions_finds_auto_created_brands(dedup_fixture, db_conn):
     assert "campari" in slugs
 
 
-def test_promote_node_sets_role_null_and_is_cluster_node_true(dedup_fixture, db_conn):
+def test_promote_node_sets_node_kind_null_and_is_cluster_node_true(dedup_fixture, db_conn):
     conn, ids = dedup_fixture
     db_conn.execute("""
         update taxonomy_nodes
-           set role = 'brand', is_cluster_node = false, role_default = null
+           set node_kind = 'brand', is_cluster_node = false, default_role = null
          where slug = 'campari'
     """)
 
     promote_node(
         db_conn, slug="campari",
-        role_default="modifier",
+        default_role="modifier",
         promoter="test-suite",
     )
 
     row = db_conn.execute(
-        "select role, is_cluster_node, role_default from taxonomy_nodes where slug = 'campari'"
+        "select node_kind, is_cluster_node, default_role from taxonomy_nodes where slug = 'campari'"
     ).fetchone()
     assert row == (None, True, "modifier")

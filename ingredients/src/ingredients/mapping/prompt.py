@@ -28,7 +28,7 @@ You choose ONE of four actions and reply with a single JSON object, no commentar
 
 2. PROPOSE a new brand or expression node when the string clearly names a real product whose parent category is already present in the candidates:
    {"action": "propose_brand", "slug": "<snake_case>", "display_name": "<Title Case>",
-    "parent_slug": "<existing_parent_slug>", "role": "brand" | "expression"}
+    "parent_slug": "<existing_parent_slug>", "node_kind": "brand" | "expression"}
 
 3. PROPOSE a new form node (e.g. "lemon zest", "lime oil") when the string names a substance form not already in the taxonomy:
    {"action": "propose_form", "slug": "<snake_case>", "display_name": "<Title Case>",

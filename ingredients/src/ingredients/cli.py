@@ -700,8 +700,8 @@ def run_promote_substances(args: argparse.Namespace) -> int:
             log.info("No candidates for promotion.")
             return 0
         for c in cands:
-            print(f"\nCandidate: {c['display_name']} (slug={c['slug']}, current_role={c['current_role']})")
-            print(f"  proposed: role=NULL, is_cluster_node=true, role_default={c['proposed_role_default']}")
+            print(f"\nCandidate: {c['display_name']} (slug={c['slug']}, current_node_kind={c['current_node_kind']})")
+            print(f"  proposed: node_kind=NULL, is_cluster_node=true, default_role={c['proposed_default_role']}")
             if not args.yes:
                 ans = input("Promote? [y/N/q] ").strip().lower()
                 if ans == "q":
@@ -710,7 +710,7 @@ def run_promote_substances(args: argparse.Namespace) -> int:
                     continue
             promote_node(
                 db.conn, slug=c["slug"],
-                role_default=c["proposed_role_default"],
+                default_role=c["proposed_default_role"],
                 promoter=os.environ.get("USER", "operator"),
             )
             log.info("Promoted %s.", c["slug"])

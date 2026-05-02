@@ -14,10 +14,10 @@
 --     substitute high-fructose corn syrup with artificial color and
 --     flavor — Liber & Co., BG Reynolds, Master of Mixes are real-fruit
 --     alternatives.
-insert into taxonomy_nodes (slug, display_name, role_default) values
+insert into taxonomy_nodes (slug, display_name, default_role) values
   ('syrup', 'Syrup', 'sweetener');
 
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('simple_syrup',   'Simple Syrup',   true, 'sweetener'),
   ('demerara_syrup', 'Demerara Syrup', true, 'sweetener'),
   ('honey_syrup',    'Honey Syrup',    true, 'sweetener'),

@@ -12,12 +12,12 @@
 -- Porto Flip) are defined by the whole egg; egg yolk is the base of
 -- traditional Pisco Sour and some classic flips.
 --
--- role_default = 'other' across — the dedup spec's role vocabulary
+-- default_role = 'other' across — the dedup spec's role vocabulary
 -- doesn't include 'dairy' or 'foam_agent'; 'other' is the catch-all.
-insert into taxonomy_nodes (slug, display_name, role_default) values
+insert into taxonomy_nodes (slug, display_name, default_role) values
   ('dairy', 'Dairy', 'other');
 
-insert into taxonomy_nodes (slug, display_name, is_cluster_node, role_default) values
+insert into taxonomy_nodes (slug, display_name, is_cluster_node, default_role) values
   ('cream',          'Cream',                    true, 'other'),
   ('milk',           'Milk',                     true, 'other'),
   ('half_and_half',  'Half-and-Half',            true, 'other'),
