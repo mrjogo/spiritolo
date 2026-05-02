@@ -5,7 +5,7 @@ export interface TaxonomyViewRow {
   slug: string;
   display_name: string;
   role: 'brand' | 'expression' | null;
-  role_default: 'brand' | 'expression' | 'substance' | null;
+  role_default: string | null;
   is_cluster_node: boolean;
   is_defining_garnish: boolean;
   parent_ids: number[];
@@ -25,7 +25,7 @@ export interface TaxonomyLink {
 }
 
 export function effectiveRole(node: TaxonomyViewRow): TaxonomyRole {
-  return (node.role ?? node.role_default ?? 'unknown') as TaxonomyRole;
+  return (node.role ?? 'unknown') as TaxonomyRole;
 }
 
 export function effectiveRoleLabel(node: TaxonomyViewRow): string {

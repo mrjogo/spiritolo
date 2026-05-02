@@ -31,11 +31,8 @@ describe('effectiveRole', () => {
     expect(effectiveRole({ ...baseRow, role: 'expression', role_default: null })).toBe('expression');
   });
 
-  it('falls back to role_default when role is null', () => {
-    expect(effectiveRole({ ...baseRow, role: null, role_default: 'substance' })).toBe('substance');
-  });
-
-  it('returns "unknown" when both are null', () => {
+  it('returns "unknown" when role is null, regardless of role_default', () => {
+    expect(effectiveRole({ ...baseRow, role: null, role_default: 'modifier' })).toBe('unknown');
     expect(effectiveRole({ ...baseRow, role: null, role_default: null })).toBe('unknown');
   });
 });
