@@ -6,9 +6,11 @@
 import type { TaxonomyRole } from './shapeData';
 
 export const TX_GOLD        = '#c9a449';
+export const TX_GOLD_DIM    = 'rgba(201, 164, 73, 0.18)';
 export const TX_CLUSTER_RING = '#a85b3a';   // rust — was the prior expression fill
 export const TX_NODE_BG     = '#1a0f06';
 export const TX_LINK        = 'rgba(201, 164, 73, 0.55)';
+export const TX_LINK_DIM    = 'rgba(201, 164, 73, 0.10)';
 export const TX_FRAME_EDGE  = '#8a6a35';
 export const TX_BROWN_SOFT  = '#5a3f1a';
 export const TX_BROWN_INK   = '#2c1d0c';

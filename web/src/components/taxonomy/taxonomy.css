@@ -98,7 +98,7 @@
 .taxonomy-page__corner--br::after { bottom: 6px; right: 6px;
   border-left: none; border-top: none; }
 
-/* Cream "menu card" used by Legend, SearchBox, ZoomControls, NodeCard. */
+/* Cream "menu card" used by Legend, SearchBox, NodeCard, EdgeCard. */
 .tx-card {
   background: linear-gradient(180deg, var(--tx-cream) 0%, var(--tx-cream-deep) 100%);
   color: var(--tx-brown-ink);

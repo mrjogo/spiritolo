@@ -1,11 +1,17 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '../supabase';
-import { ForceCanvas, type DagMode, type ForceCanvasHandle } from '../components/taxonomy/ForceCanvas';
+import {
+  ForceCanvas,
+  type DagMode,
+  type ForceCanvasHandle,
+  type RuntimeLink,
+} from '../components/taxonomy/ForceCanvas';
 import { Legend } from '../components/taxonomy/Legend';
 import { SearchBox } from '../components/taxonomy/SearchBox';
 import { FilterChips } from '../components/taxonomy/FilterChips';
-import { ZoomControls } from '../components/taxonomy/ZoomControls';
 import { NodeCard } from '../components/taxonomy/NodeCard';
+import { EdgeCard, type EdgeRef } from '../components/taxonomy/EdgeCard';
+import { TX_BROWN_MID, TX_FRAME_EDGE } from '../components/taxonomy/palette';
 import {
   matchesQuery,
   neighborsOf,
@@ -70,11 +76,22 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<Set<FilterKey>>(new Set());
   const [focusedId, setFocusedId] = useState<number | null>(null);
+  const [hoveredEdge, setHoveredEdge] = useState<EdgeRef | null>(null);
+  const [focusedEdge, setFocusedEdge] = useState<EdgeRef | null>(null);
   const [dagMode, setDagMode] = useState<DagMode | undefined>(undefined);
   const canvasRef = useRef<ForceCanvasHandle>(null);
 
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const focusedNode = focusedId ? (byId.get(focusedId) ?? null) : null;
+
+  const resolveLink = (l: RuntimeLink): EdgeRef | null => {
+    const sId = typeof l.source === 'object' ? l.source.id : l.source;
+    const tId = typeof l.target === 'object' ? l.target.id : l.target;
+    const source = byId.get(sId);
+    const target = byId.get(tId);
+    if (!source || !target) return null;
+    return { source, target };
+  };
 
   const neighborIds = useMemo(() => {
     if (!focusedNode) return null;
@@ -199,6 +216,21 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
           <option value="radialout">Layout: radial out</option>
           <option value="radialin">Layout: radial in</option>
         </select>
+        <button
+          type="button"
+          onClick={() => canvasRef.current?.fit()}
+          aria-label="Fit to view"
+          style={{
+            fontFamily: "'Cinzel', serif", fontSize: 10, letterSpacing: '0.18em',
+            padding: '4px 8px', borderRadius: 6,
+            border: `1px solid ${TX_FRAME_EDGE}`,
+            background: 'rgba(245, 233, 200, 0.85)',
+            color: TX_BROWN_MID,
+            textTransform: 'uppercase', cursor: 'pointer',
+          }}
+        >
+          View all
+        </button>
       </div>
       <ForceCanvas
         ref={canvasRef}
@@ -208,27 +240,40 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         height={size.h}
         dimmedIds={dimmedIds}
         dagMode={dagMode}
-        onNodeClick={(n) => setFocusedId(n.id)}
+        onNodeClick={(n) => {
+          setFocusedEdge(null);
+          setFocusedId(n.id);
+        }}
         onNodeHover={setHovered}
-        onBackgroundClick={() => setFocusedId(null)}
-      />
-      <ZoomControls
-        onZoomIn={() => canvasRef.current?.zoom(1.4)}
-        onZoomOut={() => canvasRef.current?.zoom(1 / 1.4)}
-        onFit={() => canvasRef.current?.fit()}
-        right={focusedNode ? 264 : 24}
+        onLinkClick={(l) => {
+          const e = resolveLink(l);
+          if (!e) return;
+          setFocusedId(null);
+          setFocusedEdge(e);
+        }}
+        onLinkHover={(l) => setHoveredEdge(l ? resolveLink(l) : null)}
+        onBackgroundClick={() => {
+          setFocusedId(null);
+          setFocusedEdge(null);
+        }}
       />
 
       <div
         style={{
           position: 'absolute', top: 14, right: 14, zIndex: 3,
-          display: 'flex', flexDirection: 'column', gap: 12,
+          display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12,
         }}
       >
         <Legend />
         {(() => {
+          if (focusedEdge) {
+            return <EdgeCard edge={focusedEdge} mode="pinned" onDismiss={() => setFocusedEdge(null)} />;
+          }
           if (focusedNode) {
             return <NodeCard node={focusedNode} mode="pinned" onDismiss={() => setFocusedId(null)} />;
+          }
+          if (hoveredEdge && !focusedNode) {
+            return <EdgeCard edge={hoveredEdge} mode="hover" onDismiss={() => {}} />;
           }
           if (hovered) {
             return <NodeCard node={hovered} mode="hover" onDismiss={() => {}} />;

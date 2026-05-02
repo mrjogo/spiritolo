@@ -10,9 +10,11 @@ import {
 import {
   ROLE_FILL,
   TX_GOLD,
+  TX_GOLD_DIM,
   TX_CLUSTER_RING,
   TX_NODE_BG,
   TX_LINK,
+  TX_LINK_DIM,
   TX_BROWN_FAINT,
   nodeRadius,
 } from './palette';
@@ -27,6 +29,14 @@ export interface ForceCanvasHandle {
   centerAt: (x: number, y: number, ms?: number) => void;
 }
 
+// react-force-graph mutates `source`/`target` from id-numbers to the
+// node objects after the simulation hooks them up. The accessor lambdas
+// below see the post-mutation form; outbound callbacks return the same.
+export interface RuntimeLink {
+  source: TaxonomyNode | number;
+  target: TaxonomyNode | number;
+}
+
 interface Props {
   nodes: TaxonomyNode[];
   links: TaxonomyLink[];
@@ -36,11 +46,20 @@ interface Props {
   dagMode?: DagMode;
   onNodeClick: (node: TaxonomyNode) => void;
   onNodeHover: (node: TaxonomyNode | null) => void;
+  onLinkClick?: (link: RuntimeLink) => void;
+  onLinkHover?: (link: RuntimeLink | null) => void;
   onBackgroundClick?: () => void;
 }
 
+function endpointId(end: TaxonomyNode | number): number {
+  return typeof end === 'object' ? end.id : end;
+}
+
 export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCanvas(
-  { nodes, links, width, height, dimmedIds, dagMode, onNodeClick, onNodeHover, onBackgroundClick },
+  {
+    nodes, links, width, height, dimmedIds, dagMode,
+    onNodeClick, onNodeHover, onLinkClick, onLinkHover, onBackgroundClick,
+  },
   ref,
 ) {
   const inner = useRef<ForceGraphMethods | undefined>(undefined);
@@ -86,16 +105,28 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
       dagLevelDistance={80}
       nodeRelSize={4}
       nodeVal={(n) => nodeRadius(n as TaxonomyNode)}
-      linkColor={() => TX_LINK}
+      linkColor={(l) => {
+        const link = l as RuntimeLink;
+        const sId = endpointId(link.source);
+        const tId = endpointId(link.target);
+        return dimmedIds?.has(sId) || dimmedIds?.has(tId) ? TX_LINK_DIM : TX_LINK;
+      }}
       linkWidth={0.6}
       linkCurvature={0.18}
       linkDirectionalArrowLength={4}
       linkDirectionalArrowRelPos={0.92}
-      linkDirectionalArrowColor={() => TX_GOLD}
+      linkDirectionalArrowColor={(l) => {
+        const link = l as RuntimeLink;
+        const sId = endpointId(link.source);
+        const tId = endpointId(link.target);
+        return dimmedIds?.has(sId) || dimmedIds?.has(tId) ? TX_GOLD_DIM : TX_GOLD;
+      }}
       enableNodeDrag={false}
       cooldownTicks={120}
       onNodeClick={(n) => onNodeClick(n as TaxonomyNode)}
       onNodeHover={(n) => onNodeHover((n as TaxonomyNode | null) ?? null)}
+      onLinkClick={(l) => onLinkClick?.(l as RuntimeLink)}
+      onLinkHover={(l) => onLinkHover?.((l as RuntimeLink | null) ?? null)}
       onBackgroundClick={onBackgroundClick}
       nodeCanvasObject={(node, ctx, globalScale) => {
         const n = node as TaxonomyNode & { x: number; y: number };

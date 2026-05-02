@@ -10,6 +10,8 @@ interface Props {
   onDismiss: () => void;
 }
 
+const yesNo = (b: boolean) => (b ? 'yes' : 'no');
+
 export function NodeCard({ node, mode, onDismiss }: Props) {
   useEffect(() => {
     if (mode !== 'pinned') return;
@@ -60,43 +62,49 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
 
       <div style={{ fontSize: 13, lineHeight: 1.55, color: TX_BROWN_MID }}>
         <div className="tx-card__heading" style={{ marginTop: 4 }}>PROPERTIES</div>
+        <Row label="ID" value={String(node.id)} />
         <Row label="Node kind" value={node.node_kind ?? '—'} />
         <Row label="Default ingredient role" value={node.default_role ?? '—'} />
-        <Row label="Clustering node" value={node.is_cluster_node ? '✓' : '—'} />
-        <Row label="Defining garnish" value={node.is_defining_garnish ? '✓' : '—'} />
+        <Row label="Clustering node" value={yesNo(node.is_cluster_node)} />
+        <Row label="Defining garnish" value={yesNo(node.is_defining_garnish)} />
+        <Row
+          label="Slug"
+          value={
+            <button
+              type="button"
+              onClick={copySlug}
+              aria-label={`Copy slug ${node.slug} to clipboard`}
+              style={{
+                background: 'none', border: 'none', padding: 0,
+                color: 'inherit', textAlign: 'right',
+                fontFamily: 'ui-monospace, monospace', fontSize: 12,
+                cursor: 'pointer', userSelect: 'none',
+              }}
+            >
+              {node.slug}
+            </button>
+          }
+        />
 
         <div className="tx-card__heading" style={{ marginTop: 10 }}>
           ALIASES <span style={{ fontStyle: 'italic', color: TX_FRAME_EDGE }}>({node.aliases.length})</span>
         </div>
-        <div style={{ fontStyle: 'italic' }}>{node.aliases.join(', ') || '—'}</div>
+        <div>{node.aliases.length > 0 ? node.aliases.join(', ') : '—'}</div>
 
-        <div className="tx-card__heading" style={{ marginTop: 10 }}>RECIPES</div>
-        <div>{node.recipe_count} drinks call for this</div>
-
-        <div className="tx-card__heading" style={{ marginTop: 10 }}>SLUG</div>
-        <button
-          type="button"
-          onClick={copySlug}
-          aria-label={`Copy slug ${node.slug} to clipboard`}
-          style={{
-            background: 'none', border: 'none', padding: 0,
-            color: 'inherit', textAlign: 'left',
-            fontFamily: 'ui-monospace, monospace', fontSize: 12,
-            cursor: 'pointer', userSelect: 'none',
-          }}
-        >
-          ⊕ {node.slug}
-        </button>
+        <div className="tx-card__heading" style={{ marginTop: 10 }}>
+          RECIPES <span style={{ fontStyle: 'italic', color: TX_FRAME_EDGE }}>({node.recipe_count})</span>
+        </div>
+        {node.recipe_count === 0 && <div>—</div>}
       </div>
     </aside>
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function Row({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
       <span>{label}</span>
-      <span style={{ fontStyle: 'italic', textAlign: 'right' }}>{value}</span>
+      <span style={{ textAlign: 'right' }}>{value}</span>
     </div>
   );
 }
