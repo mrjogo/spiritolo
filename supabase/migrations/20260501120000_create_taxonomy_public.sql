@@ -12,8 +12,8 @@ select
   n.id,
   n.slug,
   n.display_name,
-  n.node_kind,
-  n.default_role,
+  n.role,
+  n.role_default,
   n.is_cluster_node,
   n.is_defining_garnish,
   coalesce(p.parent_ids, '{}'::bigint[]) as parent_ids,
@@ -43,7 +43,7 @@ grant select on taxonomy_public to anon, authenticated;
 
 -- taxonomy_nodes: full column-level grant + public-read policy.
 grant select (
-  id, slug, display_name, node_kind, default_role,
+  id, slug, display_name, role, role_default,
   is_cluster_node, is_defining_garnish, created_at
 ) on taxonomy_nodes to anon, authenticated;
 
