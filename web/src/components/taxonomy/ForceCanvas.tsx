@@ -120,17 +120,6 @@ function drawNode(
   ctx.fillStyle = fill;
   ctx.fill();
 
-  // Inferred-role marker: '?' near the node when role is null but
-  // role_default is set (the QA tool wants these flagged for curator
-  // review — the role hasn't been asserted yet).
-  if (node.role == null && node.role_default != null) {
-    ctx.font = `bold ${Math.max(7, radius * 1.2)}px 'Cinzel', serif`;
-    ctx.fillStyle = TX_GOLD;
-    ctx.textAlign = 'left';
-    ctx.textBaseline = 'top';
-    ctx.fillText('?', node.x + outerR + 1, node.y - outerR - 1);
-  }
-
   // Defining-garnish glyph: a small floral mark (❦) to the upper-left
   // when the node's presence changes a drink's identity (cocktail onion
   // → Gibson, salt rim → Salty Dog, etc.). Uses a serif character so
