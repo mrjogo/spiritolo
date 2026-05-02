@@ -33,3 +33,10 @@ htmlcov/
 # Worktrees
 .worktrees/
 .claude/worktrees/
+
+# Brainstorm visual companion mockups
+.superpowers/
+
+# Playwright MCP screenshot/snapshot scratch (kept local, never committed)
+.playwright-mcp/
+/*.png

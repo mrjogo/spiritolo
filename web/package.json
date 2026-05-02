@@ -13,8 +13,10 @@
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.104.0",
+    "d3-bboxCollide": "^1.0.4",
     "react": "^19.2.5",
     "react-dom": "^19.2.5",
+    "react-force-graph-2d": "^1.29.1",
     "react-router-dom": "^7.14.2",
     "schema-dts": "^2.0.0"
   },

@@ -17,6 +17,9 @@ export function RecipeDetail() {
 
   useEffect(() => {
     let cancelled = false;
+    // Reset to loading whenever the route param changes — the previous
+    // recipe's data must not flash while the new fetch is in flight.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setState({ status: 'loading' });
 
     const numericId = Number(id);
