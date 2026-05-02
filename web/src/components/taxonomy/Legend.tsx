@@ -5,7 +5,7 @@ export function Legend() {
     <div
       className="tx-card"
       style={{
-        padding: '8px 12px', fontSize: 12, lineHeight: 1.55, width: 180,
+        padding: '8px 12px', fontSize: 13, lineHeight: 1.6, width: 180,
       }}
     >
       <div className="tx-card__heading" style={{ marginBottom: 4 }}>LEGEND</div>

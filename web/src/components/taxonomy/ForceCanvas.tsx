@@ -123,6 +123,7 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
       }}
       enableNodeDrag={false}
       cooldownTicks={120}
+      showPointerCursor={(obj) => obj != null}
       onNodeClick={(n) => onNodeClick(n as TaxonomyNode)}
       onNodeHover={(n) => onNodeHover((n as TaxonomyNode | null) ?? null)}
       onLinkClick={(l) => onLinkClick?.(l as RuntimeLink)}

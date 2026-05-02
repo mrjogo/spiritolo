@@ -16,7 +16,7 @@ interface Props {
   onFocusNode?: (id: number) => void;
 }
 
-const monoStyle: React.CSSProperties = { fontFamily: 'ui-monospace, monospace' };
+const monoStyle: React.CSSProperties = { fontFamily: 'ui-monospace, monospace', fontSize: 13 };
 
 export function EdgeCard({ edge, mode, onDismiss, onFocusNode }: Props) {
   useEffect(() => {
@@ -88,13 +88,13 @@ export function EdgeCard({ edge, mode, onDismiss, onFocusNode }: Props) {
         style={{
           flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
           padding: '0 18px 20px',
-          fontSize: 13, lineHeight: 1.55, color: TX_BROWN_MID,
+          fontSize: 15, lineHeight: 1.5, color: TX_BROWN_MID,
         }}
       >
         <div className="tx-card__heading" style={{ marginTop: 4 }}>PROPERTIES</div>
         <Row
           label="ID"
-          value={`${edge.source.id} → ${edge.target.id}`}
+          value={`(${edge.source.id}, ${edge.target.id})`}
           valueStyle={monoStyle}
         />
       </div>

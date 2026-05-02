@@ -11,7 +11,9 @@ interface Props {
 }
 
 const yesNo = (b: boolean) => (b ? 'yes' : 'no');
-const monoStyle: React.CSSProperties = { fontFamily: 'ui-monospace, monospace' };
+// ui-monospace renders ~10–15% larger by character-cell metrics than the
+// proportional serif at the same px size; bump down so values visually match.
+const monoStyle: React.CSSProperties = { fontFamily: 'ui-monospace, monospace', fontSize: 13 };
 
 export function NodeCard({ node, mode, onDismiss }: Props) {
   useEffect(() => {
@@ -67,7 +69,7 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
         style={{
           flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
           padding: '0 18px 20px',
-          fontSize: 13, lineHeight: 1.55, color: TX_BROWN_MID,
+          fontSize: 15, lineHeight: 1.5, color: TX_BROWN_MID,
         }}
       >
         <div className="tx-card__heading" style={{ marginTop: 4 }}>PROPERTIES</div>
