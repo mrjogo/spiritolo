@@ -4,7 +4,9 @@ import { useAuth } from '../auth/AuthProvider';
 export function AuthCallback() {
   const { user, loading } = useAuth();
   const [params] = useSearchParams();
-  const next = params.get('next') || '/recipes';
+  const rawNext = params.get('next') || '';
+  // Only accept same-origin relative paths to prevent open-redirect via ?next=.
+  const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/recipes';
 
   if (loading) {
     return (

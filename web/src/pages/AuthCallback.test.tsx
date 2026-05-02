@@ -43,4 +43,18 @@ describe('AuthCallback', () => {
     renderAt('/auth/callback');
     expect(screen.getByText('login-page')).toBeInTheDocument();
   });
+
+  it('falls back to /recipes when ?next= is an absolute or protocol-relative URL', () => {
+    useAuthMock.mockReturnValue({ user: { id: 'u-1' }, loading: false });
+
+    renderAt('/auth/callback?next=https%3A%2F%2Fevil.com');
+    expect(screen.getByText('recipes-page')).toBeInTheDocument();
+  });
+
+  it('falls back to /recipes when ?next= is protocol-relative (//evil.com)', () => {
+    useAuthMock.mockReturnValue({ user: { id: 'u-1' }, loading: false });
+
+    renderAt('/auth/callback?next=%2F%2Fevil.com');
+    expect(screen.getByText('recipes-page')).toBeInTheDocument();
+  });
 });
