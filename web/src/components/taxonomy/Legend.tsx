@@ -6,7 +6,7 @@ export function Legend() {
       className="tx-card"
       style={{
         position: 'absolute', top: 14, right: 14, zIndex: 2,
-        padding: '8px 12px', fontSize: 12, lineHeight: 1.55, width: 160,
+        padding: '8px 12px', fontSize: 12, lineHeight: 1.55, width: 180,
       }}
     >
       <div className="tx-card__heading" style={{ marginBottom: 4 }}>LEGEND</div>
@@ -14,8 +14,9 @@ export function Legend() {
       <LegendDot color={ROLE_FILL.expression} /> expression<br />
       <LegendDot color={ROLE_FILL.brand} /> brand<br />
       <div style={{ marginTop: 4, fontStyle: 'italic', color: TX_BROWN_SOFT, lineHeight: 1.4 }}>
-        ◯ ring = cluster · ⌀ dashed = orphan<br />
-        ? = role inferred · ❦ = defining garnish
+        ◯ extra ring = clustering node<br />
+        ◯ gray fill = role (taxonomy) not set<br />
+        → arrow = parent → child
       </div>
     </div>
   );
