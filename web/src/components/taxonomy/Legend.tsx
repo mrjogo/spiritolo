@@ -5,7 +5,6 @@ export function Legend() {
     <div
       className="tx-card"
       style={{
-        position: 'absolute', top: 14, right: 14, zIndex: 2,
         padding: '8px 12px', fontSize: 12, lineHeight: 1.55, width: 180,
       }}
     >

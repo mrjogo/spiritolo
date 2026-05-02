@@ -193,17 +193,23 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         right={focusedNode ? 264 : 24}
       />
 
-      <Legend />
-
-      {(() => {
-        if (focusedNode) {
-          return <NodeCard node={focusedNode} mode="pinned" onDismiss={() => setFocusedId(null)} />;
-        }
-        if (hovered) {
-          return <NodeCard node={hovered} mode="hover" onDismiss={() => {}} />;
-        }
-        return null;
-      })()}
+      <div
+        style={{
+          position: 'absolute', top: 14, right: 14, zIndex: 3,
+          display: 'flex', flexDirection: 'column', gap: 12,
+        }}
+      >
+        <Legend />
+        {(() => {
+          if (focusedNode) {
+            return <NodeCard node={focusedNode} mode="pinned" onDismiss={() => setFocusedId(null)} />;
+          }
+          if (hovered) {
+            return <NodeCard node={hovered} mode="hover" onDismiss={() => {}} />;
+          }
+          return null;
+        })()}
+      </div>
     </div>
   );
 }

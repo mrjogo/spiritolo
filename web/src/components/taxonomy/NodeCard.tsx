@@ -27,10 +27,7 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
       className="tx-card"
       role={mode === 'pinned' ? 'dialog' : 'tooltip'}
       aria-label={`Taxonomy node: ${node.display_name}`}
-      style={{
-        position: 'absolute', top: 150, right: 14, width: 240, zIndex: 4,
-        padding: '20px 18px',
-      }}
+      style={{ width: 240, padding: '20px 18px' }}
     >
       {mode === 'pinned' && (
         <button
