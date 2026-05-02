@@ -8,6 +8,7 @@ import {
 import {
   ROLE_FILL,
   TX_GOLD,
+  TX_CLUSTER_RING,
   TX_NODE_BG,
   TX_LINK,
   nodeRadius,
@@ -89,7 +90,6 @@ function drawNode(
   const fill = ROLE_FILL[role];
   const radius = nodeRadius(node);
   const outerR = radius + 2.5;
-  const haloR = radius + 1.7;
 
   // Outer dark cap
   ctx.beginPath();
@@ -97,19 +97,10 @@ function drawNode(
   ctx.fillStyle = TX_NODE_BG;
   ctx.fill();
 
-  // Cluster halo (thin extra ring)
-  if (node.is_cluster_node) {
-    ctx.beginPath();
-    ctx.arc(node.x, node.y, haloR, 0, 2 * Math.PI);
-    ctx.strokeStyle = TX_GOLD;
-    ctx.lineWidth = 0.4;
-    ctx.stroke();
-  }
-
-  // Gold ring
+  // Gold ring (rust for clustering nodes)
   ctx.beginPath();
   ctx.arc(node.x, node.y, outerR, 0, 2 * Math.PI);
-  ctx.strokeStyle = TX_GOLD;
+  ctx.strokeStyle = node.is_cluster_node ? TX_CLUSTER_RING : TX_GOLD;
   ctx.lineWidth = 1.0;
   ctx.stroke();
 

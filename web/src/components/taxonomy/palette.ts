@@ -6,6 +6,7 @@
 import type { TaxonomyRole } from './shapeData';
 
 export const TX_GOLD        = '#c9a449';
+export const TX_CLUSTER_RING = '#a85b3a';   // rust — was the prior expression fill
 export const TX_NODE_BG     = '#1a0f06';
 export const TX_LINK        = 'rgba(201, 164, 73, 0.55)';
 export const TX_FRAME_EDGE  = '#8a6a35';
@@ -17,7 +18,7 @@ export const TX_BROWN_FAINT = '#7a5520';
 
 export const ROLE_FILL: Record<TaxonomyRole, string> = {
   substance:  '#e8d9b0',
-  expression: '#a85b3a',
+  expression: '#3a6b6e',                    // was #a85b3a; rust moved to TX_CLUSTER_RING
   brand:      '#7a9a82',
   unknown:    '#888888',
 };
