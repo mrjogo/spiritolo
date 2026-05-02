@@ -103,6 +103,11 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
     ]);
   }, [focusedNode, byId]);
 
+  const edgeFocusIds = useMemo<Set<number> | null>(() => {
+    if (!focusedEdge) return null;
+    return new Set([focusedEdge.source.id, focusedEdge.target.id]);
+  }, [focusedEdge]);
+
   const dimmedIds = useMemo(() => {
     const dim = new Set<number>();
     for (const r of rows) {
@@ -110,10 +115,11 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
       if (query.trim() !== '' && !matchesQuery(r, query)) dimMe = true;
       if (filters.size > 0 && !rowMatchesFilters(r, filters)) dimMe = true;
       if (neighborIds !== null && !neighborIds.has(r.id)) dimMe = true;
+      if (edgeFocusIds !== null && !edgeFocusIds.has(r.id)) dimMe = true;
       if (dimMe) dim.add(r.id);
     }
     return dim;
-  }, [rows, query, filters, neighborIds]);
+  }, [rows, query, filters, neighborIds, edgeFocusIds]);
 
   function toggleFilter(key: FilterKey) {
     setFilters((prev) => {
@@ -262,12 +268,23 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         style={{
           position: 'absolute', top: 14, right: 14, zIndex: 3,
           display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 12,
+          maxHeight: `calc(100vh - ${SITE_HEADER_HEIGHT + 28}px)`,
         }}
       >
         <Legend />
         {(() => {
           if (focusedEdge) {
-            return <EdgeCard edge={focusedEdge} mode="pinned" onDismiss={() => setFocusedEdge(null)} />;
+            return (
+              <EdgeCard
+                edge={focusedEdge}
+                mode="pinned"
+                onDismiss={() => setFocusedEdge(null)}
+                onFocusNode={(id) => {
+                  setFocusedEdge(null);
+                  setFocusedId(id);
+                }}
+              />
+            );
           }
           if (focusedNode) {
             return <NodeCard node={focusedNode} mode="pinned" onDismiss={() => setFocusedId(null)} />;

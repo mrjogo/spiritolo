@@ -57,12 +57,4 @@ describe('<NodeCard>', () => {
     expect(onDismiss).not.toHaveBeenCalled();
   });
 
-  it('writes the slug to the clipboard when the slug row is clicked', async () => {
-    const user = userEvent.setup();
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-    render(<NodeCard node={node} mode="pinned" onDismiss={() => {}} />);
-    await user.click(screen.getByText(/rye_whiskey/));
-    expect(writeText).toHaveBeenCalledWith('rye_whiskey');
-  });
 });

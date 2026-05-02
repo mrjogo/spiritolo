@@ -1,4 +1,4 @@
-import { ROLE_FILL, TX_BROWN_SOFT, TX_CLUSTER_RING, TX_FRAME_EDGE } from './palette';
+import { ROLE_FILL, TX_CLUSTER_RING, TX_FRAME_EDGE } from './palette';
 
 export function Legend() {
   return (
@@ -13,20 +13,21 @@ export function Legend() {
       <LegendDot color={ROLE_FILL.expression} /> expression<br />
       <LegendDot color={ROLE_FILL.brand} /> brand<br />
       <LegendDot color={ROLE_FILL.unknown} /> node kind not set<br />
-      <div style={{ marginTop: 4, fontStyle: 'italic', color: TX_BROWN_SOFT, lineHeight: 1.4 }}>
-        <LegendRing color={TX_CLUSTER_RING} /> clustering ring
-      </div>
+      <LegendRing color={TX_CLUSTER_RING} /> clustering ring
     </div>
   );
 }
+
+const SWATCH_DIAMETER = 9;
 
 function LegendDot({ color }: { color: string }) {
   return (
     <span
       style={{
-        display: 'inline-block', width: 9, height: 9, borderRadius: '50%',
-        background: color, border: `1px solid ${TX_FRAME_EDGE}`, verticalAlign: 'middle',
-        marginRight: 6,
+        display: 'inline-block', width: SWATCH_DIAMETER, height: SWATCH_DIAMETER,
+        borderRadius: '50%', boxSizing: 'border-box',
+        background: color, border: `1px solid ${TX_FRAME_EDGE}`,
+        verticalAlign: 'middle', marginRight: 6,
       }}
     />
   );
@@ -36,9 +37,10 @@ function LegendRing({ color }: { color: string }) {
   return (
     <span
       style={{
-        display: 'inline-block', width: 9, height: 9, borderRadius: '50%',
+        display: 'inline-block', width: SWATCH_DIAMETER, height: SWATCH_DIAMETER,
+        borderRadius: '50%', boxSizing: 'border-box',
         background: 'transparent', border: `2px solid ${color}`,
-        verticalAlign: 'middle', marginRight: 6, boxSizing: 'content-box',
+        verticalAlign: 'middle', marginRight: 6,
       }}
     />
   );

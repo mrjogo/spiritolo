@@ -11,6 +11,7 @@ interface Props {
 }
 
 const yesNo = (b: boolean) => (b ? 'yes' : 'no');
+const monoStyle: React.CSSProperties = { fontFamily: 'ui-monospace, monospace' };
 
 export function NodeCard({ node, mode, onDismiss }: Props) {
   useEffect(() => {
@@ -20,16 +21,18 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
     return () => window.removeEventListener('keydown', handler);
   }, [mode, onDismiss]);
 
-  const copySlug = async () => {
-    try { await navigator.clipboard.writeText(node.slug); } catch { /* swallow */ }
-  };
-
   return (
     <aside
       className="tx-card"
       role={mode === 'pinned' ? 'dialog' : 'tooltip'}
       aria-label={`Taxonomy node: ${node.display_name}`}
-      style={{ width: 240, padding: '20px 18px' }}
+      style={{
+        position: 'relative',
+        width: 240, padding: 0,
+        maxHeight: '100%', minHeight: 0,
+        display: 'flex', flexDirection: 'column',
+        overflow: 'hidden',
+      }}
     >
       {mode === 'pinned' && (
         <button
@@ -37,7 +40,7 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
           onClick={onDismiss}
           aria-label="Close"
           style={{
-            position: 'absolute', top: 6, right: 8,
+            position: 'absolute', top: 6, right: 8, zIndex: 1,
             background: 'none', border: 'none', cursor: 'pointer',
             color: TX_BROWN_MID, fontSize: 16, lineHeight: 1,
             fontFamily: "'Cinzel', serif",
@@ -47,7 +50,7 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
         </button>
       )}
 
-      <div style={{ textAlign: 'center' }}>
+      <div style={{ flex: '0 0 auto', padding: '20px 18px 0', textAlign: 'center' }}>
         <div className="tx-card__heading">— SPECIMEN —</div>
         <div
           style={{
@@ -60,31 +63,20 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
         <div className="tx-rule" style={{ margin: '8px 16px' }} />
       </div>
 
-      <div style={{ fontSize: 13, lineHeight: 1.55, color: TX_BROWN_MID }}>
+      <div
+        style={{
+          flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
+          padding: '0 18px 20px',
+          fontSize: 13, lineHeight: 1.55, color: TX_BROWN_MID,
+        }}
+      >
         <div className="tx-card__heading" style={{ marginTop: 4 }}>PROPERTIES</div>
-        <Row label="ID" value={String(node.id)} />
+        <Row label="ID" value={String(node.id)} valueStyle={monoStyle} />
+        <Row label="Slug" value={node.slug} valueStyle={monoStyle} />
         <Row label="Node kind" value={node.node_kind ?? '—'} />
         <Row label="Default ingredient role" value={node.default_role ?? '—'} />
         <Row label="Clustering node" value={yesNo(node.is_cluster_node)} />
         <Row label="Defining garnish" value={yesNo(node.is_defining_garnish)} />
-        <Row
-          label="Slug"
-          value={
-            <button
-              type="button"
-              onClick={copySlug}
-              aria-label={`Copy slug ${node.slug} to clipboard`}
-              style={{
-                background: 'none', border: 'none', padding: 0,
-                color: 'inherit', textAlign: 'right',
-                fontFamily: 'ui-monospace, monospace', fontSize: 12,
-                cursor: 'pointer', userSelect: 'none',
-              }}
-            >
-              {node.slug}
-            </button>
-          }
-        />
 
         <div className="tx-card__heading" style={{ marginTop: 10 }}>
           ALIASES <span style={{ fontStyle: 'italic', color: TX_FRAME_EDGE }}>({node.aliases.length})</span>
@@ -100,11 +92,17 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
   );
 }
 
-function Row({ label, value }: { label: string; value: React.ReactNode }) {
+function Row({
+  label, value, valueStyle,
+}: {
+  label: string;
+  value: React.ReactNode;
+  valueStyle?: React.CSSProperties;
+}) {
   return (
     <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-      <span>{label}</span>
-      <span style={{ textAlign: 'right' }}>{value}</span>
+      <span style={{ flex: '0 0 auto' }}>{label}</span>
+      <span style={{ textAlign: 'right', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', ...valueStyle }}>{value}</span>
     </div>
   );
 }

@@ -98,6 +98,17 @@
 .taxonomy-page__corner--br::after { bottom: 6px; right: 6px;
   border-left: none; border-top: none; }
 
+/* Default to a dragging hand on the canvas; react-force-graph
+   inline-styles cursor:pointer when hovering nodes/links, which
+   takes precedence over this CSS rule. The :active form gives the
+   "currently dragging" feel while the user pans. */
+.taxonomy-page canvas {
+  cursor: grab;
+}
+.taxonomy-page canvas:active {
+  cursor: grabbing;
+}
+
 /* Cream "menu card" used by Legend, SearchBox, NodeCard, EdgeCard. */
 .tx-card {
   background: linear-gradient(180deg, var(--tx-cream) 0%, var(--tx-cream-deep) 100%);
