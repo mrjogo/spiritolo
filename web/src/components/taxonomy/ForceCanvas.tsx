@@ -62,6 +62,9 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
       linkColor={() => TX_LINK}
       linkWidth={0.6}
       linkCurvature={0.18}
+      linkDirectionalArrowLength={4}
+      linkDirectionalArrowRelPos={0.92}
+      linkDirectionalArrowColor={() => TX_GOLD}
       enableNodeDrag={false}
       cooldownTicks={120}
       onNodeClick={(n) => onNodeClick(n as TaxonomyNode)}
