@@ -302,6 +302,20 @@ def fetch_pages(
             # wait and exits without draining further.
             executor.shutdown(wait=True, cancel_futures=True)
 
+    # Race recovery: a worker raising QuotaExhaustedError/AuthError calls
+    # interrupt.request() before re-raising, so its future is yielded by
+    # as_completed only later. If the main loop sees interrupt.requested
+    # and breaks while processing a different (successful) future, the
+    # exception future is never reached and abort_message stays None.
+    # Surface it after shutdown by scanning completed futures.
+    if interrupt.requested and abort_message is None:
+        for f in futures:
+            if f.done() and not f.cancelled():
+                exc = f.exception()
+                if isinstance(exc, (QuotaExhaustedError, AuthError)):
+                    abort_message = f"\nABORTED: {type(exc).__name__}: {exc}"
+                    break
+
     if abort_message:
         print(abort_message)
 
