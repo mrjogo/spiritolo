@@ -90,12 +90,35 @@ describe('AuthProvider', () => {
     await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'));
     expect(screen.getByTestId('user').textContent).toBe('none');
 
-    profileSelectMock.mockResolvedValue({ data: { is_admin: false }, error: null });
+    profileSelectMock.mockResolvedValue({ data: { is_admin: true }, error: null });
     await act(async () => {
       authChangeHandler!('SIGNED_IN', { user: { id: 'u-2' } });
     });
 
     await waitFor(() => expect(screen.getByTestId('user').textContent).toBe('u-2'));
+    expect(screen.getByTestId('admin').textContent).toBe('true');
+  });
+
+  it('clears user and isAdmin when SIGNED_OUT fires', async () => {
+    getSessionMock.mockResolvedValue({
+      data: { session: { user: { id: 'u-1' } } },
+    });
+    profileSelectMock.mockResolvedValue({ data: { is_admin: true }, error: null });
+
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('admin').textContent).toBe('true'));
+    expect(screen.getByTestId('user').textContent).toBe('u-1');
+
+    await act(async () => {
+      authChangeHandler!('SIGNED_OUT', null);
+    });
+
+    await waitFor(() => expect(screen.getByTestId('user').textContent).toBe('none'));
     expect(screen.getByTestId('admin').textContent).toBe('false');
   });
 });

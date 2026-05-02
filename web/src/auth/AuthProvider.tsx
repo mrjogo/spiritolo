@@ -30,7 +30,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fetchAdminFlag = useCallback(async (userId: string | null) => {
     const seq = ++fetchSeq.current;
     if (!userId) {
-      if (seq === fetchSeq.current) setIsAdmin(false);
+      setIsAdmin(false);
       return;
     }
     const { data } = await supabase
