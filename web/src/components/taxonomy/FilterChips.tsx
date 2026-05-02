@@ -29,7 +29,7 @@ export function FilterChips({ active, onToggle }: Props) {
       role="group"
       aria-label="Filter nodes by role and flag"
       style={{
-        display: 'flex', flexWrap: 'wrap', gap: 4, maxWidth: 220,
+        display: 'flex', flexWrap: 'wrap', gap: 4, maxWidth: 240,
       }}
     >
       {ORDERED.map((key) => {
@@ -42,9 +42,9 @@ export function FilterChips({ active, onToggle }: Props) {
             onClick={() => onToggle(key)}
             style={{
               fontFamily: "'Cinzel', serif",
-              fontSize: 9, letterSpacing: '0.2em',
-              padding: '3px 8px',
-              borderRadius: 10,
+              fontSize: 11, letterSpacing: '0.2em',
+              padding: '4px 10px',
+              borderRadius: 12,
               border: `1px solid ${TX_FRAME_EDGE}`,
               background: isActive ? TX_GOLD : TX_CREAM_RGBA,
               color: isActive ? TX_NODE_BG : TX_BROWN_MID,

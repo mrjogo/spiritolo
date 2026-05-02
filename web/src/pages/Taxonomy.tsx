@@ -206,8 +206,8 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
           }}
           aria-label="Layout mode"
           style={{
-            fontFamily: "'Cinzel', serif", fontSize: 10, letterSpacing: '0.18em',
-            padding: '4px 8px', borderRadius: 6,
+            fontFamily: "'Cinzel', serif", fontSize: 12, letterSpacing: '0.18em',
+            padding: '6px 10px', borderRadius: 6,
             border: '1px solid #8a6a35',
             background: 'rgba(245, 233, 200, 0.85)',
             color: '#3a2a14',
@@ -227,8 +227,8 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
           onClick={() => canvasRef.current?.fit()}
           aria-label="Fit to view"
           style={{
-            fontFamily: "'Cinzel', serif", fontSize: 10, letterSpacing: '0.18em',
-            padding: '4px 8px', borderRadius: 6,
+            fontFamily: "'Cinzel', serif", fontSize: 12, letterSpacing: '0.18em',
+            padding: '6px 10px', borderRadius: 6,
             border: `1px solid ${TX_FRAME_EDGE}`,
             background: 'rgba(245, 233, 200, 0.85)',
             color: TX_BROWN_MID,

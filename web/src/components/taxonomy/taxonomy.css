@@ -98,14 +98,15 @@
 .taxonomy-page__corner--br::after { bottom: 6px; right: 6px;
   border-left: none; border-top: none; }
 
-/* Default to a dragging hand on the canvas; react-force-graph
-   inline-styles cursor:pointer when hovering nodes/links, which
-   takes precedence over this CSS rule. The :active form gives the
-   "currently dragging" feel while the user pans. */
+/* Default to a dragging hand on the canvas. react-force-graph adds a
+   .clickable class to the canvas while hovering nodes/links (its
+   own CSS sets cursor:pointer at that point); we exclude that case
+   from the :active grabbing rule so a click on a node doesn't flash
+   the grabbing cursor. */
 .taxonomy-page canvas {
   cursor: grab;
 }
-.taxonomy-page canvas:active {
+.taxonomy-page canvas:not(.clickable):active {
   cursor: grabbing;
 }
 
@@ -124,7 +125,7 @@
 
 .tx-card__heading {
   font-family: 'Cinzel', serif;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.25em;
   font-weight: 600;
   color: var(--tx-brown-faint);

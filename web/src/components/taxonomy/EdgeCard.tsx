@@ -92,11 +92,17 @@ export function EdgeCard({ edge, mode, onDismiss, onFocusNode }: Props) {
         }}
       >
         <div className="tx-card__heading" style={{ marginTop: 4 }}>PROPERTIES</div>
-        <Row
-          label="ID"
-          value={`(${edge.source.id}, ${edge.target.id})`}
-          valueStyle={monoStyle}
-        />
+        <div
+          style={{
+            display: 'grid', gridTemplateColumns: 'max-content 1fr',
+            columnGap: 12, rowGap: 0, alignItems: 'baseline',
+          }}
+        >
+          <span>ID</span>
+          <span style={{ textAlign: 'right', minWidth: 0, ...monoStyle }}>
+            ({edge.source.id}, {edge.target.id})
+          </span>
+        </div>
       </div>
     </aside>
   );
@@ -118,17 +124,3 @@ function NodeLink({ name, onClick }: { name: string; onClick: () => void }) {
   );
 }
 
-function Row({
-  label, value, valueStyle,
-}: {
-  label: string;
-  value: React.ReactNode;
-  valueStyle?: React.CSSProperties;
-}) {
-  return (
-    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
-      <span style={{ flex: '0 0 auto' }}>{label}</span>
-      <span style={{ textAlign: 'right', minWidth: 0, ...valueStyle }}>{value}</span>
-    </div>
-  );
-}

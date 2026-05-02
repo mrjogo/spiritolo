@@ -25,7 +25,7 @@ export function SearchBox({ value, onChange, onSubmit }: Props) {
           width: '100%', background: 'transparent', border: 'none',
           borderBottom: `1px solid ${TX_FRAME_EDGE}`,
           fontFamily: "'Cormorant Garamond', Georgia, serif",
-          fontStyle: 'italic', fontSize: 14, color: TX_BROWN_MID, padding: '2px 0',
+          fontStyle: 'italic', fontSize: 16, color: TX_BROWN_MID, padding: '2px 0',
         }}
       />
     </div>
