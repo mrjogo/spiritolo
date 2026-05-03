@@ -1,4 +1,6 @@
-* { box-sizing: border-box; }
+* {
+  box-sizing: border-box;
+}
 
 :root {
   --site-header-height: 56px;
@@ -12,7 +14,9 @@ body {
   background: #fafafa;
 }
 
-a { color: #0a58ca; }
+a {
+  color: #0a58ca;
+}
 
 .page {
   max-width: 720px;
@@ -20,7 +24,9 @@ a { color: #0a58ca; }
   padding: 1.5rem 1rem 3rem;
 }
 
-.error-page h1 { margin-bottom: 0.25rem; }
+.error-page h1 {
+  margin-bottom: 0.25rem;
+}
 
 .recipe-list {
   list-style: none;
@@ -42,7 +48,9 @@ a { color: #0a58ca; }
   color: inherit;
 }
 
-.recipe-list__item a:hover { background: #f3f4f6; }
+.recipe-list__item a:hover {
+  background: #f3f4f6;
+}
 
 .recipe-list__thumb {
   width: 64px;
@@ -52,10 +60,19 @@ a { color: #0a58ca; }
   flex-shrink: 0;
 }
 
-.recipe-list__name { font-weight: 600; }
-.recipe-list__site { font-size: 0.85rem; color: #666; }
+.recipe-list__name {
+  font-weight: 600;
+}
 
-.recipe-list__empty { color: #666; font-style: italic; }
+.recipe-list__site {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.recipe-list__empty {
+  color: #666;
+  font-style: italic;
+}
 
 .pagination {
   display: flex;
@@ -73,7 +90,10 @@ a { color: #0a58ca; }
   cursor: pointer;
 }
 
-.pagination button:disabled { opacity: 0.4; cursor: not-allowed; }
+.pagination button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
 
 .recipe-detail__hero {
   width: 100%;
@@ -82,7 +102,9 @@ a { color: #0a58ca; }
   border-radius: 6px;
 }
 
-.recipe-detail__byline { color: #666; }
+.recipe-detail__byline {
+  color: #666;
+}
 
 .recipe-detail__meta {
   list-style: none;
@@ -168,6 +190,7 @@ a { color: #0a58ca; }
   color: #2c1d0c;
   text-decoration: none;
 }
+
 .site-header__nav a:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -205,9 +228,8 @@ a { color: #0a58ca; }
      centered around ~78% from the left and ~50% from the top of the
      image. Percentages so the position tracks as the image scales. */
   position: absolute;
-  top: 50%;
-  left: 78%;
-  transform: translate(-50%, -50%);
+  top: 15%;
+  left: 45%;
   margin: 0;
   font-family: 'Cormorant Garamond', Georgia, serif;
   font-weight: 600;
