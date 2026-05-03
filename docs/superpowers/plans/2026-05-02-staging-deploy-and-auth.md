@@ -32,7 +32,7 @@
 - `web/src/auth/AuthProvider.tsx` — context provider, `useAuth` hook, `signOut`
 - `web/src/auth/RequireAuth.tsx` — layout-route guard for tier-(a) and tier-(b)
 - `web/src/auth/RequireAdmin.tsx` — layout-route guard for tier-(c), nests inside `RequireAuth`
-- `web/src/components/AppLayout.tsx` — `<Header/>` + `<main><Outlet/></main>`
+- `web/src/components/AppLayout.tsx` — `<Header/>` + `<Outlet/>` (no `<main>` wrapper; each page renders its own `<main>` so we don't nest landmarks)
 - `web/src/pages/Landing.tsx` — public hero (image + title + sign-in link)
 - `web/src/pages/Login.tsx` — magic-link form
 - `web/src/pages/AuthCallback.tsx` — post-magic-link landing
