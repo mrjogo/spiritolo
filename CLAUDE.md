@@ -21,28 +21,24 @@ Run `cd scraper && uv run …` and `cd web && npm …` from the repo root.
 
 **Supabase runs on the Mac host, not the devcontainer** (DooD vs `supabase start`'s bind mounts). Host setup: `brew install supabase/tap/supabase && supabase start`. Studio at http://localhost:54323.
 
-Devcontainer `.env`: `SUPABASE_DB_URL=postgresql://postgres:postgres@host.docker.internal:54322/postgres`. App code (psycopg, JS clients, browser) connects fine via this URL — glibc's resolver returns the IPv4 address (`192.168.65.254`) and there's no IPv6 record to trip over.
+Devcontainer `.env`: `SUPABASE_DB_URL=postgresql://postgres:postgres@host.docker.internal:54322/postgres`. App code (psycopg, JS clients, browser, the `psql` CLI) connects fine via this URL.
 
-**The `supabase` CLI is the exception.** Two gotchas, both of which surface as identical-looking `tls error (server refused TLS connection)` failures:
-
-1. Its Go-based resolver picks up an IPv6 form of `host.docker.internal` that isn't routable from the container — pass the IPv4 literal `192.168.65.254` instead.
-2. The CLI defaults to attempting TLS, which the local Postgres rejects — append `?sslmode=disable` to the URL.
-
-Both fixes together:
+**Run `supabase` CLI commands from the Mac host** (where `supabase start` lives) — no `--db-url` flag needed; the CLI auto-detects its local cluster:
 
 ```bash
-DB_URL='postgresql://postgres:postgres@192.168.65.254:54322/postgres?sslmode=disable'
-supabase db reset       --db-url "$DB_URL" --yes
-supabase migration up   --db-url "$DB_URL" --include-all   # forward-apply, doesn't wipe data
-supabase migration list --db-url "$DB_URL"
-supabase db push        --db-url "$DB_URL" --include-all
+supabase db reset --yes
+supabase migration up --include-all       # forward-apply, doesn't wipe data
+supabase migration list
+supabase db push --include-all
 ```
 
-Use `migration up` when you want to add new migrations without losing local processed data; `db reset` wipes and replays everything. The reset auto-seeds only the files listed in `supabase/config.toml` under `db.seed.sql_paths` — `recipes.sql` is excluded because it's a `pg_dump` file. After a reset, restore recipes via `psql` directly:
+Use `migration up` when you want to add new migrations without losing local processed data; `db reset` wipes and replays everything. The reset auto-seeds only the files listed in `supabase/config.toml` under `db.seed.sql_paths` — `recipes.sql` is excluded because it's a `pg_dump` file. After a reset, restore recipes via `psql` from the devcontainer:
 
 ```bash
-psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/seeds/recipes.sql
+psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/seeds/recipes.sql
 ```
+
+(If you ever need to invoke the `supabase` CLI from inside the devcontainer — uncommon — its Go resolver picks an IPv6 form of `host.docker.internal` that isn't routable, and it defaults to TLS which the local Postgres rejects. Both surface as `tls error (server refused TLS connection)`. Workaround: pass `--db-url` with your container's gateway IPv4 plus `?sslmode=disable`. The literal varies by environment — `getent hosts host.docker.internal` and `ip route` show what's reachable from your container.)
 
 **Test DB.** DB-integration tests (in `ingredients/tests/test_db.py`, et al) run against `TEST_DB_URL` — a *separate* Postgres database from `SUPABASE_DB_URL` — so `pytest` can `TRUNCATE … CASCADE` freely without nuking the dev data. Add this to `.env`:
 
