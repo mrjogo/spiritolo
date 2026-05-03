@@ -1,0 +1,10 @@
+# Splinter lint cache_keys explicitly accepted as known tradeoffs.
+# One key per line. Lines starting with `#` are comments.
+#
+# When a new WARN- or ERROR-level lint appears in the test output, either:
+#   1. Fix the underlying issue (preferred), or
+#   2. Add its cache_key here with a `# <reason>` justification.
+#
+# Currently empty — every WARN/ERROR has been addressed in
+# supabase/migrations/20260503180000_security_lints.sql and
+# 20260503190000_more_lint_fixes.sql.

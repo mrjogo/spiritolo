@@ -118,6 +118,31 @@ def _ensure_test_db_migrated() -> None:
             admin.execute(f'create database "{name}"')
 
     with psycopg.connect(test_url, autocommit=True) as conn:
+        # Stub the Supabase auth surface our migrations reference. The
+        # real auth schema is provisioned by GoTrue (cloud) or by
+        # `supabase start` (host); the test DB is bare Postgres, so we
+        # create just enough for FK references and `auth.uid()` calls
+        # to compile. Tests don't exercise actual auth flows.
+        conn.execute("create schema if not exists auth")
+        conn.execute(
+            """
+            create table if not exists auth.users (
+                id uuid primary key default gen_random_uuid(),
+                email text
+            )
+            """
+        )
+        conn.execute(
+            """
+            create or replace function auth.uid() returns uuid
+            language sql stable as 'select null::uuid'
+            """
+        )
+        # `extensions` schema exists by default on Supabase; create it
+        # locally so migrations that move extensions into it
+        # (`alter extension ... set schema extensions`) succeed.
+        conn.execute("create schema if not exists extensions")
+
         conn.execute(
             """
             create table if not exists _test_db_migrations (
