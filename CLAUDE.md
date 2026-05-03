@@ -21,28 +21,24 @@ Run `cd scraper && uv run …` and `cd web && npm …` from the repo root.
 
 **Supabase runs on the Mac host, not the devcontainer** (DooD vs `supabase start`'s bind mounts). Host setup: `brew install supabase/tap/supabase && supabase start`. Studio at http://localhost:54323.
 
-Devcontainer `.env`: `SUPABASE_DB_URL=postgresql://postgres:postgres@host.docker.internal:54322/postgres`. App code (psycopg, JS clients, browser) connects fine via this URL — glibc's resolver returns the IPv4 address (`192.168.65.254`) and there's no IPv6 record to trip over.
+Devcontainer `.env`: `SUPABASE_DB_URL=postgresql://postgres:postgres@host.docker.internal:54322/postgres`. App code (psycopg, JS clients, browser, the `psql` CLI) connects fine via this URL.
 
-**The `supabase` CLI is the exception.** Two gotchas, both of which surface as identical-looking `tls error (server refused TLS connection)` failures:
-
-1. Its Go-based resolver picks up an IPv6 form of `host.docker.internal` that isn't routable from the container — pass the IPv4 literal `192.168.65.254` instead.
-2. The CLI defaults to attempting TLS, which the local Postgres rejects — append `?sslmode=disable` to the URL.
-
-Both fixes together:
+**Run `supabase` CLI commands from the Mac host** (where `supabase start` lives) — no `--db-url` flag needed; the CLI auto-detects its local cluster:
 
 ```bash
-DB_URL='postgresql://postgres:postgres@192.168.65.254:54322/postgres?sslmode=disable'
-supabase db reset       --db-url "$DB_URL" --yes
-supabase migration up   --db-url "$DB_URL" --include-all   # forward-apply, doesn't wipe data
-supabase migration list --db-url "$DB_URL"
-supabase db push        --db-url "$DB_URL" --include-all
+supabase db reset --yes
+supabase migration up --include-all       # forward-apply, doesn't wipe data
+supabase migration list
+supabase db push --include-all
 ```
 
-Use `migration up` when you want to add new migrations without losing local processed data; `db reset` wipes and replays everything. The reset auto-seeds only the files listed in `supabase/config.toml` under `db.seed.sql_paths` — `recipes.sql` is excluded because it's a `pg_dump` file. After a reset, restore recipes via `psql` directly:
+Use `migration up` when you want to add new migrations without losing local processed data; `db reset` wipes and replays everything. The reset auto-seeds only the files listed in `supabase/config.toml` under `db.seed.sql_paths` — `recipes.sql` is excluded because it's a `pg_dump` file. After a reset, restore recipes via `psql` from the devcontainer:
 
 ```bash
-psql "$DB_URL" -v ON_ERROR_STOP=1 -f supabase/seeds/recipes.sql
+psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/seeds/recipes.sql
 ```
+
+(If you ever need to invoke the `supabase` CLI from inside the devcontainer — uncommon — its Go resolver picks an IPv6 form of `host.docker.internal` that isn't routable, and it defaults to TLS which the local Postgres rejects. Both surface as `tls error (server refused TLS connection)`. Workaround: pass `--db-url` with your container's gateway IPv4 plus `?sslmode=disable`. The literal varies by environment — `getent hosts host.docker.internal` and `ip route` show what's reachable from your container.)
 
 **Test DB.** DB-integration tests (in `ingredients/tests/test_db.py`, et al) run against `TEST_DB_URL` — a *separate* Postgres database from `SUPABASE_DB_URL` — so `pytest` can `TRUNCATE … CASCADE` freely without nuking the dev data. Add this to `.env`:
 
@@ -213,39 +209,16 @@ The canonical-name pool grows bottom-up: the seed in [supabase/seeds/taxonomy_no
 
 The eval set is [dedup/eval_set.py](ingredients/src/ingredients/dedup/eval_set.py), run against the fixture taxonomy in [dedup/eval_fixture.py](ingredients/src/ingredients/dedup/eval_fixture.py) so eval results don't drift with seed changes.
 
-## Processed-data seeding pattern
+## Data flow
 
-The local Supabase DB gets reset frequently. LLM-touched data and curator-reviewed taxonomy promotions are expensive to recompute, so they're seeded; deterministic state (alias + lexical mappings, role tags, cluster compute) is recomputed on demand.
+Schema is the only thing that flows local → staging (via the migrations CI workflow on push to the `staging` branch). **Pipeline data lives on staging** — it is the source of truth for `recipes`, `recipe_ingredients`, `recipe_clusters`, taxonomy growth, etc. Pipelines that mutate this data (the parser, mapper LLM phase, normalize-names LLM phase, cluster compute) should be pointed at staging via `SUPABASE_DB_URL` rather than producing local-only state that has to be sync'd back.
 
-**Layout:**
+**Local dev** has two viable shapes:
 
-```
-supabase/seeds/
-├── recipes.sql                       (raw scraped recipes)
-├── taxonomy_nodes.sql                (hand-curated taxonomy seed)
-└── processed/
-    ├── 00_taxonomy_grown.sql         (D's auto-created brand/expression nodes,
-    │                                  D's LLM-grown taxonomy_aliases,
-    │                                  E's promote-substances output)
-    ├── 10_recipe_ingredients_llm.sql (D's mapper Layer-3 rows only)
-    ├── 20_recipes_normalized.sql     (E's Phase-2 LLM resolutions only)
-    └── 30_cocktail_aliases.sql       (E's grown cocktail aliases)
-```
+- **Schema-only:** `supabase db reset` is enough. You get the migrated schema, the auto-seeded reference data (taxonomy nodes, cocktail aliases, dev admin user), and an empty `recipes` table. Fine for UI work and migration writing.
+- **Schema + a snapshot of staging data:** `pg_dump` from staging into local for offline pipeline work. Ad-hoc — script it when the need is recurring.
 
-**Workflow:**
-
-```bash
-# After supabase db reset: bring the DB up to a fully populated state.
-scripts/refresh-processed-seeds.sh restore
-
-# After running pipeline cycles that consumed LLM credits: refresh
-# committed seed files from the current DB.
-scripts/refresh-processed-seeds.sh dump
-```
-
-`restore` applies the committed seeds + runs the deterministic recompute steps (D's `map`, E's `normalize-names`, E's `cluster`). `dump` filters to LLM-touched + curator-promoted rows only — anything cheap to re-derive stays out of seeds.
-
-**Going forward.** Any new pipeline stage that emits LLM-resolved or human-curated output adds itself to this pattern: a seed file in `supabase/seeds/processed/NN_<stage>.sql` (filtered to the LLM/curated subset) and an entry in `restore`'s recompute list if it has a deterministic step.
+The `supabase/seeds/recipes.sql` file is a frozen pg_dump from before this model was adopted. Useful as a one-shot way to populate a fresh local DB with the historical corpus; not refreshed.
 
 ## Hosting
 
