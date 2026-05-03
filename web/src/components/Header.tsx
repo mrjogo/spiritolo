@@ -6,7 +6,11 @@ export function Header() {
   const navigate = useNavigate();
 
   async function onSignOut() {
-    await signOut();
+    try {
+      await signOut();
+    } catch {
+      // Sign-out errors are non-fatal; navigate to landing anyway to reset client state.
+    }
     navigate('/');
   }
 

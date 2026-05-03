@@ -30,6 +30,7 @@ describe('Header', () => {
     expect(screen.getByRole('link', { name: /recipes/i })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: /taxonomy/i })).toBeNull();
     expect(screen.getByRole('button', { name: /sign out/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /spiritolo/i })).toHaveAttribute('href', '/recipes');
   });
 
   it('shows Taxonomy link when isAdmin', () => {
