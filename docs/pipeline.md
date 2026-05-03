@@ -38,18 +38,11 @@ flowchart TD
         M2 -. after first Claude run .-> PS
     end
 
-    subgraph DBL ["DB lifecycle (run from repo root)"]
+    subgraph DBL ["DB lifecycle (Mac host)"]
         direction TB
-        RST["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>supabase db reset (wipes data)</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Drop the local DB and replay every migration + auto-seed from scratch.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>(repo root)</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>supabase db reset --db-url $DB_URL --yes</div></div>"]
-        MIG["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>migration up (keeps data)</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Forward-apply new migrations without losing processed data.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>(repo root)</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>supabase migration up --db-url $DB_URL --include-all</div></div>"]
-        SR["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>restore processed seeds</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Reapply committed LLM/curator seeds and re-run the deterministic phases on top.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>(repo root)</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>scripts/refresh-processed-seeds.sh restore</div></div>"]
-        SD["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>dump processed seeds (after paid runs)</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Snapshot LLM-resolved + curator-promoted rows out to seed files for git.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>(repo root)</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>scripts/refresh-processed-seeds.sh dump</div></div>"]
-        RST --> SR
+        RST["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>supabase db reset (wipes data)</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Drop the local DB and replay every migration + auto-seed from scratch.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>(Mac host)</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>supabase db reset --yes</div></div>"]
+        MIG["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>migration up (keeps data)</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Forward-apply new migrations without losing processed data.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>(Mac host)</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>supabase migration up --include-all</div></div>"]
     end
 
     E ==>|recipes table| P
-    M2 -. periodically .-> SD
-    N2 -. periodically .-> SD
-    RP -. periodically .-> SD
-    PS -. periodically .-> SD
 ```
