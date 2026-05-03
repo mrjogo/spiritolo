@@ -5,6 +5,10 @@ on:
     branches: [staging]
     paths:
       - 'supabase/migrations/**'
+  # Manual trigger for the initial bootstrap (push events on branch
+  # creation skip the paths filter so the first deploy never fires
+  # automatically) and for ad-hoc re-runs.
+  workflow_dispatch:
 
 jobs:
   push:
