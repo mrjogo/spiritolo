@@ -27,7 +27,11 @@ fi
 
 STAGING_URL="$1"
 ASSUME_YES="${2:-}"
-LOCAL_URL="${SUPABASE_DB_URL:-postgresql://postgres:postgres@192.168.65.254:54322/postgres?sslmode=disable}"
+# pg_dump uses libpq, which goes through glibc's resolver and gets the
+# routable IPv4 address for host.docker.internal. (The 192.168.65.254
+# literal + sslmode=disable workaround is only needed for the supabase
+# CLI, which uses Go's resolver and picks the broken IPv6 form.)
+LOCAL_URL="${SUPABASE_DB_URL:-postgresql://postgres:postgres@host.docker.internal:54322/postgres}"
 
 # Application tables, in load order. recipe_clusters and recipes have a
 # circular FK; we drop+recreate around the load.
@@ -45,8 +49,8 @@ TABLES=(
 
 # Refuse if the staging URL looks local — defense against running
 # this against the dev DB by mistake.
-if [[ "$STAGING_URL" == *"192.168.65.254"* \
-   || "$STAGING_URL" == *"host.docker.internal"* \
+if [[ "$STAGING_URL" == *"host.docker.internal"* \
+   || "$STAGING_URL" == *"192.168.65.254"* \
    || "$STAGING_URL" == *"localhost"* \
    || "$STAGING_URL" == *"127.0.0.1"* ]]; then
   echo "ERROR: staging URL appears to be a local address. Refusing to run." >&2
