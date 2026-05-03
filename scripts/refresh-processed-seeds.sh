@@ -31,8 +31,8 @@ dump_mode() {
   # 00: taxonomy nodes auto-created or substance-promoted (provenance source != 'seed').
   dump_table "$PROCESSED_DIR/00_taxonomy_grown.sql" \
     "select format(
-       'insert into taxonomy_nodes (slug, display_name, role, is_cluster_node, role_default, is_defining_garnish) values (%L, %L, %L, %L, %L, %L) on conflict (slug) do nothing;',
-       n.slug, n.display_name, n.role, n.is_cluster_node, n.role_default, n.is_defining_garnish
+       'insert into taxonomy_nodes (slug, display_name, node_kind, is_cluster_node, default_role, is_defining_garnish) values (%L, %L, %L, %L, %L, %L) on conflict (slug) do nothing;',
+       n.slug, n.display_name, n.node_kind, n.is_cluster_node, n.default_role, n.is_defining_garnish
      )
      from taxonomy_nodes n
      join taxonomy_provenance p on p.node_id = n.id
