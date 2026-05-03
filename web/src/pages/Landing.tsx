@@ -8,8 +8,14 @@ export function Landing() {
 
   return (
     <main className="page page--landing">
-      <img src="/landing.jpg" alt="Spiritolo" className="landing__image" />
-      <h1 className="landing__title">Spiritolo</h1>
+      <div className="landing__hero">
+        <img
+          src="/spiritolo.jpg"
+          alt="Champagne being poured into a coupe glass"
+          className="landing__image"
+        />
+        <h1 className="landing__title">Spiritolo</h1>
+      </div>
       <Link to="/login" className="landing__signin">
         Sign in
       </Link>

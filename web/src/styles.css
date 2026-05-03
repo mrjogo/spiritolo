@@ -172,3 +172,60 @@ a { color: #0a58ca; }
   text-decoration: underline;
   text-underline-offset: 3px;
 }
+
+/* Landing — public hero page. Pure-black background extends the dark
+   edges of the hero image so it bleeds seamlessly into the rest of the
+   viewport on wide screens. */
+.page--landing {
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  background: #000;
+  color: #f3e9d2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.landing__hero {
+  position: relative;
+  width: 100%;
+  max-width: 1400px;
+}
+
+.landing__image {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.landing__title {
+  position: absolute;
+  top: clamp(0.75rem, 3vw, 2rem);
+  right: clamp(1rem, 4vw, 3rem);
+  margin: 0;
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-weight: 600;
+  font-size: clamp(1.75rem, 4vw, 3rem);
+  letter-spacing: 0.04em;
+  color: #f3e9d2;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
+}
+
+.landing__signin {
+  margin: 2rem 0 3rem;
+  padding: 0.6rem 1.6rem;
+  font-size: 1.05rem;
+  letter-spacing: 0.06em;
+  color: #f3e9d2;
+  text-decoration: none;
+  border: 1px solid rgba(243, 233, 210, 0.4);
+  border-radius: 2px;
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.landing__signin:hover {
+  background: rgba(243, 233, 210, 0.08);
+  border-color: rgba(243, 233, 210, 0.85);
+}
