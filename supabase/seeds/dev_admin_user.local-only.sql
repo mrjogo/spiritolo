@@ -36,10 +36,15 @@ begin
     return;
   end if;
 
+  -- The token columns must be empty string '' rather than NULL — GoTrue's
+  -- user-lookup query returns "Database error finding user" when these
+  -- compare against an expected '' (NULL = '' is NULL, not true).
   insert into auth.users (
     instance_id, id, aud, role, email, encrypted_password,
     email_confirmed_at, created_at, updated_at,
-    raw_app_meta_data, raw_user_meta_data
+    raw_app_meta_data, raw_user_meta_data,
+    confirmation_token, recovery_token,
+    email_change, email_change_token_new
   ) values (
     '00000000-0000-0000-0000-000000000000',
     admin_id,
@@ -48,7 +53,8 @@ begin
     crypt('localdev-admin-password-not-used-for-magic-link', gen_salt('bf')),
     now(), now(), now(),
     '{"provider":"email","providers":["email"]}'::jsonb,
-    '{}'::jsonb
+    '{}'::jsonb,
+    '', '', '', ''
   )
   on conflict (id) do nothing;
 
