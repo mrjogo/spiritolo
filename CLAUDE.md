@@ -247,6 +247,43 @@ scripts/refresh-processed-seeds.sh dump
 
 **Going forward.** Any new pipeline stage that emits LLM-resolved or human-curated output adds itself to this pattern: a seed file in `supabase/seeds/processed/NN_<stage>.sql` (filtered to the LLM/curated subset) and an entry in `restore`'s recompute list if it has a deterministic step.
 
+## Hosting
+
+The app is hosted on Supabase + Vercel free tiers under the project name
+`spiritolo-staging`. There is no separate production environment yet.
+
+**Branches:**
+
+- `main` — integration trunk. PRs from `claude/<topic>` branches land here.
+  Deploys nowhere.
+- `staging` — deploy trunk. Both Vercel and the migrations workflow watch
+  this branch.
+
+**Promotion (run locally):**
+
+```bash
+git checkout staging
+git merge --ff-only main
+git push
+```
+
+If `--ff-only` refuses, something landed on `staging` that isn't on `main`.
+Investigate before forcing.
+
+**Frontend deploys:** Vercel handles them natively on every push to
+`staging` (production) and every PR (preview).
+
+**Migrations:** [.github/workflows/deploy-migrations.yml](.github/workflows/deploy-migrations.yml) pushes any
+migration changes to staging when `staging` advances. Requires the
+`SUPABASE_STAGING_DB_URL` repo secret.
+
+**Auth:** Magic-link only, no self-signup. Create users from Supabase
+Studio (Authentication → Users → Invite). After their first sign-in,
+flip `profiles.is_admin` in the table editor to grant admin access.
+
+See [docs/superpowers/specs/2026-05-02-staging-deploy-and-auth-design.md](docs/superpowers/specs/2026-05-02-staging-deploy-and-auth-design.md)
+for the bootstrap runbook and RLS tier conventions.
+
 ## Web UI
 
 Reads `recipes_public` via the publishable key (`sb_publishable_…`, post-Nov-2025 replacement for the legacy anon key). No backend.
