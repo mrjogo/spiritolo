@@ -19,15 +19,13 @@ function renderApp() {
 }
 
 describe('Landing', () => {
-  it('renders title, image, and a sign-in link when logged out', () => {
+  it('renders title and image when logged out, with no sign-in affordance', () => {
     useAuthMock.mockReturnValue({ user: null, loading: false });
     renderApp();
     expect(screen.getByRole('heading', { name: /spiritolo/i })).toBeInTheDocument();
     expect(screen.getByRole('img')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /sign in/i })).toHaveAttribute(
-      'href',
-      '/login',
-    );
+    // No links anywhere on the page — sign-in is direct-URL-only.
+    expect(screen.queryAllByRole('link')).toHaveLength(0);
   });
 
   it('renders nothing visible while auth is loading', () => {
@@ -35,7 +33,6 @@ describe('Landing', () => {
     renderApp();
     expect(screen.queryByRole('heading', { name: /spiritolo/i })).toBeNull();
     expect(screen.queryByRole('img')).toBeNull();
-    expect(screen.queryByRole('link', { name: /sign in/i })).toBeNull();
   });
 
   it('redirects to /recipes when already logged in', () => {

@@ -1,4 +1,4 @@
-import { Link, Navigate } from 'react-router-dom';
+import { Navigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
 
 export function Landing() {
@@ -16,9 +16,6 @@ export function Landing() {
         />
         <h1 className="landing__title">Spiritolo</h1>
       </div>
-      <Link to="/login" className="landing__signin">
-        Sign in
-      </Link>
     </main>
   );
 }

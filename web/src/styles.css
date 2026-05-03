@@ -201,31 +201,19 @@ a { color: #0a58ca; }
 }
 
 .landing__title {
+  /* Positioned in the gold-light band on the right side of the hero,
+     centered around ~78% from the left and ~50% from the top of the
+     image. Percentages so the position tracks as the image scales. */
   position: absolute;
-  top: clamp(0.75rem, 3vw, 2rem);
-  right: clamp(1rem, 4vw, 3rem);
+  top: 50%;
+  left: 78%;
+  transform: translate(-50%, -50%);
   margin: 0;
   font-family: 'Cormorant Garamond', Georgia, serif;
   font-weight: 600;
-  font-size: clamp(1.75rem, 4vw, 3rem);
+  font-size: clamp(2.75rem, 7.5vw, 6rem);
   letter-spacing: 0.04em;
   color: #f3e9d2;
-  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.7);
-}
-
-.landing__signin {
-  margin: 2rem 0 3rem;
-  padding: 0.6rem 1.6rem;
-  font-size: 1.05rem;
-  letter-spacing: 0.06em;
-  color: #f3e9d2;
-  text-decoration: none;
-  border: 1px solid rgba(243, 233, 210, 0.4);
-  border-radius: 2px;
-  transition: background 0.2s, border-color 0.2s;
-}
-
-.landing__signin:hover {
-  background: rgba(243, 233, 210, 0.08);
-  border-color: rgba(243, 233, 210, 0.85);
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.7);
+  white-space: nowrap;
 }
