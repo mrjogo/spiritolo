@@ -65,7 +65,17 @@ enabled = true
 # recipes.sql is excluded: it's a pg_dump COPY-from-stdin file, which the
 # Supabase CLI's Go-based seed runner can't process. Apply it via psql:
 #   psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/seeds/recipes.sql
-sql_paths = ["./seeds/taxonomy_nodes*.sql", "./seeds/cocktail_aliases*.sql"]
+#
+# dev_admin_user.local-only.sql pre-creates an admin@local.test user so
+# `db reset` lands you in an admin-ready state. The seed self-aborts if
+# any non-*.local.test users exist (second-line defense against running
+# against staging). Remove this seed AND its config.toml entry before
+# anything that uploads ALL data to staging via `supabase db reset`.
+sql_paths = [
+  "./seeds/taxonomy_nodes*.sql",
+  "./seeds/cocktail_aliases*.sql",
+  "./seeds/dev_admin_user.local-only.sql",
+]
 
 [db.network_restrictions]
 # Enable management of network restrictions.
@@ -154,9 +164,16 @@ max_indexes = 5
 enabled = true
 # The base URL of your website. Used as an allow-list for redirects and for constructing URLs used
 # in emails.
-site_url = "http://127.0.0.1:3000"
+# Vite dev server runs on :5173. The Supabase CLI default :3000 was wrong
+# for this project, which silently fell back to site_url because the
+# Login page's emailRedirectTo (http://localhost:5173/auth/callback?...)
+# was not in the allow-list.
+site_url = "http://localhost:5173"
 # A list of *exact* URLs that auth providers are permitted to redirect to post authentication.
-additional_redirect_urls = ["https://127.0.0.1:3000"]
+additional_redirect_urls = [
+  "http://localhost:5173/auth/callback",
+  "http://127.0.0.1:5173/auth/callback",
+]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604,800 (1 week).
 jwt_expiry = 3600
 # JWT issuer URL. If not set, defaults to the local API URL (http://127.0.0.1:<port>/auth/v1).
