@@ -52,6 +52,28 @@ begin
   )
   on conflict (id) do nothing;
 
+  -- A row in auth.users alone is not enough — GoTrue fails with
+  -- "Database error finding user" if there's no matching auth.identities
+  -- row. For email-provider users, provider_id is the user's UUID as
+  -- text, and identity_data carries sub/email/email_verified.
+  insert into auth.identities (
+    id, user_id, provider_id, provider, identity_data,
+    last_sign_in_at, created_at, updated_at
+  ) values (
+    gen_random_uuid(),
+    admin_id,
+    admin_id::text,
+    'email',
+    jsonb_build_object(
+      'sub', admin_id::text,
+      'email', admin_email,
+      'email_verified', true,
+      'phone_verified', false
+    ),
+    now(), now(), now()
+  )
+  on conflict (provider_id, provider) do nothing;
+
   -- The on_auth_user_created trigger inserts the profiles row with
   -- is_admin=false. Flip the flag. The upsert covers re-runs after
   -- something deleted the profiles row but not the auth.users row.
