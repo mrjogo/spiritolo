@@ -1,7 +1,7 @@
 name: Backup staging database
 
 # Manual-only for now. The artifact upload step at the bottom keeps dumps
-# for 30 days on GitHub's storage — fine for ad-hoc runs, not a backup of
+# for 7 days on GitHub's storage — fine for ad-hoc runs, not a backup of
 # record. Wire up durable storage (Backblaze B2, Cloudflare R2, S3, ...)
 # before enabling the schedule below.
 on:
@@ -43,5 +43,5 @@ jobs:
         with:
           name: spiritolo-staging-dump-${{ github.run_id }}
           path: backups/*.dump
-          retention-days: 30
+          retention-days: 7
           if-no-files-found: error
