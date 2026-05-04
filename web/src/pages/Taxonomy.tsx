@@ -11,7 +11,7 @@ import { SearchBox } from '../components/taxonomy/SearchBox';
 import { FilterChips } from '../components/taxonomy/FilterChips';
 import { NodeCard } from '../components/taxonomy/NodeCard';
 import { EdgeCard, type EdgeRef } from '../components/taxonomy/EdgeCard';
-import { TX_BROWN_MID, TX_FRAME_EDGE } from '../components/taxonomy/palette';
+import { TX_BROWN_MID, TX_FRAME_EDGE, type NodeSizeMode } from '../components/taxonomy/palette';
 import {
   matchesQuery,
   neighborsOf,
@@ -79,6 +79,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   const [hoveredEdge, setHoveredEdge] = useState<EdgeRef | null>(null);
   const [focusedEdge, setFocusedEdge] = useState<EdgeRef | null>(null);
   const [dagMode, setDagMode] = useState<DagMode | undefined>(undefined);
+  const [sizeMode, setSizeMode] = useState<NodeSizeMode>('uniform');
   const canvasRef = useRef<ForceCanvasHandle>(null);
 
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
@@ -222,6 +223,22 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
           <option value="radialout">Layout: radial out</option>
           <option value="radialin">Layout: radial in</option>
         </select>
+        <select
+          value={sizeMode}
+          onChange={(e) => setSizeMode(e.target.value as NodeSizeMode)}
+          aria-label="Node size mode"
+          style={{
+            fontFamily: "'Cinzel', serif", fontSize: 12, letterSpacing: '0.18em',
+            padding: '6px 10px', borderRadius: 6,
+            border: '1px solid #8a6a35',
+            background: 'rgba(245, 233, 200, 0.85)',
+            color: '#3a2a14',
+            textTransform: 'uppercase', cursor: 'pointer',
+          }}
+        >
+          <option value="recipes">Size: by recipes</option>
+          <option value="uniform">Size: uniform</option>
+        </select>
         <button
           type="button"
           onClick={() => canvasRef.current?.fit()}
@@ -246,6 +263,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         height={size.h}
         dimmedIds={dimmedIds}
         dagMode={dagMode}
+        sizeMode={sizeMode}
         onNodeClick={(n) => {
           setFocusedEdge(null);
           setFocusedId(n.id);
