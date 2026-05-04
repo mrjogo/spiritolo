@@ -25,6 +25,16 @@ export const ROLE_FILL: Record<TaxonomyRole, string> = {
   unknown:    '#888888',
 };
 
-export function nodeRadius(node: { recipe_count: number }): number {
+export type NodeSizeMode = 'recipes' | 'uniform';
+
+// Matches the prior look when every node had recipe_count = 0 and clamped
+// to the floor of the recipes formula.
+export const UNIFORM_RADIUS = 3;
+
+export function nodeRadius(
+  node: { recipe_count: number },
+  mode: NodeSizeMode = 'recipes',
+): number {
+  if (mode === 'uniform') return UNIFORM_RADIUS;
   return Math.max(3, Math.sqrt(node.recipe_count + 1) * 2.2);
 }

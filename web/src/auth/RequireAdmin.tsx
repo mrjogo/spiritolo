@@ -1,9 +1,9 @@
 import { Navigate, Outlet } from 'react-router-dom';
-import { useAuth } from './AuthProvider';
+import { useIsAdmin } from './useIsAdmin';
 
 export function RequireAdmin() {
-  const { isAdmin, loading } = useAuth();
-  if (loading) return null;
+  const { isAdmin, isLoading } = useIsAdmin();
+  if (isLoading) return null;
   if (!isAdmin) return <Navigate to="/recipes" replace />;
   return <Outlet />;
 }

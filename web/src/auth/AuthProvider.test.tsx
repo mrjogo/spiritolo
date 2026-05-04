@@ -1,124 +1,107 @@
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './AuthProvider';
+import { isAdminQueryKey } from './useIsAdmin';
 
 type AuthChangeHandler = (event: string, session: unknown) => void;
 let authChangeHandler: AuthChangeHandler | null = null;
-const getSessionMock = vi.fn();
-const profileSelectMock = vi.fn();
 const signOutMock = vi.fn(async () => ({ error: null }));
 
 vi.mock('../supabase', () => ({
   supabase: {
     auth: {
-      getSession: () => getSessionMock(),
       onAuthStateChange: (cb: AuthChangeHandler) => {
         authChangeHandler = cb;
         return { data: { subscription: { unsubscribe: () => {} } } };
       },
       signOut: () => signOutMock(),
     },
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    from: (_table: string) => ({
-      select: () => ({
-        eq: () => ({ maybeSingle: () => profileSelectMock() }),
-      }),
-    }),
   },
 }));
 
 function Probe() {
-  const { user, isAdmin, loading } = useAuth();
+  const { user, loading } = useAuth();
   return (
     <div>
       <span data-testid="loading">{String(loading)}</span>
       <span data-testid="user">{user?.id ?? 'none'}</span>
-      <span data-testid="admin">{String(isAdmin)}</span>
     </div>
   );
 }
 
+function renderWithProviders(client: QueryClient = new QueryClient()) {
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <AuthProvider>
+          <Probe />
+        </AuthProvider>
+      </QueryClientProvider>,
+    ),
+  };
+}
+
 beforeEach(() => {
   authChangeHandler = null;
-  getSessionMock.mockReset();
-  profileSelectMock.mockReset();
   signOutMock.mockClear();
 });
 
 describe('AuthProvider', () => {
-  it('exposes loading=true on first render and user=null after empty session', async () => {
-    getSessionMock.mockResolvedValue({ data: { session: null } });
-
-    render(
-      <AuthProvider>
-        <Probe />
-      </AuthProvider>,
-    );
-
+  it('starts with loading=true and resolves to user=none on INITIAL_SESSION with null', async () => {
+    renderWithProviders();
     expect(screen.getByTestId('loading').textContent).toBe('true');
+
+    await act(async () => {
+      authChangeHandler!('INITIAL_SESSION', null);
+    });
+
     await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'));
     expect(screen.getByTestId('user').textContent).toBe('none');
-    expect(screen.getByTestId('admin').textContent).toBe('false');
   });
 
-  it('hydrates user from initial session and fetches is_admin from profiles', async () => {
-    getSessionMock.mockResolvedValue({
-      data: { session: { user: { id: 'u-1' } } },
-    });
-    profileSelectMock.mockResolvedValue({ data: { is_admin: true }, error: null });
+  it('hydrates user from INITIAL_SESSION', async () => {
+    renderWithProviders();
 
-    render(
-      <AuthProvider>
-        <Probe />
-      </AuthProvider>,
-    );
+    await act(async () => {
+      authChangeHandler!('INITIAL_SESSION', { user: { id: 'u-1' } });
+    });
 
     await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'));
     expect(screen.getByTestId('user').textContent).toBe('u-1');
-    expect(screen.getByTestId('admin').textContent).toBe('true');
   });
 
-  it('updates user and re-fetches is_admin when auth state changes', async () => {
-    getSessionMock.mockResolvedValue({ data: { session: null } });
+  it('updates user when SIGNED_IN fires after empty initial', async () => {
+    renderWithProviders();
 
-    render(
-      <AuthProvider>
-        <Probe />
-      </AuthProvider>,
-    );
+    await act(async () => {
+      authChangeHandler!('INITIAL_SESSION', null);
+    });
+    await waitFor(() => expect(screen.getByTestId('user').textContent).toBe('none'));
 
-    await waitFor(() => expect(screen.getByTestId('loading').textContent).toBe('false'));
-    expect(screen.getByTestId('user').textContent).toBe('none');
-
-    profileSelectMock.mockResolvedValue({ data: { is_admin: true }, error: null });
     await act(async () => {
       authChangeHandler!('SIGNED_IN', { user: { id: 'u-2' } });
     });
-
     await waitFor(() => expect(screen.getByTestId('user').textContent).toBe('u-2'));
-    expect(screen.getByTestId('admin').textContent).toBe('true');
   });
 
-  it('clears user and isAdmin when SIGNED_OUT fires', async () => {
-    getSessionMock.mockResolvedValue({
-      data: { session: { user: { id: 'u-1' } } },
+  it('clears user and removes the isAdmin query cache on SIGNED_OUT', async () => {
+    const client = new QueryClient();
+    client.setQueryData(isAdminQueryKey('u-1'), true);
+    renderWithProviders(client);
+
+    await act(async () => {
+      authChangeHandler!('INITIAL_SESSION', { user: { id: 'u-1' } });
     });
-    profileSelectMock.mockResolvedValue({ data: { is_admin: true }, error: null });
-
-    render(
-      <AuthProvider>
-        <Probe />
-      </AuthProvider>,
-    );
-
-    await waitFor(() => expect(screen.getByTestId('admin').textContent).toBe('true'));
-    expect(screen.getByTestId('user').textContent).toBe('u-1');
+    await waitFor(() => expect(screen.getByTestId('user').textContent).toBe('u-1'));
 
     await act(async () => {
       authChangeHandler!('SIGNED_OUT', null);
     });
-
     await waitFor(() => expect(screen.getByTestId('user').textContent).toBe('none'));
-    expect(screen.getByTestId('admin').textContent).toBe('false');
+
+    // Cached admin flag should have been removed.
+    expect(client.getQueryData(isAdminQueryKey('u-1'))).toBeUndefined();
   });
 });

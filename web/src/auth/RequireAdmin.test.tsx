@@ -3,8 +3,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { RequireAdmin } from './RequireAdmin';
 
-const useAuthMock = vi.fn();
-vi.mock('./AuthProvider', () => ({ useAuth: () => useAuthMock() }));
+const useIsAdminMock = vi.fn();
+vi.mock('./useIsAdmin', () => ({ useIsAdmin: () => useIsAdminMock() }));
 
 function renderAt(path: string) {
   return render(
@@ -21,19 +21,19 @@ function renderAt(path: string) {
 
 describe('RequireAdmin', () => {
   it('renders child route when user is admin', () => {
-    useAuthMock.mockReturnValue({ user: { id: 'u-1' }, isAdmin: true, loading: false });
+    useIsAdminMock.mockReturnValue({ isAdmin: true, isLoading: false });
     renderAt('/taxonomy');
     expect(screen.getByText('taxonomy-page')).toBeInTheDocument();
   });
 
   it('redirects to /recipes when authed but not admin', () => {
-    useAuthMock.mockReturnValue({ user: { id: 'u-1' }, isAdmin: false, loading: false });
+    useIsAdminMock.mockReturnValue({ isAdmin: false, isLoading: false });
     renderAt('/taxonomy');
     expect(screen.getByText('recipes-page')).toBeInTheDocument();
   });
 
   it('renders nothing while loading', () => {
-    useAuthMock.mockReturnValue({ user: null, isAdmin: false, loading: true });
+    useIsAdminMock.mockReturnValue({ isAdmin: false, isLoading: true });
     renderAt('/taxonomy');
     expect(screen.queryByText('taxonomy-page')).toBeNull();
     expect(screen.queryByText('recipes-page')).toBeNull();
