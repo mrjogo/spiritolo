@@ -254,8 +254,8 @@ migration changes to staging when `staging` advances. Requires the
 Studio (Authentication → Users → Invite). After their first sign-in,
 flip `profiles.is_admin` in the table editor to grant admin access.
 
-See [docs/superpowers/specs/2026-05-02-staging-deploy-and-auth-design.md](docs/superpowers/specs/2026-05-02-staging-deploy-and-auth-design.md)
-for the bootstrap runbook and RLS tier conventions.
+See [docs/deployment.md](docs/deployment.md) for the full picture
+(Vercel project + URL, Supabase project URL, Resend constraints).
 
 ## Web UI
 
