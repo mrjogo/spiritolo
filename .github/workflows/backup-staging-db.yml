@@ -1,0 +1,47 @@
+name: Backup staging database
+
+# Manual-only for now. The artifact upload step at the bottom keeps dumps
+# for 30 days on GitHub's storage — fine for ad-hoc runs, not a backup of
+# record. Wire up durable storage (Backblaze B2, Cloudflare R2, S3, ...)
+# before enabling the schedule below.
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '0 2 * * *'   # daily at 02:00 UTC
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # ubuntu-latest ships pg_dump 16; Supabase staging is on Postgres 17,
+      # and pg_dump major version must be >= server. Pull 17 from PGDG.
+      - name: Install postgresql-client-17
+        run: |
+          sudo install -d /usr/share/postgresql-common/pgdg
+          sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+            https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" \
+            | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+
+      - name: Run backup script
+        env:
+          SUPABASE_STAGING_DB_URL: ${{ secrets.SUPABASE_STAGING_DB_URL }}
+        run: |
+          if [ -z "$SUPABASE_STAGING_DB_URL" ]; then
+            echo "SUPABASE_STAGING_DB_URL is not set" >&2
+            exit 1
+          fi
+          ./scripts/backup-supabase.sh
+
+      - name: Upload dump as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: spiritolo-staging-dump-${{ github.run_id }}
+          path: backups/*.dump
+          retention-days: 30
+          if-no-files-found: error

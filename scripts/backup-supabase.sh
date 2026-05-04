@@ -1,0 +1,91 @@
+#!/usr/bin/env bash
+# Back up the Supabase hosted Postgres (public schema) to a custom-format pg_dump.
+#
+# Local: source the repo .env first, then `./scripts/backup-supabase.sh`.
+# CI:    set SUPABASE_STAGING_DB_URL in the workflow env.
+#
+# Restore: `pg_restore --clean --if-exists --no-owner --no-privileges \
+#                     --dbname="$TARGET_URL" path/to/file.dump`
+set -euo pipefail
+
+usage() {
+  cat <<EOF
+Usage: $(basename "$0") [--dest DIR] [--label TAG]
+
+Dump the Supabase staging Postgres (public schema, custom format, gz=9) to a
+timestamped file: <dest>/spiritolo-staging-<YYYYMMDD-HHMMSSZ>[-<label>].dump
+
+Options:
+  -d, --dest DIR    Destination folder (created if missing). Default: ./backups
+  -l, --label TAG   Optional suffix appended to the filename (e.g. before-migration).
+  -h, --help        Show this help.
+
+Reads SUPABASE_STAGING_DB_URL from the environment. Must be the Supavisor
+session-mode pooler (host: aws-0-<region>.pooler.supabase.com, port: 5432).
+The free tier's direct connection (db.<ref>.supabase.co) is IPv6-only and
+the transaction pooler (port 6543) breaks pg_dump.
+EOF
+}
+
+DEST="$(pwd)/backups"
+LABEL=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -d|--dest)  DEST="$2"; shift 2 ;;
+    -l|--label) LABEL="$2"; shift 2 ;;
+    -h|--help)  usage; exit 0 ;;
+    *)          echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
+  esac
+done
+
+if [[ -z "${SUPABASE_STAGING_DB_URL:-}" ]]; then
+  echo "Error: SUPABASE_STAGING_DB_URL is not set." >&2
+  echo "Source the repo env first:  set -a && source .env && set +a" >&2
+  exit 1
+fi
+
+# Connection-mode sanity checks. The connection string format is
+#   postgresql://USER:PASS@HOST:PORT/DB?...
+URL="$SUPABASE_STAGING_DB_URL"
+HOSTPORT="${URL#*@}"           # strip scheme+credentials
+HOSTPORT="${HOSTPORT%%/*}"     # strip path/query
+HOST="${HOSTPORT%%:*}"
+PORT="${HOSTPORT##*:}"
+[[ "$PORT" == "$HOST" ]] && PORT=5432   # no explicit port
+
+if [[ "$HOST" == db.*.supabase.co ]]; then
+  cat >&2 <<EOF
+Error: SUPABASE_STAGING_DB_URL points at the direct connection ($HOST).
+On Supabase free tier this endpoint is IPv6-only and will fail from most
+networks. Use the Supavisor session pooler instead:
+  postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+EOF
+  exit 1
+fi
+
+if [[ "$PORT" == "6543" ]]; then
+  cat >&2 <<EOF
+Error: SUPABASE_STAGING_DB_URL uses the transaction pooler (port 6543).
+pg_dump requires session mode — switch the port to 5432.
+EOF
+  exit 1
+fi
+
+mkdir -p "$DEST"
+
+TS=$(date -u +%Y%m%d-%H%M%SZ)
+NAME="spiritolo-staging-${TS}"
+[[ -n "$LABEL" ]] && NAME="${NAME}-${LABEL}"
+OUT="${DEST}/${NAME}.dump"
+
+echo "Backing up staging public schema → $OUT"
+pg_dump \
+  --dbname="$URL" \
+  --schema=public \
+  --format=custom \
+  --no-owner \
+  --no-privileges \
+  --compress=9 \
+  --file="$OUT"
+
+ls -lh "$OUT"
