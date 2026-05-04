@@ -4,17 +4,17 @@ import {
   useContext,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
+import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '../supabase';
+import { isAdminQueryKey } from './useIsAdmin';
 
 type AuthContextValue = {
   user: User | null;
   session: Session | null;
-  isAdmin: boolean;
   loading: boolean;
   signOut: () => Promise<void>;
 };
@@ -23,46 +23,25 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
-  const fetchSeq = useRef(0);
-
-  const fetchAdminFlag = useCallback(async (userId: string | null) => {
-    const seq = ++fetchSeq.current;
-    if (!userId) {
-      setIsAdmin(false);
-      return;
-    }
-    const { data } = await supabase
-      .from('profiles')
-      .select('is_admin')
-      .eq('id', userId)
-      .maybeSingle();
-    if (seq !== fetchSeq.current) return;
-    setIsAdmin(Boolean(data?.is_admin));
-  }, []);
+  const queryClient = useQueryClient();
 
   useEffect(() => {
-    let mounted = true;
-    (async () => {
-      const { data } = await supabase.auth.getSession();
-      if (!mounted) return;
-      setSession(data.session ?? null);
-      await fetchAdminFlag(data.session?.user?.id ?? null);
-      if (!mounted) return;
-      setLoading(false);
-    })();
-
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, next) => {
+    // Single source of truth: onAuthStateChange. Supabase JS v2 fires
+    // INITIAL_SESSION immediately on subscribe, so a separate getSession()
+    // call would just race the listener.
+    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
       setSession(next ?? null);
-      void fetchAdminFlag(next?.user?.id ?? null);
+      setLoading(false);
+      if (event === 'SIGNED_OUT') {
+        queryClient.removeQueries({ queryKey: isAdminQueryKey() });
+      }
     });
 
     return () => {
-      mounted = false;
       sub.subscription.unsubscribe();
     };
-  }, [fetchAdminFlag]);
+  }, [queryClient]);
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();
@@ -72,11 +51,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user: session?.user ?? null,
       session,
-      isAdmin,
       loading,
       signOut,
     }),
-    [session, isAdmin, loading, signOut],
+    [session, loading, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

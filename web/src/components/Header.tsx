@@ -1,8 +1,10 @@
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthProvider';
+import { useIsAdmin } from '../auth/useIsAdmin';
 
 export function Header() {
-  const { user, isAdmin, signOut } = useAuth();
+  const { user, signOut } = useAuth();
+  const { isAdmin, isLoading: adminLoading } = useIsAdmin();
   const navigate = useNavigate();
 
   async function onSignOut() {
@@ -19,7 +21,7 @@ export function Header() {
       <Link to="/recipes" className="site-header__brand">SPIRITOLO</Link>
       <nav className="site-header__nav">
         <Link to="/recipes">Recipes</Link>
-        {isAdmin && <Link to="/taxonomy">Taxonomy</Link>}
+        {!adminLoading && isAdmin && <Link to="/taxonomy">Taxonomy</Link>}
       </nav>
       {user && (
         <button type="button" onClick={onSignOut} className="site-header__signout">
