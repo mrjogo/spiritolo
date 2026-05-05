@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
-# Restore a staging dump into the local Supabase Postgres.
+# Data-only restore of a staging dump into local Supabase. Local schema
+# is migration-managed; this script just refreshes the data, leaving
+# `public.profiles` (excluded from the dump; FKs auth.users) untouched.
 #
 # Usage: scripts/restore-local.sh <dump-file>
-#
-# Workaround: `public.profiles` is excluded from staging dumps, but the
-# local migration creates a `set_updated_at` trigger on it that depends
-# on `public.set_updated_at()`. The dump's `--clean` step DROPs that
-# function and fails on the dependency. Drop the trigger first, restore,
-# then recreate it.
 set -euo pipefail
 
 if [[ $# -ne 1 ]]; then
@@ -23,22 +19,45 @@ if [[ ! -f "$DUMP" ]]; then
   exit 1
 fi
 
-restore_trigger() {
-  psql "$DB_URL" -v ON_ERROR_STOP=1 -c "
-    drop trigger if exists set_updated_at on public.profiles;
-    create trigger set_updated_at
-      before update on public.profiles
-      for each row execute function public.set_updated_at();
-  " >/dev/null
-}
-trap restore_trigger EXIT
+# Migration check: if the sidecar is present, the local schema must be
+# at the dump's migration version. Otherwise the COPYs below will likely
+# fail on column mismatches anyway — better to say so up front.
+SIDECAR="${DUMP}.meta.json"
+if [[ -f "$SIDECAR" ]]; then
+  command -v jq >/dev/null \
+    || { echo "Error: jq required for sidecar migration check" >&2; exit 1; }
+  EXPECTED=$(jq -r '.applied_migrations[]?' "$SIDECAR" | sort)
+  LOCAL=$(psql "$DB_URL" -tAX -c \
+    "select version from supabase_migrations.schema_migrations order by version" \
+    2>/dev/null || true)
+  if [[ "$EXPECTED" != "$LOCAL" ]]; then
+    echo "Error: local migrations don't match the dump's." >&2
+    diff <(echo "$EXPECTED") <(echo "$LOCAL") || true
+    echo "Run 'supabase db reset --yes' (or 'supabase migration up --include-all') first." >&2
+    exit 1
+  fi
+fi
 
-psql "$DB_URL" -v ON_ERROR_STOP=1 -c \
-  "drop trigger if exists set_updated_at on public.profiles;" >/dev/null
+echo "Truncating public.* (except profiles)..."
+psql "$DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
+do $$
+declare r record;
+begin
+  for r in
+    select tablename from pg_tables
+    where schemaname = 'public' and tablename <> 'profiles'
+  loop
+    execute format('truncate table public.%I restart identity cascade', r.tablename);
+  end loop;
+end$$;
+SQL
 
+echo "Restoring data from $DUMP..."
 pg_restore \
   --dbname="$DB_URL" \
-  --clean --if-exists \
+  --data-only --disable-triggers \
   --no-owner --no-privileges \
   --single-transaction \
   "$DUMP"
+
+echo "Done."
