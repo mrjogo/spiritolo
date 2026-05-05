@@ -1,6 +1,8 @@
 import json
+import logging
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import psycopg
 from dotenv import load_dotenv
@@ -18,11 +20,42 @@ def _env_url() -> str:
     return url
 
 
+def looks_like_supabase_pooler(db_url: str) -> bool:
+    """True if the URL's host is a Supabase Supavisor pooler.
+
+    Both session-mode (`aws-0-<region>.pooler.supabase.com:5432`) and
+    transaction-mode (port 6543) live on the same hostname suffix."""
+    try:
+        host = urlparse(db_url).hostname or ""
+    except ValueError:
+        return False
+    return host.endswith(".pooler.supabase.com")
+
+
+def warn_if_staging_url(db_url: str, *, logger: logging.Logger | None = None) -> None:
+    """Log a warning if `db_url` looks like the Supabase pooler.
+
+    Pipelines are expected to run against a local restore of staging and
+    push the diff back through `scripts/upload-to-staging` (see
+    docs/upload.md). A pooler hostname almost always means the operator
+    forgot to switch SUPABASE_DB_URL back to local — bulk writes would
+    bypass every uploader protection. Warning, not refusal: occasional
+    direct-to-staging runs are still legitimate."""
+    if looks_like_supabase_pooler(db_url):
+        (logger or logging.getLogger("spiritolo_common")).warning(
+            "SUPABASE_DB_URL points at a Supabase pooler — about to write directly to "
+            "staging, bypassing the upload-to-staging protections. If this is a bulk "
+            "pipeline run, switch to local and follow docs/upload.md."
+        )
+
+
 class SupabaseClient:
     """Thin psycopg wrapper. One connection, UPSERT by source_url."""
 
     def __init__(self, db_url: str | None = None):
-        self.conn = psycopg.connect(db_url or _env_url())
+        url = db_url or _env_url()
+        warn_if_staging_url(url)
+        self.conn = psycopg.connect(url)
 
     def close(self):
         self.conn.close()
