@@ -27,21 +27,36 @@ me); honor system on "don't edit staging during a work session" is fine.
 
 ---
 
-## Pre-work — `updated_at` migration *(merged locally; staging deploy pending)*
+## Pre-work — `updated_at` migration *(shipped)*
 
 **Goal.** Add an auto-maintained `updated_at TIMESTAMPTZ` column to every
 public-schema table. Required so the uploader can compute the dirty set as
 "rows in local where `updated_at > <dump timestamp>`."
 
-**Status.** Migration written and applied locally. **Not yet deployed to
-staging.** Promote `main` → `staging` (`git checkout staging && git merge
---ff-only main && git push`) so the `deploy-migrations` workflow applies it.
-The staleness check in Stage 2 won't function meaningfully until staging
-tables actually have `updated_at`.
+---
 
-**Blocks.** Stage 2 (the uploader can be coded against local in the
-meantime, but its smoke tests against staging require the staging deploy
-first).
+## Pre-work — Deferrable public-schema FKs
+
+**Goal.** Make every `FOREIGN KEY` in the `public` schema
+`DEFERRABLE INITIALLY IMMEDIATE` so the uploader can issue
+`SET CONSTRAINTS ALL DEFERRED` inside its serializable transaction. Without
+this, the cycle between `recipes.cluster_id` and
+`recipe_clusters.representative_recipe_id` blocks any UPSERT batch that
+touches both sides — and any future cycle would block the same way.
+
+**Scope.** One migration that loops over `information_schema.table_constraints`
+for `FOREIGN KEY`s in `public`, drops each, re-adds it as
+`DEFERRABLE INITIALLY IMMEDIATE`. `INITIALLY IMMEDIATE` keeps default
+behavior for normal queries unchanged.
+
+**Blocks.** Stage 2's `--apply` path. Smoke tests for Stage 2 cannot exercise
+the deferred-constraint path against staging until this is deployed there.
+
+**Lands as.** Its own PR (`claude/stage2-uploader-prework`), promoted to
+staging via the standard `main → staging` flow before Stage 2's PR lands.
+
+See [docs/superpowers/specs/2026-05-05-stage-2-uploader-design.md](docs/superpowers/specs/2026-05-05-stage-2-uploader-design.md)
+for the full Stage 2 design and the role of this migration in it.
 
 ---
 
