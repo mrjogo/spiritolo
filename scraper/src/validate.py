@@ -28,13 +28,13 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from spiritolo_common.cli_common import (
+from common.cli_common import (
     add_reset_args, confirm_reset, describe_reset_scope,
 )
 from scraper.src.classify_drink import SCORER_VERSION, classify_drink_scored
 from scraper.src.db import Database
-from spiritolo_common.progress import make_progress
-from spiritolo_common.summary import print_summary
+from common.progress import make_progress
+from common.summary import print_summary
 from scraper.src.validation import VALIDATOR_VERSION, validate
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
@@ -54,7 +54,7 @@ def revalidate(
     """Walk the work queue and re-validate each row.
 
     Returns per-site Counter of transition descriptions, for rendering via
-    spiritolo_common.summary.print_summary.
+    common.summary.print_summary.
     """
     rows = db.get_pending_validate_html(site=site, limit=limit)
     total = len(rows)

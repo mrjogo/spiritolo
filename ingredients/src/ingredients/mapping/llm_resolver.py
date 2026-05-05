@@ -142,8 +142,8 @@ def run_phase2(
     limit: int | None = None,
 ) -> dict[str, int]:
     """Drain the pending_llm queue. Returns Counter-shaped summary keyed by action."""
-    from spiritolo_common.interrupt import InterruptHandler
-    from spiritolo_common.progress import make_progress
+    from common.interrupt import InterruptHandler
+    from common.progress import make_progress
     counts: Counter[str] = Counter()
     names = fetch_pending_llm_names(conn, mapper_version=MAPPER_VERSION, limit=limit)
     total = len(names)

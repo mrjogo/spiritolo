@@ -20,12 +20,12 @@ import os
 import sys
 from collections import Counter
 
-from spiritolo_common.cli_common import (
+from common.cli_common import (
     add_reset_args, confirm_reset, describe_reset_scope,
 )
-from spiritolo_common.interrupt import InterruptHandler
-from spiritolo_common.progress import make_progress
-from spiritolo_common.summary import print_summary
+from common.interrupt import InterruptHandler
+from common.progress import make_progress
+from common.summary import print_summary
 
 from ingredients.db import IngredientsDatabase
 from ingredients.eval_set import run_eval

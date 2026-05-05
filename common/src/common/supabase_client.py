@@ -42,7 +42,7 @@ def warn_if_staging_url(db_url: str, *, logger: logging.Logger | None = None) ->
     bypass every uploader protection. Warning, not refusal: occasional
     direct-to-staging runs are still legitimate."""
     if looks_like_supabase_pooler(db_url):
-        (logger or logging.getLogger("spiritolo_common")).warning(
+        (logger or logging.getLogger("common")).warning(
             "SUPABASE_DB_URL points at a Supabase pooler — about to write directly to "
             "staging, bypassing the upload-to-staging protections. If this is a bulk "
             "pipeline run, switch to local and follow docs/upload.md."

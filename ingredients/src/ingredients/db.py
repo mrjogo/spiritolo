@@ -1,7 +1,7 @@
 """Postgres data-access layer for the ingredient parser worker.
 
 All queries are written against Supabase Postgres (the local one in dev).
-Connection credentials come from SUPABASE_DB_URL via spiritolo_common.
+Connection credentials come from SUPABASE_DB_URL via common.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any, Iterable
 import psycopg
 from dotenv import load_dotenv
 
-from spiritolo_common.supabase_client import warn_if_staging_url
+from common.supabase_client import warn_if_staging_url
 
 
 def _env_url() -> str:

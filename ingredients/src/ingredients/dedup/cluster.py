@@ -18,7 +18,7 @@ from collections import Counter
 from typing import Any
 
 import psycopg
-from spiritolo_common.interrupt import InterruptHandler
+from common.interrupt import InterruptHandler
 
 from .role_classifier import classify_role
 from .rollup import roll_up_to_antichain
@@ -251,7 +251,7 @@ def run_cluster_compute(
     + recipes.cluster_id + recipes.variant_key + recipe_ingredients.role.
     When dry_run=True, all DB writes and commit are skipped.
     """
-    from spiritolo_common.progress import make_progress
+    from common.progress import make_progress
 
     counts: Counter[str] = Counter()
     recipes = _fetch_recipes_to_cluster(

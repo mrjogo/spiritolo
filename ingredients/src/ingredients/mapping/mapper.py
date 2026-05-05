@@ -11,8 +11,8 @@ import logging
 from collections import Counter
 
 import psycopg
-from spiritolo_common.interrupt import InterruptHandler
-from spiritolo_common.progress import make_progress
+from common.interrupt import InterruptHandler
+from common.progress import make_progress
 
 from .alias_layer import fetch_aliases_dict
 from .db import (

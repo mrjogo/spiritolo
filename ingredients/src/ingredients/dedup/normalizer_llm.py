@@ -40,8 +40,8 @@ def run_phase2(
     provider: LLMProvider,
     limit: int | None = None,
 ) -> dict[str, int]:
-    from spiritolo_common.interrupt import InterruptHandler
-    from spiritolo_common.progress import make_progress
+    from common.interrupt import InterruptHandler
+    from common.progress import make_progress
 
     counts: Counter[str] = Counter()
     raw_names = fetch_pending_canonical_names(
