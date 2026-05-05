@@ -18,6 +18,10 @@ from collections import Counter
 import psycopg
 
 from common.llm import LLMProvider
+from common.llm.batch_provider import BatchProvider, BatchRequest
+from common.llm.batch_runner import (
+    BatchSubmitOutcome, ingest_batch, submit_batch,
+)
 from common.llm.retry import resolve_with_retry
 
 from .db import (
@@ -104,3 +108,91 @@ def run_phase2(
                 counts["abstain"] += 1
             progress(idx)
     return dict(counts)
+
+
+def submit_normalize_names_batch(
+    conn: psycopg.Connection,
+    *,
+    provider: BatchProvider,
+    batches_dir,
+    limit: int | None = None,
+) -> BatchSubmitOutcome:
+    """Submit pending canonical-name resolutions as an OpenAI batch."""
+    raw_names = fetch_pending_canonical_names(
+        conn, normalizer_version=NORMALIZER_VERSION, limit=limit,
+    )
+    if not raw_names:
+        raise RuntimeError("nothing pending; queue is empty")
+
+    rows = []
+    for raw in raw_names:
+        normalized = normalize_cocktail_name(raw)
+        cands = lexical_candidates(conn, normalized, limit=20)
+        user_prompt = build_user_prompt(
+            raw_name=raw, normalized=normalized, candidates=cands,
+        )
+        rows.append((raw, SYSTEM_PROMPT, user_prompt))
+
+    return submit_batch(
+        provider=provider, rows=rows,
+        to_request=lambda i, r: BatchRequest(
+            custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2],
+        ),
+        row_to_id=lambda r: r[0],
+        flow="dedup.normalize_names.resolve_pending",
+        version_constant=NORMALIZER_VERSION,
+        batches_dir=batches_dir,
+    )
+
+
+def ingest_normalize_names_batch(
+    conn: psycopg.Connection,
+    *,
+    provider: BatchProvider,
+    batch_id: str,
+    batches_dir,
+) -> dict[str, int]:
+    """Ingest a previously submitted normalize-names batch."""
+
+    def on_result(row_id: str, raw_text: str | None, error: str | None) -> None:
+        if error or raw_text is None:
+            log.warning("batch result error for %r: %s", row_id, error)
+            return
+        try:
+            action_obj = _parse_response(raw_text)
+        except Exception as exc:
+            log.warning("batch result parse failed for %r: %s", row_id, exc)
+            return
+        action = action_obj["action"]
+        raw = row_id
+        normalized = normalize_cocktail_name(raw)
+
+        if action == "chose":
+            canonical = action_obj["canonical_name"]
+            write_normalization(
+                conn, raw_name=raw, normalized=normalized,
+                canonical_name=canonical, source="llm",
+                normalizer_version=NORMALIZER_VERSION,
+            )
+        elif action == "propose":
+            canonical = action_obj["canonical_name"]
+            add_cocktail_alias(
+                conn, alias=normalized, canonical_name=canonical, source="llm",
+            )
+            write_normalization(
+                conn, raw_name=raw, normalized=normalized,
+                canonical_name=canonical, source="llm",
+                normalizer_version=NORMALIZER_VERSION,
+            )
+        elif action == "abstain":
+            write_normalize_abstain(
+                conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION,
+            )
+
+    return ingest_batch(
+        provider=provider, batch_id=batch_id,
+        flow="dedup.normalize_names.resolve_pending",
+        version_constant=NORMALIZER_VERSION,
+        on_result=on_result,
+        batches_dir=batches_dir,
+    )
