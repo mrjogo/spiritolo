@@ -77,14 +77,31 @@ def _create_brand_node(
     model_id: str,
 ) -> int:
     """Insert the new node + edge + provenance. is_cluster_node defaults
-    to false (E's column); the antichain stays curator-controlled."""
-    new_id = conn.execute(
+    to false (E's column); the antichain stays curator-controlled.
+
+    Slug collisions (two batch results proposing the same slug) resolve
+    silently to the existing node. This is the right behavior in batch
+    mode where prompts are built against a frozen candidate set: the
+    second proposer agrees with the first and we map the row to the
+    already-created node. Edge + provenance inserts are also tolerant
+    of duplicates (ON CONFLICT DO NOTHING) so re-encountering the same
+    (slug, raw_string) pair is idempotent."""
+    row = conn.execute(
         "insert into taxonomy_nodes (slug, display_name, node_kind) "
-        "values (%s, %s, %s) returning id",
+        "values (%s, %s, %s) "
+        "on conflict (slug) do nothing returning id",
         (slug, display_name, node_kind),
-    ).fetchone()[0]
+    ).fetchone()
+    if row is None:
+        # Existing node with this slug — resolve to it.
+        new_id = conn.execute(
+            "select id from taxonomy_nodes where slug = %s", (slug,),
+        ).fetchone()[0]
+    else:
+        new_id = row[0]
     conn.execute(
-        "insert into taxonomy_edges (parent_id, child_id) values (%s, %s)",
+        "insert into taxonomy_edges (parent_id, child_id) values (%s, %s) "
+        "on conflict do nothing",
         (parent_id, new_id),
     )
     conn.execute(
@@ -92,6 +109,7 @@ def _create_brand_node(
         insert into taxonomy_provenance
             (node_id, source, mapper_version, raw_string, prompt_hash, model_id)
         values (%s, 'llm-mapper', %s, %s, %s, %s)
+        on conflict do nothing
         """,
         (new_id, MAPPER_VERSION, raw_string, prompt_hash_value, model_id),
     )

@@ -96,6 +96,51 @@ def test_ingest_dispatches_to_callbacks_and_marks_sidecar(tmp_path):
     assert not (tmp_path / "batch_abc.json").exists()
 
 
+def test_ingest_continues_when_on_result_raises(tmp_path):
+    """A single bad row in a batch (e.g. DB integrity violation) must not
+    abort ingest — otherwise a 25k-result batch loses everything after the
+    first failure and the sidecar never gets marked .ingested."""
+    submit_batch(
+        provider=_stub_provider(),
+        rows=[("vodka", "s", "u0"), ("rye", "s", "u1"), ("gin", "s", "u2")],
+        to_request=lambda i, r: BatchRequest(custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2]),
+        row_to_id=lambda r: r[0],
+        flow="mapping.resolve_pending", version_constant="v3",
+        batches_dir=tmp_path,
+    )
+
+    ingest_provider = MagicMock()
+    ingest_provider.status.return_value = BatchStatus(
+        batch_id="batch_abc", state="completed", completed=3, total=3,
+    )
+    ingest_provider.fetch_results.return_value = iter([
+        BatchResult(custom_id="r0", raw_text='{"action":"chose"}', error=None),
+        BatchResult(custom_id="r1", raw_text='{"action":"chose"}', error=None),  # blows up in writer
+        BatchResult(custom_id="r2", raw_text='{"action":"chose"}', error=None),
+    ])
+
+    seen = []
+    def on_result(row_id, raw_text, error):
+        if row_id == "rye":
+            raise RuntimeError("simulated DB integrity error")
+        seen.append(row_id)
+
+    counts = ingest_batch(
+        provider=ingest_provider, batch_id="batch_abc",
+        flow="mapping.resolve_pending", version_constant="v3",
+        on_result=on_result, batches_dir=tmp_path,
+    )
+
+    # Loop continued past the failure.
+    assert seen == ["vodka", "gin"]
+    assert counts["ok"] == 2
+    assert counts["writer_error"] == 1
+
+    # Sidecar still got marked .ingested so re-runs noisily skip.
+    assert (tmp_path / "batch_abc.json.ingested").exists()
+    assert not (tmp_path / "batch_abc.json").exists()
+
+
 def test_ingest_refuses_when_status_not_completed(tmp_path):
     provider = _stub_provider()
     submit_batch(

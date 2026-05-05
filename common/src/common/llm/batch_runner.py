@@ -14,6 +14,7 @@ DB writer; this module knows nothing about them.
 
 from __future__ import annotations
 
+import logging
 from collections import Counter
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -22,6 +23,8 @@ from pathlib import Path
 
 from .batch_provider import BatchProvider, BatchRequest, BatchResult, BatchSubmission
 from .sidecar import Sidecar, load_sidecar, mark_ingested, write_sidecar
+
+log = logging.getLogger("common.llm.batch_runner")
 
 
 @dataclass(frozen=True)
@@ -89,7 +92,16 @@ def ingest_batch(
         if row_id is None:
             counts["unmapped"] += 1
             continue
-        on_result(row_id, r.raw_text, r.error)
+        try:
+            on_result(row_id, r.raw_text, r.error)
+        except Exception as exc:
+            # Per-row writer failures (DB integrity violations, parse errors,
+            # etc.) must not abort the loop — otherwise a single bad row in a
+            # 25k-result batch loses the rest of the work and the sidecar
+            # never gets renamed `.ingested`.
+            log.exception("on_result raised for row_id=%r: %s", row_id, exc)
+            counts["writer_error"] += 1
+            continue
         counts["error" if r.error or r.raw_text is None else "ok"] += 1
     sidecar_path = batches_dir / f"{batch_id}.json"
     mark_ingested(sidecar_path)
