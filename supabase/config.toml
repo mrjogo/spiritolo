@@ -58,11 +58,15 @@ enabled = true
 schema_paths = []
 
 [db.seed]
-# Seed files are not used. Reference data (taxonomy, cocktail aliases, dev
-# admin) is populated locally by restoring a `scripts/backup-supabase.sh`
-# dump from staging — see docs/backups.md.
-enabled = false
-sql_paths = []
+# Reference data (taxonomy, cocktail aliases, recipes) is populated
+# locally by restoring a `scripts/backup-supabase.sh` dump from staging
+# — see docs/backups.md. The single seed file below is the exception:
+# `profiles` and `auth.users` are excluded from the staging dump, so we
+# need a local-only seed to land in an admin-ready state after `db
+# reset`. The seed self-aborts if any non-*.local.{test,dev} users
+# exist (second-line defense against running against staging).
+enabled = true
+sql_paths = ["./seeds/dev_admin_user.local-only.sql"]
 
 [db.network_restrictions]
 # Enable management of network restrictions.

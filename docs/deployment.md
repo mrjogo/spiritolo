@@ -47,10 +47,14 @@ runs on every push to `staging`. It detects migration changes and applies them
 via `supabase db push --include-all`. Requires the `SUPABASE_STAGING_DB_URL`
 repo secret.
 
-There are no seed files. Reference data (taxonomy nodes, cocktail aliases,
-recipes, etc.) lives on staging and is curated there directly via the admin
-UI. Local dev populates this data by restoring a staging backup; see
-[backups.md](backups.md).
+The only seed file is `supabase/seeds/dev_admin_user.local-only.sql`,
+which pre-creates a magic-link admin for local dev. The seed self-aborts
+on any non-`*.local.{test,dev}` user, so it's safe by construction, but
+it's never applied to staging anyway — Supabase only runs seeds on `db
+reset`, which we don't run against the hosted project. Reference data
+(taxonomy nodes, cocktail aliases, recipes, etc.) lives on staging and
+is curated there directly via the admin UI. Local dev populates this
+data by restoring a staging backup; see [backups.md](backups.md).
 
 ## Email — Resend
 

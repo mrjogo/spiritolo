@@ -32,7 +32,7 @@ supabase migration list
 supabase db push --include-all
 ```
 
-Use `migration up` when you want to add new migrations without losing local processed data; `db reset` wipes and replays migrations only — there are no seed files. To populate local with realistic data (taxonomy, cocktail aliases, recipes, etc.), restore a staging backup; see [docs/backups.md](docs/backups.md).
+Use `migration up` when you want to add new migrations without losing local processed data; `db reset` wipes, replays migrations, and applies the single `dev_admin_user.local-only.sql` seed (creates the `admin@local.test` magic-link user — `profiles` and `auth.users` aren't in staging dumps, so this stays a seed). To populate local with realistic data (taxonomy, cocktail aliases, recipes, etc.), restore a staging backup; see [docs/backups.md](docs/backups.md).
 
 (If you ever need to invoke the `supabase` CLI from inside the devcontainer — uncommon — its Go resolver picks an IPv6 form of `host.docker.internal` that isn't routable, and it defaults to TLS which the local Postgres rejects. Both surface as `tls error (server refused TLS connection)`. Workaround: pass `--db-url` with your container's gateway IPv4 plus `?sslmode=disable`. The literal varies by environment — `getent hosts host.docker.internal` and `ip route` show what's reachable from your container.)
 
@@ -211,8 +211,8 @@ Schema is the only thing that flows local → staging (via the migrations CI wor
 
 **Local dev** has two viable shapes:
 
-- **Schema-only:** `supabase db reset` is enough. You get the migrated schema and empty tables. Fine for UI work and migration writing, but you'll need to re-invite an admin via Studio after the reset to use anything that requires auth.
-- **Schema + a snapshot of staging data:** restore a `scripts/backup-supabase.sh` dump into the local DB. This is the only way to get current reference data (taxonomy, cocktail aliases) and any pipeline output locally. See [docs/backups.md](docs/backups.md).
+- **Schema-only:** `supabase db reset` is enough. You get the migrated schema, empty tables, and a pre-seeded `admin@local.test` magic-link user (see [supabase/seeds/dev_admin_user.local-only.sql](supabase/seeds/dev_admin_user.local-only.sql) — the only seed file). Fine for UI work and migration writing.
+- **Schema + a snapshot of staging data:** restore a `scripts/backup-supabase.sh` dump into the local DB. This is the only way to get current reference data (taxonomy, cocktail aliases) and any pipeline output locally. The dev admin seed survives the restore (`profiles` and `auth.users` are excluded from the dump). See [docs/backups.md](docs/backups.md).
 
 ## Hosting
 

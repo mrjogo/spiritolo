@@ -4,6 +4,9 @@ Outer roadmap for moving spiritolo to a backup-restore-edit-upload model. Each
 stage is its own AI session and PR. **Delete this file once all stages have
 shipped.**
 
+**Each stage's session must mark its stage shipped in this file (an italic
+status note next to the heading) as part of its PR — before opening it.**
+
 ## The target workflow
 
 1. Run `scripts/backup-supabase.sh` — produces a `pg_dump` custom-format dump
@@ -42,7 +45,7 @@ first).
 
 ---
 
-## Stage 1 — Remove all seed files
+## Stage 1 — Remove all seed files *(shipped — PR #51)*
 
 **Goal.** Delete every file under `supabase/seeds/`. Reference data
 (taxonomy, cocktail aliases, dev admin) now flows local ← staging via backup
