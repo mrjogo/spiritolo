@@ -9,7 +9,6 @@ dependencies = [
     "pyyaml>=6.0",
     "cssselect>=1.2",
     "python-dotenv>=1.0",
-    "ollama>=0.4",
     "psycopg[binary]>=3.2",
     "beautifulsoup4>=4.12",
     "extruct>=0.18.0",

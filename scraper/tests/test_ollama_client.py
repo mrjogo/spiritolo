@@ -1,91 +1,51 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
-from scraper.classify_prompt import LABELS
+from common.llm.provider import ProviderResult
 from scraper.ollama_client import ClassificationResult, classify_url
 
 
-@pytest.fixture
-def fake_ollama_response():
-    return {
-        "message": {
-            "role": "assistant",
-            "content": '{"label": "likely_drink_recipe"}',
-        },
-        "done": True,
-    }
+def _stub_provider(reply: str) -> MagicMock:
+    p = MagicMock()
+    p.resolve.return_value = ProviderResult(raw_text=reply, model_id="qwen3:14b")
+    return p
 
 
-async def test_classify_url_returns_parsed_label(fake_ollama_response):
-    mock_client = AsyncMock()
-    mock_client.chat = AsyncMock(return_value=fake_ollama_response)
-
-    with patch("scraper.ollama_client.AsyncClient", return_value=mock_client):
-        result = await classify_url(
-            url="https://example.com/recipe/1",
-            sitemap_source="recipes.xml",
-            model="qwen3:14b",
-        )
-
-    assert isinstance(result, ClassificationResult)
-    assert result.label == "likely_drink_recipe"
-    assert result.raw_response == '{"label": "likely_drink_recipe"}'
-    assert result.latency_ms >= 0
+def test_classify_url_returns_label():
+    provider = _stub_provider('{"label": "likely_drink_recipe"}')
+    out = classify_url(
+        url="https://example.com/recipes/margarita",
+        sitemap_source=None, provider=provider,
+    )
+    assert isinstance(out, ClassificationResult)
+    assert out.label == "likely_drink_recipe"
+    assert out.raw_response == '{"label": "likely_drink_recipe"}'
+    assert out.latency_ms >= 0
+    provider.resolve.assert_called_once()
 
 
-async def test_classify_url_sends_system_and_user_messages(fake_ollama_response):
-    mock_client = AsyncMock()
-    mock_client.chat = AsyncMock(return_value=fake_ollama_response)
-
-    with patch("scraper.ollama_client.AsyncClient", return_value=mock_client):
-        await classify_url("https://example.com/x", "s.xml", "qwen3:14b")
-
-    call = mock_client.chat.await_args
-    kwargs = call.kwargs
-    assert kwargs["model"] == "qwen3:14b"
-    messages = kwargs["messages"]
-    assert messages[0]["role"] == "system"
-    assert messages[1]["role"] == "user"
-    assert "https://example.com/x" in messages[1]["content"]
-    assert kwargs["format"]["type"] == "object"
-    # The enum is the whole point of structured output — verify it.
-    assert kwargs["format"]["properties"]["label"]["enum"] == list(LABELS)
+def test_classify_url_raises_on_malformed_json():
+    provider = _stub_provider("not json")
+    with pytest.raises(ValueError, match="malformed JSON"):
+        classify_url(url="https://x", sitemap_source=None, provider=provider)
 
 
-async def test_classify_url_raises_on_invalid_label():
-    bad = {"message": {"content": '{"label": "not_a_real_label"}'}, "done": True}
-    mock_client = AsyncMock()
-    mock_client.chat = AsyncMock(return_value=bad)
-
-    with patch("scraper.ollama_client.AsyncClient", return_value=mock_client):
-        with pytest.raises(ValueError, match="invalid label"):
-            await classify_url("https://example.com/x", None, "qwen3:14b")
+def test_classify_url_raises_on_unknown_label():
+    provider = _stub_provider('{"label": "nonsense"}')
+    with pytest.raises(ValueError, match="invalid label"):
+        classify_url(url="https://x", sitemap_source=None, provider=provider)
 
 
-async def test_classify_url_uses_supplied_client_instead_of_constructing(fake_ollama_response):
-    """When `client=` is provided, classify_url must not construct a new AsyncClient."""
-    supplied = AsyncMock()
-    supplied.chat = AsyncMock(return_value=fake_ollama_response)
-
-    with patch("scraper.ollama_client.AsyncClient") as MockClass:
-        result = await classify_url(
-            url="https://example.com/x",
-            sitemap_source=None,
-            model="qwen3:14b",
-            client=supplied,
-        )
-
-    MockClass.assert_not_called()
-    supplied.chat.assert_awaited_once()
-    assert result.label == "likely_drink_recipe"
-
-
-async def test_classify_url_raises_on_malformed_json():
-    bad = {"message": {"content": "not json"}, "done": True}
-    mock_client = AsyncMock()
-    mock_client.chat = AsyncMock(return_value=bad)
-
-    with patch("scraper.ollama_client.AsyncClient", return_value=mock_client):
-        with pytest.raises(ValueError, match="malformed"):
-            await classify_url("https://example.com/x", None, "qwen3:14b")
+def test_classify_url_passes_system_and_user_prompts():
+    provider = _stub_provider('{"label": "likely_drink_recipe"}')
+    classify_url(
+        url="https://example.com/x",
+        sitemap_source="recipes.xml",
+        provider=provider,
+    )
+    kwargs = provider.resolve.call_args.kwargs
+    assert "system_prompt" in kwargs
+    assert "user_prompt" in kwargs
+    assert "https://example.com/x" in kwargs["user_prompt"]
+    assert "recipes.xml" in kwargs["user_prompt"]

@@ -1,30 +1,28 @@
 """URL classifier: main runner, review mode, and sample subcommand.
 
-Main run: opens a pipeline_runs row, asyncio pool of workers pull
-unclassified rows, classify each via ollama, UPSERT classify_url_runs
-(latest-only per page) with the label + prompt_version + snapshot of the
-prior pages.content_type, then update pages.content_type.
+Main run: opens a pipeline_runs row, a ThreadPoolExecutor of workers pull
+unclassified rows, classify each via the chosen LLMProvider, UPSERT
+classify_url_runs (latest-only per page) with the label + prompt_version +
+snapshot of the prior pages.content_type, then update pages.content_type.
 """
 
 import argparse
-import asyncio
 import json
 import logging
 import sys
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
-from typing import Awaitable, Callable
 
-from ollama import AsyncClient
-
-from scraper.classify_prompt import PROMPT_VERSION
 from common.cli_common import (
     add_reset_args, confirm_reset, describe_reset_scope,
 )
-from scraper.db import Database
-from scraper.ollama_client import ClassificationResult, classify_url
 from common.progress import make_progress
 from common.summary import print_summary
+
+from scraper.classify_prompt import PROMPT_VERSION
+from scraper.db import Database
+from scraper.ollama_client import classify_url
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
@@ -32,14 +30,11 @@ DEFAULT_EVAL_PATH = Path(__file__).resolve().parent.parent / "eval" / "classify-
 
 log = logging.getLogger(__name__)
 
-ClassifyFn = Callable[..., Awaitable[ClassificationResult]]
 
-
-async def classify_one(
+def classify_one(
     row: dict,
-    classify_fn: ClassifyFn,
+    provider,
     db: Database,
-    model: str,
     prompt_version: str,
     run_id: int | None = None,
 ) -> bool:
@@ -49,10 +44,10 @@ async def classify_one(
     Returns True if the row was classified and written, False on any error.
     """
     try:
-        result = await classify_fn(
+        result = classify_url(
             url=row["url"],
             sitemap_source=row.get("sitemap_source"),
-            model=model,
+            provider=provider,
         )
     except Exception as e:
         log.warning("classify failed for id=%s url=%s: %s", row["id"], row["url"], e, exc_info=True)
@@ -62,7 +57,7 @@ async def classify_one(
         page_id=row["id"],
         run_id=run_id,
         label=result.label,
-        model=model,
+        model=provider.model_id,
         prompt_version=prompt_version,
         raw_response=result.raw_response,
         latency_ms=result.latency_ms,
@@ -71,14 +66,13 @@ async def classify_one(
     return True
 
 
-async def run_classify_pool(
+def run_classify_pool(
     rows: list[dict],
-    classify_fn: ClassifyFn,
+    provider,
     db: Database,
-    model: str,
     prompt_version: str,
     concurrency: int = 4,
-    on_progress: Callable[[int, int], None] | None = None,
+    on_progress=None,
     run_id: int | None = None,
 ) -> int:
     """Run classify_one over rows with at most `concurrency` in-flight calls.
@@ -89,35 +83,44 @@ async def run_classify_pool(
     Returns the count of successfully classified rows (failures are swallowed
     by classify_one; this number lets callers detect zero-progress batches).
     """
-    sem = asyncio.Semaphore(concurrency)
     total = len(rows)
     done = 0
     successes = 0
-
-    async def worker(r: dict):
-        nonlocal done, successes
-        async with sem:
-            ok = await classify_one(r, classify_fn, db, model, prompt_version, run_id=run_id)
-        if ok:
-            successes += 1
-        done += 1
-        if on_progress:
-            on_progress(done, total)
-
-    await asyncio.gather(*(worker(r) for r in rows))
+    with ThreadPoolExecutor(max_workers=concurrency) as ex:
+        futures = {
+            ex.submit(classify_one, r, provider, db, prompt_version, run_id): r
+            for r in rows
+        }
+        for fut in as_completed(futures):
+            ok = fut.result()
+            if ok:
+                successes += 1
+            done += 1
+            if on_progress:
+                on_progress(done, total)
     return successes
 
 
 def build_arg_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="classify",
-        description="Classify unclassified URLs in scraper.db via a local ollama model.",
+        description="Classify unclassified URLs in scraper.db via an LLM provider.",
     )
     p.add_argument("--site", help="Limit run to one site (matches pages.site).")
     p.add_argument("--limit", type=int, help="Stop after this many URLs (main run only).")
     p.add_argument("--concurrency", type=int, default=4,
-                   help="Concurrent in-flight ollama requests (default: 4).")
-    p.add_argument("--model", default="qwen3:14b", help="Ollama model tag (default: qwen3:14b).")
+                   help="Concurrent in-flight provider requests (default: 4).")
+    p.add_argument(
+        "--provider", choices=["ollama", "claude", "openai"], default="ollama",
+        help="LLM provider for classification (default: ollama, free local).",
+    )
+    p.add_argument(
+        "--model", default="qwen3:14b",
+        help=(
+            "Model id for the chosen provider (default: qwen3:14b for ollama). "
+            "For claude pass e.g. claude-haiku-4-5; for openai pass e.g. gpt-5-mini."
+        ),
+    )
     p.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Path to scraper.db.")
     p.add_argument("--batch-size", type=int, default=1000,
                    help="Rows pulled from DB per batch (keeps task-object memory bounded). Default: 1000.")
@@ -135,12 +138,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
     return p
 
 
-async def run_main(args: argparse.Namespace) -> int:
+def _build_provider(args: argparse.Namespace):
+    """Instantiate the chosen sync LLM provider."""
+    provider_name = getattr(args, "provider", "ollama") or "ollama"
+    model = getattr(args, "model", None)
+    if provider_name == "ollama":
+        from common.llm.ollama import OllamaProvider
+        return OllamaProvider.from_env(model_id=model) if model else OllamaProvider.from_env()
+    if provider_name == "claude":
+        from common.llm.claude import ClaudeProvider
+        return ClaudeProvider.from_env(model_id=model) if model else ClaudeProvider.from_env()
+    if provider_name == "openai":
+        from common.llm.openai import OpenAIProvider
+        return OpenAIProvider.from_env(model_id=model) if model else OpenAIProvider.from_env()
+    raise ValueError(f"unknown provider {provider_name!r}")
+
+
+def run_main(args: argparse.Namespace) -> int:
     """Main classify run, batched.
 
     We pull `--batch-size` rows at a time from the DB rather than loading all
     NULL rows up front. With ~521k unclassified URLs, materializing every row
-    as an asyncio.Task would consume hundreds of MB of task-object memory.
+    as a future would consume hundreds of MB of task-object memory.
     Batching keeps that bounded and is otherwise indistinguishable from a
     single big run because the work queue is just `content_type IS NULL`.
 
@@ -151,10 +170,8 @@ async def run_main(args: argparse.Namespace) -> int:
     remaining = args.limit  # None means "no limit"
     grand_total = 0
     exit_code = 0
-    shared_client = AsyncClient()
 
-    async def classify_with_shared(url, sitemap_source, model):
-        return await classify_url(url, sitemap_source, model, client=shared_client)
+    provider = _build_provider(args)
 
     overall_total = db.count_unclassified(site=args.site)
     if args.limit is not None:
@@ -174,7 +191,7 @@ async def run_main(args: argparse.Namespace) -> int:
         site=args.site,
         args={
             "limit": args.limit, "batch_size": args.batch_size,
-            "model": args.model, "concurrency": args.concurrency,
+            "model": provider.model_id, "concurrency": args.concurrency,
             "prompt_version": PROMPT_VERSION,
         },
     )
@@ -192,7 +209,7 @@ async def run_main(args: argparse.Namespace) -> int:
                 scope = f"site={args.site}" if args.site else "all sites"
                 log.info(
                     "classifying %s URLs (%s) via %s (concurrency=%d, batch_size=%d, prompt=%s)",
-                    f"{overall_total:,}", scope, args.model,
+                    f"{overall_total:,}", scope, provider.model_id,
                     args.concurrency, args.batch_size, PROMPT_VERSION,
                 )
 
@@ -200,11 +217,10 @@ async def run_main(args: argparse.Namespace) -> int:
             # written this batch. Cheap because we already paid the round-trip
             # to write them.
             batch_urls = [r["url"] for r in rows]
-            successes = await run_classify_pool(
+            successes = run_classify_pool(
                 rows=rows,
-                classify_fn=classify_with_shared,
+                provider=provider,
                 db=db,
-                model=args.model,
                 prompt_version=PROMPT_VERSION,
                 concurrency=args.concurrency,
                 on_progress=adapter,
@@ -215,7 +231,7 @@ async def run_main(args: argparse.Namespace) -> int:
             if successes == 0:
                 print(
                     f"ERROR: batch of {len(rows)} produced zero classifications. "
-                    "Is ollama running? Aborting to avoid an infinite loop.",
+                    "Check provider connectivity. Aborting to avoid an infinite loop.",
                     file=sys.stderr,
                 )
                 exit_code = 1
@@ -262,12 +278,12 @@ def main(argv: list[str] | None = None) -> int:
     if args.sample:
         return _run_sample(args)
     if args.review:
-        return asyncio.run(_run_review(args))
+        return _run_review(args)
     if args.reset:
         rc = _do_reset(args)
         if rc != 0:
             return rc
-    return asyncio.run(run_main(args))
+    return run_main(args)
 
 
 def _do_reset(args: argparse.Namespace) -> int:
@@ -316,18 +332,15 @@ def load_eval_set(path: Path) -> list[dict]:
     return entries
 
 
-async def run_review(
-    eval_path: Path,
-    classify_fn: ClassifyFn,
-    model: str,
-) -> int:
+def run_review(eval_path: Path, provider) -> int:
     entries = load_eval_set(eval_path)
     correct = 0
     failures: list[tuple[dict, str]] = []
     for e in entries:
         try:
-            result = await classify_fn(
-                url=e["url"], sitemap_source=e.get("sitemap_source"), model=model,
+            result = classify_url(
+                url=e["url"], sitemap_source=e.get("sitemap_source"),
+                provider=provider,
             )
             predicted = result.label
         except Exception as err:
@@ -392,10 +405,8 @@ def _run_sample(args: argparse.Namespace) -> int:
     )
 
 
-async def _run_review(args: argparse.Namespace) -> int:
-    return await run_review(
-        eval_path=DEFAULT_EVAL_PATH, classify_fn=classify_url, model=args.model,
-    )
+def _run_review(args: argparse.Namespace) -> int:
+    return run_review(eval_path=DEFAULT_EVAL_PATH, provider=_build_provider(args))
 
 
 if __name__ == "__main__":

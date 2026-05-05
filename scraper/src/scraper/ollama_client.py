@@ -1,17 +1,18 @@
-"""Thin async wrapper around ollama's chat API for URL classification.
+"""Sync wrapper that asks an LLMProvider to classify one URL.
 
-One request per URL. Structured output via the `format` parameter prevents
-malformed responses; the model can only return JSON matching RESPONSE_SCHEMA."""
+Prompt assembly stays here (in scraper, where the prompt module lives).
+The LLM call itself goes through common.llm.LLMProvider, so any sync
+provider — Ollama, Claude, OpenAI — can drive classify.
+"""
 
 import json
 import time
 from dataclasses import dataclass
 
-from ollama import AsyncClient
+from common.llm.provider import LLMProvider
 
 from scraper.classify_prompt import (
     LABELS,
-    RESPONSE_SCHEMA,
     SYSTEM_PROMPT,
     build_user_message,
 )
@@ -24,39 +25,23 @@ class ClassificationResult:
     latency_ms: int
 
 
-async def classify_url(
+def classify_url(
+    *,
     url: str,
     sitemap_source: str | None,
-    model: str,
-    host: str | None = None,
-    client: AsyncClient | None = None,
+    provider: LLMProvider,
 ) -> ClassificationResult:
-    """Ask ollama to classify one URL. Returns ClassificationResult or raises.
+    """Ask `provider` to classify one URL. Returns ClassificationResult or raises.
 
-    Raises ValueError for malformed or out-of-enum responses. Transport errors
-    bubble up from the ollama library unchanged so the caller can decide
-    retry policy.
-
-    For a batch run, pass a shared `client` — constructing a new AsyncClient
-    per call wastes connection pools. If `client` is None, a throwaway client
-    is created (the default path for tests and one-off use).
+    Raises ValueError for malformed JSON or out-of-enum responses.
+    Transport errors bubble up from the underlying provider unchanged so the
+    caller can decide retry policy.
     """
-    if client is None:
-        client = AsyncClient(host=host)
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": build_user_message(url, sitemap_source)},
-    ]
+    user = build_user_message(url, sitemap_source)
     start = time.monotonic()
-    resp = await client.chat(
-        model=model,
-        messages=messages,
-        format=RESPONSE_SCHEMA,
-        options={"temperature": 0, "num_predict": 50},
-        think=False,
-    )
+    result = provider.resolve(system_prompt=SYSTEM_PROMPT, user_prompt=user)
     latency_ms = int((time.monotonic() - start) * 1000)
-    raw = resp["message"]["content"]
+    raw = result.raw_text
 
     try:
         payload = json.loads(raw)
