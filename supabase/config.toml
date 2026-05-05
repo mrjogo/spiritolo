@@ -58,24 +58,15 @@ enabled = true
 schema_paths = []
 
 [db.seed]
-# If enabled, seeds the database after migrations during a db reset.
+# Reference data (taxonomy, cocktail aliases, recipes) is populated
+# locally by restoring a `scripts/backup-supabase.sh` dump from staging
+# — see docs/backups.md. The single seed file below is the exception:
+# `profiles` and `auth.users` are excluded from the staging dump, so we
+# need a local-only seed to land in an admin-ready state after `db
+# reset`. The seed self-aborts if any non-*.local.{test,dev} users
+# exist (second-line defense against running against staging).
 enabled = true
-# Specifies an ordered list of seed files to load during db reset.
-# Supports glob patterns relative to supabase directory: "./seeds/*.sql"
-# recipes.sql is excluded: it's a pg_dump COPY-from-stdin file, which the
-# Supabase CLI's Go-based seed runner can't process. Apply it via psql:
-#   psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/seeds/recipes.sql
-#
-# dev_admin_user.local-only.sql pre-creates an admin@local.test user so
-# `db reset` lands you in an admin-ready state. The seed self-aborts if
-# any non-*.local.test users exist (second-line defense against running
-# against staging). Remove this seed AND its config.toml entry before
-# anything that uploads ALL data to staging via `supabase db reset`.
-sql_paths = [
-  "./seeds/taxonomy_nodes*.sql",
-  "./seeds/cocktail_aliases*.sql",
-  "./seeds/dev_admin_user.local-only.sql",
-]
+sql_paths = ["./seeds/dev_admin_user.local-only.sql"]
 
 [db.network_restrictions]
 # Enable management of network restrictions.
