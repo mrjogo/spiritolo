@@ -13,6 +13,8 @@ from typing import Any, Iterable
 import psycopg
 from dotenv import load_dotenv
 
+from spiritolo_common.supabase_client import warn_if_staging_url
+
 
 def _env_url() -> str:
     url = os.environ.get("SUPABASE_DB_URL")
@@ -30,7 +32,9 @@ class IngredientsDatabase:
     """Connection + queries for recipes -> recipe_ingredients."""
 
     def __init__(self, db_url: str | None = None):
-        self.conn = psycopg.connect(db_url or _env_url())
+        url = db_url or _env_url()
+        warn_if_staging_url(url)
+        self.conn = psycopg.connect(url)
 
     def close(self) -> None:
         self.conn.close()
