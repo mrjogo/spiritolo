@@ -20,7 +20,7 @@ from common.cli_common import (
 from common.progress import make_progress
 from common.summary import print_summary
 
-from scraper.classify_prompt import PROMPT_VERSION
+from scraper.classify_prompt import LABELS, PROMPT_VERSION, SYSTEM_PROMPT, build_user_message
 from scraper.db import Database
 from scraper.ollama_client import classify_url
 
@@ -134,6 +134,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--urls", nargs="+",
                    help="For --sample: look up these specific URLs instead of sampling. "
                         "Overrides --site/--category/--n.")
+    p.add_argument(
+        "--batch", action="store_true",
+        help="Use OpenAI Batch API. Only valid with --provider openai.",
+    )
+    p.add_argument(
+        "--ingest", metavar="BATCH_ID", default=None,
+        help="Ingest a previously submitted classify batch. Implies --batch.",
+    )
+    p.add_argument(
+        "--wait", action="store_true",
+        help="With --batch, poll until completed and ingest in one command.",
+    )
+    p.add_argument(
+        "--poll-interval", type=int, default=600,
+        help="With --wait, seconds between status polls (default: 600).",
+    )
     add_reset_args(p, stage="classify_url_runs")
     return p
 
@@ -278,11 +294,27 @@ def main(argv: list[str] | None = None) -> int:
     if args.sample:
         return _run_sample(args)
     if args.review:
+        if args.batch:
+            print("ERROR: --review is sync-only; cannot combine with --batch", file=sys.stderr)
+            return 2
         return _run_review(args)
     if args.reset:
         rc = _do_reset(args)
         if rc != 0:
             return rc
+
+    if args.batch and args.provider != "openai":
+        print("ERROR: --batch requires --provider openai", file=sys.stderr)
+        return 2
+    if args.ingest and not args.batch:
+        # --ingest implies --batch
+        args.batch = True
+    if args.wait and args.ingest:
+        print("ERROR: --wait and --ingest are mutually exclusive", file=sys.stderr)
+        return 2
+
+    if args.batch:
+        return run_batch(args)
     return run_main(args)
 
 
@@ -407,6 +439,162 @@ def _run_sample(args: argparse.Namespace) -> int:
 
 def _run_review(args: argparse.Namespace) -> int:
     return run_review(eval_path=DEFAULT_EVAL_PATH, provider=_build_provider(args))
+
+
+# ---------------------------------------------------------------------------
+# Batch (OpenAI Batch API) path
+# ---------------------------------------------------------------------------
+
+from common.llm.batch_provider import BatchProvider, BatchRequest
+from common.llm.batch_runner import (
+    BatchSubmitOutcome, ingest_batch, submit_batch,
+)
+
+
+def submit_classify_batch(
+    db: Database,
+    *,
+    provider: BatchProvider,
+    batches_dir: Path,
+    site: str | None,
+    limit: int | None,
+) -> BatchSubmitOutcome:
+    """Submit unclassified pages as an OpenAI batch."""
+    rows = db.get_unclassified(site=site, limit=limit)
+    if not rows:
+        raise RuntimeError("nothing pending; queue is empty")
+
+    payload = []
+    for r in rows:
+        user = build_user_message(r["url"], r.get("sitemap_source"))
+        payload.append((r["url"], SYSTEM_PROMPT, user))
+
+    return submit_batch(
+        provider=provider, rows=payload,
+        to_request=lambda i, p: BatchRequest(
+            custom_id=f"r{i}", system_prompt=p[1], user_prompt=p[2],
+        ),
+        row_to_id=lambda p: p[0],     # the URL
+        flow="scraper.classify.url",
+        version_constant=PROMPT_VERSION,
+        batches_dir=batches_dir,
+    )
+
+
+def ingest_classify_batch(
+    *,
+    db: Database,
+    provider: BatchProvider,
+    batch_id: str,
+    batches_dir: Path,
+    run_id: int | None = None,
+) -> dict[str, int]:
+    """Ingest results from a previously submitted classify batch."""
+    def on_result(row_id: str, raw_text: str | None, error: str | None) -> None:
+        url = row_id
+        if error or raw_text is None:
+            log.warning("classify batch error for %s: %s", url, error)
+            return
+        try:
+            payload = json.loads(raw_text)
+            label = payload.get("label")
+            if label not in LABELS:
+                log.warning("classify batch invalid label %r for %s", label, url)
+                return
+        except Exception as exc:
+            log.warning("classify batch parse failed for %s: %s", url, exc)
+            return
+
+        page_row = db.conn.execute(
+            "SELECT id, content_type FROM pages WHERE url = ?", (url,)
+        ).fetchone()
+        if page_row is None:
+            log.warning("classify batch URL no longer in pages: %s", url)
+            return
+        db.record_classify_url(
+            page_id=page_row["id"],
+            run_id=run_id,
+            label=label,
+            model=provider.model_id,
+            prompt_version=PROMPT_VERSION,
+            raw_response=raw_text,
+            latency_ms=0,    # batch path: latency not meaningful
+            pages_content_type_before=page_row["content_type"],
+        )
+
+    return ingest_batch(
+        provider=provider, batch_id=batch_id,
+        flow="scraper.classify.url",
+        version_constant=PROMPT_VERSION,
+        on_result=on_result,
+        batches_dir=batches_dir,
+    )
+
+
+def run_batch(args: argparse.Namespace) -> int:
+    import time
+
+    from common.interrupt import InterruptHandler
+    from common.llm.openai_batch import OpenAIBatchProvider
+
+    BATCHES_DIR = Path("data/batches")
+
+    db = Database(args.db)
+    try:
+        provider_kwargs = (
+            {"model_id": args.model}
+            if args.model and args.model != "qwen3:14b"
+            else {}
+        )
+        provider = OpenAIBatchProvider.from_env(**provider_kwargs)
+
+        if args.ingest:
+            counts = ingest_classify_batch(
+                db=db, provider=provider, batch_id=args.ingest,
+                batches_dir=BATCHES_DIR,
+            )
+            print_summary(
+                f"Classify ingest ({args.ingest})",
+                {"all": Counter(counts)},
+            )
+            return 0
+
+        outcome = submit_classify_batch(
+            db, provider=provider, batches_dir=BATCHES_DIR,
+            site=args.site, limit=args.limit,
+        )
+        print(
+            f"submitted batch {outcome.submission.batch_id} "
+            f"({outcome.submission.request_count} requests, model={outcome.submission.model_id})"
+        )
+        print(f"sidecar: {outcome.sidecar_path}")
+
+        if args.wait:
+            log.info("polling batch %s every %ds…", outcome.submission.batch_id, args.poll_interval)
+            with InterruptHandler() as interrupt:
+                while True:
+                    if interrupt.requested:
+                        log.info("interrupted; batch remains submitted, run --ingest later")
+                        return 0
+                    st = provider.status(outcome.submission.batch_id)
+                    log.info("status=%s (%d/%d)", st.state, st.completed, st.total)
+                    if st.state == "completed":
+                        break
+                    if st.state in ("failed", "expired", "cancelled"):
+                        log.error("batch ended in state %s", st.state)
+                        return 1
+                    time.sleep(args.poll_interval)
+            counts = ingest_classify_batch(
+                db=db, provider=provider, batch_id=outcome.submission.batch_id,
+                batches_dir=BATCHES_DIR,
+            )
+            print_summary(
+                f"Classify ingest ({outcome.submission.batch_id})",
+                {"all": Counter(counts)},
+            )
+        return 0
+    finally:
+        db.close()
 
 
 if __name__ == "__main__":
