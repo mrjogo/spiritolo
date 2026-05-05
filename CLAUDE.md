@@ -71,7 +71,22 @@ Stage CLIs (`fetch`, `classify`, `validate`, `extract`) share `--site` / `--limi
 
 ## Pipeline stages
 
-- **`classify.py`** — local ollama on `content_type IS NULL` rows. Iterate prompts via `--review` against the checked-in eval set; use `--sample` for spot-checks. Bump `PROMPT_VERSION` after edits.
+- **`classify.py`** — classifies `content_type IS NULL` rows via LLM. Provider: `--provider ollama` (local qwen3:14b, default), `--provider claude`, or `--provider openai`. Iterate prompts via `--review` against the checked-in eval set; use `--sample` for spot-checks. Bump `PROMPT_VERSION` after edits.
+
+  **Batch mode (OpenAI only):** 50% off real-time, ~24h SLA. Submit once, ingest later.
+
+  ```bash
+  # Submit and exit (prints batch_id + sidecar path).
+  cd scraper && uv run python -m scraper.classify --provider openai --batch --yes
+
+  # Ingest results after the batch completes.
+  cd scraper && uv run python -m scraper.classify --provider openai --batch --ingest <batch_id>
+
+  # One-shot: submit + poll + ingest inline (blocks until done).
+  cd scraper && uv run python -m scraper.classify --provider openai --batch --wait --yes
+  ```
+
+  Sidecar at `data/batches/<batch_id>.json` (gitignored). Lose it and you must re-derive from the OpenAI dashboard or re-submit.
 - **`validate.py`** — fetch runs validation + drink scoring inline, so this CLI exists only to re-evaluate cached HTML after a version bump.
 - **`extract.py`** — parses Schema.org Recipe JSON-LD into Supabase `recipes` at whatever `SUPABASE_DB_URL` points at. UPSERTs on `source_url`; re-runs are idempotent. To re-extract: clear `extract_runs` rows. Bulk runs follow the local-restore-then-upload flow — see [docs/upload.md](docs/upload.md).
 
@@ -122,7 +137,7 @@ Writes go to whatever `SUPABASE_DB_URL` points at. Bulk runs use the local-resto
 The mapper resolves `recipe_ingredients.name` strings to `taxonomy_nodes.id` references in two phases:
 
 - **Phase 1** (alias + lexical) runs eagerly with no external deps. Misses are marked `mapper_source='pending_llm'`.
-- **Phase 2** (LLM) is operator-triggered. Provider chosen at invocation: `--provider claude` (Anthropic, modest cost) or `--provider ollama` (local qwen3:14b, free). The CLI prints residual count + top-N before any external call.
+- **Phase 2** (LLM) is operator-triggered. Provider chosen at invocation: `--provider claude` (Anthropic, modest cost), `--provider ollama` (local qwen3:14b, free), or `--provider openai` (default gpt-5-mini). The CLI prints residual count + top-N before any external call.
 
 **Versioning:** `MAPPER_VERSION` in [mapping/mapper.py](ingredients/src/ingredients/mapping/mapper.py). Stored on every mapped row.
 
@@ -144,6 +159,12 @@ cd ingredients && uv run python -m ingredients.cli map --review
 # Phase 2 — drain the pending_llm queue with a provider. Confirms before any cost.
 cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider claude
 cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider ollama --limit 100
+cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider openai
+
+# Batch mode (OpenAI only): 50% off real-time, ~24h SLA.
+cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider openai --batch --yes
+cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider openai --batch --ingest <batch_id>
+cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider openai --batch --wait --yes
 
 # Walk the form-proposal review queue.
 cd ingredients && uv run python -m ingredients.cli map review-proposals
@@ -156,7 +177,7 @@ Brand/expression nodes auto-create silently when the LLM proposes one with an ex
 
 The eval set is `ingredients/src/ingredients/mapping/eval_set.py`, run against the fixture taxonomy in `ingredients/src/ingredients/mapping/eval_fixture.py` so eval results don't drift with seed changes.
 
-`ANTHROPIC_API_KEY` is required for `--provider claude`; `OLLAMA_BASE_URL` defaults to `http://localhost:11434` for `--provider ollama`.
+`ANTHROPIC_API_KEY` is required for `--provider claude`; `OLLAMA_BASE_URL` defaults to `http://localhost:11434` for `--provider ollama`; `OPENAI_API_KEY` is required for `--provider openai` (defaults to model `gpt-5-mini`, override with `--model <id>`).
 
 Writes go to whatever `SUPABASE_DB_URL` points at — including the LLM-resolved nodes Phase 2 auto-creates. Bulk runs (especially Phase 2, which costs money) use the local-restore-then-upload flow — see [docs/upload.md](docs/upload.md).
 
@@ -180,6 +201,12 @@ cd ingredients && uv run python -m ingredients.cli normalize-names list-pending 
 # Phase 2: drain the pending_llm queue with a chosen provider.
 cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider ollama
 cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider claude
+cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider openai
+
+# Batch mode (OpenAI only): 50% off real-time, ~24h SLA.
+cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider openai --batch --yes
+cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider openai --batch --ingest <batch_id>
+cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider openai --batch --wait --yes
 
 # Cluster compute. Tags roles, computes cluster + variant keys,
 # writes recipe_clusters / recipes.cluster_id / recipes.variant_key.
