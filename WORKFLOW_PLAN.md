@@ -35,19 +35,24 @@ public-schema table. Required so the uploader can compute the dirty set as
 
 ---
 
-## Pre-work — Deferrable public-schema FKs
+## Pre-work — Deferrable FKs for the recipes / recipe_clusters cycle
 
-**Goal.** Make every `FOREIGN KEY` in the `public` schema
+**Goal.** Make exactly the two FKs in the `recipes ↔ recipe_clusters` cycle
 `DEFERRABLE INITIALLY IMMEDIATE` so the uploader can issue
 `SET CONSTRAINTS ALL DEFERRED` inside its serializable transaction. Without
 this, the cycle between `recipes.cluster_id` and
 `recipe_clusters.representative_recipe_id` blocks any UPSERT batch that
-touches both sides — and any future cycle would block the same way.
+touches both sides.
 
-**Scope.** One migration that loops over `information_schema.table_constraints`
-for `FOREIGN KEY`s in `public`, drops each, re-adds it as
-`DEFERRABLE INITIALLY IMMEDIATE`. `INITIALLY IMMEDIATE` keeps default
-behavior for normal queries unchanged.
+**Scope.** One migration that uses `ALTER TABLE ... ALTER CONSTRAINT ...
+DEFERRABLE INITIALLY IMMEDIATE` on the two named constraints
+(`recipes_cluster_id_fkey`, `recipe_clusters_representative_recipe_id_fkey`).
+`ALTER CONSTRAINT` is metadata-only — no row is touched, no validation
+re-pass is needed, no FK protection is dropped at any moment.
+`INITIALLY IMMEDIATE` keeps default behavior for every write path;
+`SET CONSTRAINTS ALL DEFERRED` is a no-op on FKs that aren't deferrable,
+so the broader schema is unaffected. Future cycles will need the same
+treatment per-cycle in their own migrations.
 
 **Blocks.** Stage 2's `--apply` path. Smoke tests for Stage 2 cannot exercise
 the deferred-constraint path against staging until this is deployed there.

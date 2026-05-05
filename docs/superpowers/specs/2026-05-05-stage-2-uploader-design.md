@@ -42,25 +42,42 @@ trigger to every public-schema table. Lives at
 [supabase/migrations/20260505040811_add_updated_at.sql](../../../supabase/migrations/20260505040811_add_updated_at.sql).
 Required so the uploader can compute the dirty set.
 
-### Migration 2 — Deferrable FKs across the public schema
+### Migration 2 — Deferrable FKs for the recipes / recipe_clusters cycle
 
 **Why.** `recipes.cluster_id ↔ recipe_clusters.representative_recipe_id`
 forms a cycle in the FK graph. After a local `cluster` run, both sides of
-the cycle land in the dirty set referencing each other. Current FKs are
-NOT DEFERRABLE, so an UPSERT batched across both tables cannot satisfy
-constraints in any single statement order. Making the FKs
+the cycle land in the dirty set referencing each other. With NOT
+DEFERRABLE FKs, an UPSERT batched across both tables cannot satisfy
+constraints in any single statement order. Making just those two FKs
 `DEFERRABLE INITIALLY IMMEDIATE` lets the uploader issue
-`SET CONSTRAINTS ALL DEFERRED` inside its transaction; constraints are
-checked at COMMIT instead of after each row, breaking the ordering
-problem. `INITIALLY IMMEDIATE` keeps default semantics for normal
-application queries — only the uploader's explicit `SET CONSTRAINTS`
-changes behavior.
+`SET CONSTRAINTS ALL DEFERRED` inside its transaction — constraints are
+then checked at COMMIT for these two FKs only, breaking the ordering
+problem. `INITIALLY IMMEDIATE` keeps default semantics for every other
+write path; only the uploader's explicit `SET CONSTRAINTS` changes
+behavior, and `SET CONSTRAINTS ALL DEFERRED` is a no-op on FKs that are
+not deferrable, so the broader schema is unaffected.
 
-**Scope.** A single migration that loops over
-`information_schema.table_constraints` for every `FOREIGN KEY` in the
-public schema, drops it, and re-adds the same constraint with
-`DEFERRABLE INITIALLY IMMEDIATE`. Generic over the current schema and any
-future cycles.
+**Scope.** A single migration that uses `ALTER TABLE ... ALTER CONSTRAINT
+... DEFERRABLE INITIALLY IMMEDIATE` on exactly two named constraints:
+
+- `recipes_cluster_id_fkey` (on `public.recipes`)
+- `recipe_clusters_representative_recipe_id_fkey` (on `public.recipe_clusters`)
+
+`ALTER CONSTRAINT` is metadata-only — no row is touched, no validation
+re-pass is needed, no FK protection is dropped at any moment. The
+migration also includes a verification step that asserts both constraints
+ended in the expected `condeferrable = true / condeferred = false` state.
+
+**Why named-and-targeted instead of generic-over-information_schema.**
+Two reasons. (1) Smallest blast radius: only the FKs we actually need
+become deferrable; everything else stays exactly as-is. (2) Better
+auditability: anyone reading the schema can see "these two FKs are
+deferrable, both because of the recipes/cluster cycle" instead of a
+schema-wide property they have to reason about. The cost of remembering
+to make a future cycle's FKs deferrable is small — when a future cycle
+is added, the uploader will fail loudly on its first run with an FK
+error pointing at the exact constraint, and the fix is one ALTER in
+that cycle's own migration.
 
 **Where it lands.** Its own PR, merged to `main` and promoted to `staging`
 before the uploader PR lands. Both pre-work migrations must be applied to
@@ -413,11 +430,13 @@ to deploy via the existing `deploy-migrations.yml` workflow.
   literals (no need for them).
 - **PEP 723 + uv adoption.** `uv run --script` is supported in current
   uv; the rest of the project uses uv. No risk.
-- **A′ migration runs DO blocks.** The migration is reentrant: dropping
-  and re-adding a constraint with the same name is idempotent over
-  re-applies (the reissued constraint is itself `DEFERRABLE`, so a
-  second run is a no-op modulo existing-name detection). Worth a small
-  guard in the DO block: skip if `is_deferrable = 'YES'` already.
+- **A′ migration uses `ALTER CONSTRAINT`.** Metadata-only, no row is
+  touched, no FK protection is dropped. Idempotent — running the
+  migration a second time leaves the constraints in the same already-
+  deferrable state. The post-ALTER verification step asserts both
+  constraints are `condeferrable = true / condeferred = false`; if a
+  constraint name diverges from the expected default in some future
+  schema, the migration fails loudly rather than silently no-op'ing.
 
 ## Success criteria
 
