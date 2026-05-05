@@ -3,6 +3,13 @@
 # is migration-managed; this script just refreshes the data, leaving
 # `public.profiles` (excluded from the dump; FKs auth.users) untouched.
 #
+# Uses `session_replication_role = replica` instead of pg_restore's
+# `--disable-triggers` because the latter calls ALTER TABLE DISABLE
+# TRIGGER ALL, which fails on the FK constraint triggers ("system
+# triggers") with the local Supabase postgres role. The session-level
+# flag has the same effect (no FK / user trigger firing during the load)
+# and works around the recipes ↔ recipe_clusters circular FK.
+#
 # Usage: scripts/restore-local.sh <dump-file>
 set -euo pipefail
 
@@ -38,8 +45,10 @@ if [[ -f "$SIDECAR" ]]; then
   fi
 fi
 
-echo "Truncating public.* (except profiles)..."
-psql "$DB_URL" -v ON_ERROR_STOP=1 <<'SQL'
+echo "Restoring data from $DUMP..."
+{
+  echo "SET LOCAL session_replication_role = replica;"
+  cat <<'SQL'
 do $$
 declare r record;
 begin
@@ -51,13 +60,7 @@ begin
   end loop;
 end$$;
 SQL
-
-echo "Restoring data from $DUMP..."
-pg_restore \
-  --dbname="$DB_URL" \
-  --data-only --disable-triggers \
-  --no-owner --no-privileges \
-  --single-transaction \
-  "$DUMP"
+  pg_restore --data-only --no-owner --no-privileges -f - "$DUMP"
+} | psql "$DB_URL" -v ON_ERROR_STOP=1 --single-transaction --quiet
 
 echo "Done."
