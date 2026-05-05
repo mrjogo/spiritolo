@@ -216,7 +216,7 @@ Schema is the only thing that flows local → staging (via the migrations CI wor
 **Local dev** has two viable shapes:
 
 - **Schema-only:** `supabase db reset` is enough. You get the migrated schema, the auto-seeded reference data (taxonomy nodes, cocktail aliases, dev admin user), and an empty `recipes` table. Fine for UI work and migration writing.
-- **Schema + a snapshot of staging data:** `pg_dump` from staging into local for offline pipeline work. Ad-hoc — script it when the need is recurring.
+- **Schema + a snapshot of staging data:** restore a `scripts/backup-supabase.sh` dump into the local DB. See [docs/backups.md](docs/backups.md).
 
 The `supabase/seeds/recipes.sql` file is a frozen pg_dump from before this model was adopted. Useful as a one-shot way to populate a fresh local DB with the historical corpus; not refreshed.
 
@@ -253,6 +253,12 @@ migration changes to staging when `staging` advances. Requires the
 **Auth:** Magic-link only, no self-signup. Create users from Supabase
 Studio (Authentication → Users → Invite). After their first sign-in,
 flip `profiles.is_admin` in the table editor to grant admin access.
+
+**Backups:** [scripts/backup-supabase.sh](scripts/backup-supabase.sh)
+runs `pg_dump` of staging's `public` schema (excluding `profiles`).
+Manual locally; via the `Backup staging database` GH Action in CI
+(currently `workflow_dispatch`-only). Restore flow + caveats in
+[docs/backups.md](docs/backups.md).
 
 See [docs/deployment.md](docs/deployment.md) for the full picture
 (Vercel project + URL, Supabase project URL, Resend constraints).

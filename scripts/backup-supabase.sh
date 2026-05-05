@@ -7,8 +7,11 @@
 # Local: source the repo .env first, then `./scripts/backup-supabase.sh`.
 # CI:    set SUPABASE_STAGING_DB_URL in the workflow env.
 #
-# Restore: `pg_restore --clean --if-exists --no-owner --no-privileges \
-#                     --dbname="$TARGET_URL" path/to/file.dump`
+# Quick restore:
+#   pg_restore --clean --if-exists --no-owner --no-privileges \
+#              --single-transaction --dbname="$TARGET_URL" path/to/file.dump
+#
+# Full backup + restore docs: docs/backups.md
 set -euo pipefail
 
 usage() {
