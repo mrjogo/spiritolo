@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from ollama import AsyncClient
 
-from scraper.src.classify_prompt import (
+from scraper.classify_prompt import (
     LABELS,
     RESPONSE_SCHEMA,
     SYSTEM_PROMPT,

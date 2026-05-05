@@ -8,9 +8,9 @@ from dotenv import load_dotenv
 from common.cli_common import (
     add_reset_args, confirm_reset, describe_reset_scope,
 )
-from scraper.src.db import Database
+from scraper.db import Database
 from common.progress import make_progress
-from scraper.src.structured import find_recipe
+from scraper.structured import find_recipe
 from common.summary import print_summary
 from common.supabase_client import SupabaseClient
 

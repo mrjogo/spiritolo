@@ -31,11 +31,11 @@ from pathlib import Path
 from common.cli_common import (
     add_reset_args, confirm_reset, describe_reset_scope,
 )
-from scraper.src.classify_drink import SCORER_VERSION, classify_drink_scored
-from scraper.src.db import Database
+from scraper.classify_drink import SCORER_VERSION, classify_drink_scored
+from scraper.db import Database
 from common.progress import make_progress
 from common.summary import print_summary
-from scraper.src.validation import VALIDATOR_VERSION, validate
+from scraper.validation import VALIDATOR_VERSION, validate
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"

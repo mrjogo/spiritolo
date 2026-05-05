@@ -1,9 +1,9 @@
 import requests
 import responses
 
-from scraper.src.client import ScraperAPIClient, ScraperAPIError
-from scraper.src.db import Database
-from scraper.src.discover import SmartFetcher, discover_sitemap, load_sites_config, probe_sitemap
+from scraper.client import ScraperAPIClient, ScraperAPIError
+from scraper.db import Database
+from scraper.discover import SmartFetcher, discover_sitemap, load_sites_config, probe_sitemap
 
 
 SAMPLE_SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>

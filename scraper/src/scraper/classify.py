@@ -17,12 +17,12 @@ from typing import Awaitable, Callable
 
 from ollama import AsyncClient
 
-from scraper.src.classify_prompt import PROMPT_VERSION
+from scraper.classify_prompt import PROMPT_VERSION
 from common.cli_common import (
     add_reset_args, confirm_reset, describe_reset_scope,
 )
-from scraper.src.db import Database
-from scraper.src.ollama_client import ClassificationResult, classify_url
+from scraper.db import Database
+from scraper.ollama_client import ClassificationResult, classify_url
 from common.progress import make_progress
 from common.summary import print_summary
 

@@ -5,7 +5,7 @@ from unittest.mock import MagicMock
 import pytest
 from dotenv import load_dotenv
 
-from scraper.src.db import Database
+from scraper.db import Database
 
 # Load .env from repo root so SUPABASE_DB_URL is available.
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
@@ -49,7 +49,7 @@ def seeded_scraper_db(tmp_db, tmp_path):
 
 @requires_supabase
 def test_extract_writes_recipe_and_marks_rows(seeded_scraper_db, isolated_supabase):
-    from scraper.src.extract import extract_pages
+    from scraper.extract import extract_pages
     db, html_dir = seeded_scraper_db
     changes = extract_pages(db=db, sb=isolated_supabase, html_dir=html_dir)
 
@@ -67,7 +67,7 @@ def test_extract_writes_recipe_and_marks_rows(seeded_scraper_db, isolated_supaba
 
 @requires_supabase
 def test_extract_upsert_is_idempotent(seeded_scraper_db, isolated_supabase):
-    from scraper.src.extract import extract_pages
+    from scraper.extract import extract_pages
     db, html_dir = seeded_scraper_db
     extract_pages(db=db, sb=isolated_supabase, html_dir=html_dir)
 
@@ -103,7 +103,7 @@ def test_extract_skips_rows_already_in_supabase(tmp_db, tmp_path):
     """A page with an extract_runs row marked 'extracted' that is ALSO
     present in Supabase must not be re-uploaded. Supabase membership is the
     skip gate, not the local audit row."""
-    from scraper.src.extract import extract_pages
+    from scraper.extract import extract_pages
 
     (tmp_path / "difs").mkdir(parents=True)
     (tmp_path / "difs" / "x.html").write_text((FIXTURES / "standard.html").read_text())
@@ -132,7 +132,7 @@ def test_extract_reuploads_when_supabase_has_been_wiped(tmp_db, tmp_path):
     but Supabase's recipes table has been reset. The page must be
     re-extracted and re-uploaded; Supabase is the source of truth, not
     extract_runs."""
-    from scraper.src.extract import extract_pages
+    from scraper.extract import extract_pages
 
     (tmp_path / "difs").mkdir(parents=True)
     (tmp_path / "difs" / "x.html").write_text((FIXTURES / "standard.html").read_text())
@@ -162,7 +162,7 @@ def test_extract_skips_known_failures_even_when_not_in_supabase(tmp_db, tmp_path
     """A page marked 'no_recipe' locally stays skipped across runs — the
     HTML hasn't changed, so the outcome won't change either. To retry it
     (e.g. after bumping EXTRACTOR_VERSION), delete the extract_runs row."""
-    from scraper.src.extract import extract_pages
+    from scraper.extract import extract_pages
 
     (tmp_path / "difs").mkdir(parents=True)
     (tmp_path / "difs" / "x.html").write_text((FIXTURES / "no_jsonld.html").read_text())
@@ -188,7 +188,7 @@ def test_extract_skips_known_failures_even_when_not_in_supabase(tmp_db, tmp_path
 def test_extract_processes_fresh_page(tmp_db, tmp_path):
     """A page with no extract_runs row and not in Supabase is the baseline
     'new work' case."""
-    from scraper.src.extract import extract_pages
+    from scraper.extract import extract_pages
 
     (tmp_path / "difs").mkdir(parents=True)
     (tmp_path / "difs" / "x.html").write_text((FIXTURES / "standard.html").read_text())

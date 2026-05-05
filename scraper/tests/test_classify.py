@@ -3,16 +3,16 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from scraper.src.classify import classify_one, run_classify_pool
-from scraper.src.db import Database
-from scraper.src.ollama_client import ClassificationResult
+from scraper.classify import classify_one, run_classify_pool
+from scraper.db import Database
+from scraper.ollama_client import ClassificationResult
 
 
 # ---------------------------------------------------------------------------
 # CLI arg parser tests (Task 10)
 # ---------------------------------------------------------------------------
 
-from scraper.src.classify import build_arg_parser
+from scraper.classify import build_arg_parser
 
 
 def test_arg_parser_defaults():
@@ -185,7 +185,7 @@ async def test_run_main_processes_in_batches(tmp_db, monkeypatch):
     fake_classify = AsyncMock(return_value=ClassificationResult(
         label="likely_drink_recipe", raw_response="{}", latency_ms=1,
     ))
-    monkeypatch.setattr("scraper.src.classify.classify_url", fake_classify)
+    monkeypatch.setattr("scraper.classify.classify_url", fake_classify)
 
     parser = build_arg_parser()
     args = parser.parse_args([
@@ -194,7 +194,7 @@ async def test_run_main_processes_in_batches(tmp_db, monkeypatch):
         "--concurrency", "2",
     ])
 
-    from scraper.src.classify import run_main
+    from scraper.classify import run_main
     rc = await run_main(args)
     assert rc == 0
 
@@ -217,7 +217,7 @@ async def test_run_main_respects_overall_limit(tmp_db, monkeypatch):
     fake_classify = AsyncMock(return_value=ClassificationResult(
         label="likely_junk", raw_response="{}", latency_ms=1,
     ))
-    monkeypatch.setattr("scraper.src.classify.classify_url", fake_classify)
+    monkeypatch.setattr("scraper.classify.classify_url", fake_classify)
 
     parser = build_arg_parser()
     args = parser.parse_args([
@@ -225,7 +225,7 @@ async def test_run_main_respects_overall_limit(tmp_db, monkeypatch):
         "--batch-size", "3",
         "--limit", "5",
     ])
-    from scraper.src.classify import run_main
+    from scraper.classify import run_main
     await run_main(args)
 
     assert fake_classify.await_count == 5
@@ -269,7 +269,7 @@ async def test_run_classify_pool_respects_concurrency_limit(tmp_db):
 # Review mode tests (Task 11)
 # ---------------------------------------------------------------------------
 
-from scraper.src.classify import load_eval_set, run_review
+from scraper.classify import load_eval_set, run_review
 
 
 def test_load_eval_set_parses_jsonl(tmp_path):
@@ -309,7 +309,7 @@ async def test_run_review_reports_pass_and_fail_counts(tmp_path, capsys):
 # Sample mode tests (Task 12)
 # ---------------------------------------------------------------------------
 
-from scraper.src.classify import run_sample
+from scraper.classify import run_sample
 
 
 def test_run_sample_prints_matching_rows(tmp_db, capsys):
@@ -344,7 +344,7 @@ def test_run_sample_prints_matching_rows(tmp_db, capsys):
 # Task 13: End-to-end smoke test
 # ---------------------------------------------------------------------------
 
-from scraper.src.classify_prompt import PROMPT_VERSION
+from scraper.classify_prompt import PROMPT_VERSION
 
 
 @pytest.mark.asyncio
@@ -404,12 +404,12 @@ async def test_run_main_aborts_when_batch_produces_zero_successes(tmp_db, monkey
     db.close()
 
     always_fails = AsyncMock(side_effect=OSError("ollama unreachable"))
-    monkeypatch.setattr("scraper.src.classify.classify_url", always_fails)
+    monkeypatch.setattr("scraper.classify.classify_url", always_fails)
 
     parser = build_arg_parser()
     args = parser.parse_args(["--db", str(tmp_db), "--batch-size", "3"])
 
-    from scraper.src.classify import run_main
+    from scraper.classify import run_main
     rc = await run_main(args)
 
     assert rc == 1
@@ -461,12 +461,12 @@ async def test_run_main_uses_one_shared_ollama_client_across_batches(tmp_db, mon
         async def chat(self, *args, **kwargs):
             return {"message": {"content": '{"label": "likely_drink_recipe"}'}, "done": True}
 
-    monkeypatch.setattr("scraper.src.classify.AsyncClient", CountingClient)
-    monkeypatch.setattr("scraper.src.ollama_client.AsyncClient", CountingClient)
+    monkeypatch.setattr("scraper.classify.AsyncClient", CountingClient)
+    monkeypatch.setattr("scraper.ollama_client.AsyncClient", CountingClient)
 
     parser = build_arg_parser()
     args = parser.parse_args(["--db", str(tmp_db), "--batch-size", "2", "--concurrency", "2"])
-    from scraper.src.classify import run_main
+    from scraper.classify import run_main
     rc = await run_main(args)
 
     assert rc == 0

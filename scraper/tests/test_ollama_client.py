@@ -2,8 +2,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from scraper.src.classify_prompt import LABELS
-from scraper.src.ollama_client import ClassificationResult, classify_url
+from scraper.classify_prompt import LABELS
+from scraper.ollama_client import ClassificationResult, classify_url
 
 
 @pytest.fixture
@@ -21,7 +21,7 @@ async def test_classify_url_returns_parsed_label(fake_ollama_response):
     mock_client = AsyncMock()
     mock_client.chat = AsyncMock(return_value=fake_ollama_response)
 
-    with patch("scraper.src.ollama_client.AsyncClient", return_value=mock_client):
+    with patch("scraper.ollama_client.AsyncClient", return_value=mock_client):
         result = await classify_url(
             url="https://example.com/recipe/1",
             sitemap_source="recipes.xml",
@@ -38,7 +38,7 @@ async def test_classify_url_sends_system_and_user_messages(fake_ollama_response)
     mock_client = AsyncMock()
     mock_client.chat = AsyncMock(return_value=fake_ollama_response)
 
-    with patch("scraper.src.ollama_client.AsyncClient", return_value=mock_client):
+    with patch("scraper.ollama_client.AsyncClient", return_value=mock_client):
         await classify_url("https://example.com/x", "s.xml", "qwen3:14b")
 
     call = mock_client.chat.await_args
@@ -58,7 +58,7 @@ async def test_classify_url_raises_on_invalid_label():
     mock_client = AsyncMock()
     mock_client.chat = AsyncMock(return_value=bad)
 
-    with patch("scraper.src.ollama_client.AsyncClient", return_value=mock_client):
+    with patch("scraper.ollama_client.AsyncClient", return_value=mock_client):
         with pytest.raises(ValueError, match="invalid label"):
             await classify_url("https://example.com/x", None, "qwen3:14b")
 
@@ -68,7 +68,7 @@ async def test_classify_url_uses_supplied_client_instead_of_constructing(fake_ol
     supplied = AsyncMock()
     supplied.chat = AsyncMock(return_value=fake_ollama_response)
 
-    with patch("scraper.src.ollama_client.AsyncClient") as MockClass:
+    with patch("scraper.ollama_client.AsyncClient") as MockClass:
         result = await classify_url(
             url="https://example.com/x",
             sitemap_source=None,
@@ -86,6 +86,6 @@ async def test_classify_url_raises_on_malformed_json():
     mock_client = AsyncMock()
     mock_client.chat = AsyncMock(return_value=bad)
 
-    with patch("scraper.src.ollama_client.AsyncClient", return_value=mock_client):
+    with patch("scraper.ollama_client.AsyncClient", return_value=mock_client):
         with pytest.raises(ValueError, match="malformed"):
             await classify_url("https://example.com/x", None, "qwen3:14b")

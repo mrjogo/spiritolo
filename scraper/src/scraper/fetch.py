@@ -12,10 +12,10 @@ from common.interrupt import InterruptHandler
 from common.progress import make_progress
 from common.summary import print_summary
 
-from scraper.src.classify_drink import SCORER_VERSION, classify_drink_scored
-from scraper.src.client import ScraperAPIClient, ScraperAPIError, AuthError, QuotaExhaustedError
-from scraper.src.db import Database
-from scraper.src.validation import VALIDATOR_VERSION, validate
+from scraper.classify_drink import SCORER_VERSION, classify_drink_scored
+from scraper.client import ScraperAPIClient, ScraperAPIError, AuthError, QuotaExhaustedError
+from scraper.db import Database
+from scraper.validation import VALIDATOR_VERSION, validate
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 

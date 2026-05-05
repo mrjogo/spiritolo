@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from scraper.src.db import migrate
+from scraper.db import migrate
 
 
 # Tripwire: tests must never run against the real scraper.db. The path

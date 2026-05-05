@@ -2,7 +2,7 @@ import os
 
 import responses
 
-from scraper.src.client import AuthError, ScraperAPIClient, ScraperAPIError
+from scraper.client import AuthError, ScraperAPIClient, ScraperAPIError
 
 
 @responses.activate
@@ -38,7 +38,7 @@ def test_fetch_raises_on_500():
 
 @responses.activate
 def test_fetch_raises_QuotaExhaustedError_on_403():
-    from scraper.src.client import QuotaExhaustedError
+    from scraper.client import QuotaExhaustedError
     responses.add(
         responses.GET,
         "https://api.scraperapi.com",
@@ -83,7 +83,7 @@ def test_client_raises_without_api_key(monkeypatch):
 
 @responses.activate
 def test_fetch_raises_AuthError_on_401():
-    from scraper.src.client import AuthError
+    from scraper.client import AuthError
     responses.add(
         responses.GET,
         "https://api.scraperapi.com",
@@ -99,12 +99,12 @@ def test_fetch_raises_AuthError_on_401():
 
 
 def test_AuthError_is_ScraperAPIError_subclass():
-    from scraper.src.client import AuthError
+    from scraper.client import AuthError
     assert issubclass(AuthError, ScraperAPIError)
 
 
 def test_QuotaExhaustedError_is_ScraperAPIError_subclass():
-    from scraper.src.client import QuotaExhaustedError
+    from scraper.client import QuotaExhaustedError
     assert issubclass(QuotaExhaustedError, ScraperAPIError)
 
 

@@ -23,7 +23,7 @@ import json
 import sys
 from pathlib import Path
 
-from scraper.src.db import Database
+from scraper.db import Database
 
 DB_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "scraper.db"
 
