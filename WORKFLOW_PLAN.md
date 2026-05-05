@@ -103,7 +103,7 @@ restore — there is no separate "seed locally" path anymore.
 
 ---
 
-## Stage 2 — Build the uploader script
+## Stage 2 — Build the uploader script *(shipped)*
 
 **Goal.** Implement `scripts/upload-to-staging.sh` (or `.py` — session
 chooses). All protections live here.
