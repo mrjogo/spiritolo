@@ -7,9 +7,8 @@ FROM mcr.microsoft.com/devcontainers/python:3.12
 
 # Install tmux for session persistence (Claude Code sessions survive IDE
 # disconnects), jq for hook payloads (parses hook stdin JSON), and
-# postgresql-client for psql (needed to load supabase/seeds/recipes.sql,
-# a pg_dump file with `\restrict` and other meta-commands that raw psycopg
-# cannot parse).
+# postgresql-client for psql + pg_restore (needed to restore staging
+# backups locally — see docs/backups.md).
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \

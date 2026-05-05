@@ -32,11 +32,7 @@ supabase migration list
 supabase db push --include-all
 ```
 
-Use `migration up` when you want to add new migrations without losing local processed data; `db reset` wipes and replays everything. The reset auto-seeds only the files listed in `supabase/config.toml` under `db.seed.sql_paths` — `recipes.sql` is excluded because it's a `pg_dump` file. After a reset, restore recipes via `psql` from the devcontainer:
-
-```bash
-psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f supabase/seeds/recipes.sql
-```
+Use `migration up` when you want to add new migrations without losing local processed data; `db reset` wipes and replays migrations only — there are no seed files. To populate local with realistic data (taxonomy, cocktail aliases, recipes, etc.), restore a staging backup; see [docs/backups.md](docs/backups.md).
 
 (If you ever need to invoke the `supabase` CLI from inside the devcontainer — uncommon — its Go resolver picks an IPv6 form of `host.docker.internal` that isn't routable, and it defaults to TLS which the local Postgres rejects. Both surface as `tls error (server refused TLS connection)`. Workaround: pass `--db-url` with your container's gateway IPv4 plus `?sslmode=disable`. The literal varies by environment — `getent hosts host.docker.internal` and `ip route` show what's reachable from your container.)
 
@@ -88,7 +84,7 @@ Two non-obvious rules worth surfacing here (full treatment in the doc):
 - **Brand and product names always get their own nodes** (`node_kind='brand'` / `'expression'`), never aliases. Aliases are reserved for capitalization/punctuation/language variants of one canonical name, plus the brand-as-substance carve-out (`'aromatic bitters'` → `angostura_bitters`).
 - **`is_cluster_node` cuts the DAG asymmetrically.** A type node is the cluster identity in some branches (`orange_bitters`, `bourbon`); an expression node is the cluster identity in others (`angostura_bitters`, `peychauds_bitters` — brand-as-substance). The only invariant: no `is_cluster_node` node has an `is_cluster_node` ancestor.
 
-Add by editing `supabase/seeds/taxonomy_nodes.sql` (local dev only — Supabase doesn't apply seed files to prod) and re-running `supabase db reset`.
+Taxonomy nodes are managed on staging via the curation UI; they are not maintained as local seed files. To work against current reference data locally, restore a fresh `scripts/backup-supabase.sh` dump (see [docs/backups.md](docs/backups.md)).
 
 ## Ingredient Parser
 
@@ -205,7 +201,7 @@ cd ingredients && uv run python -m ingredients.cli normalize-names --reset --exc
 cd ingredients && uv run python -m ingredients.cli cluster --reset --except-version v1 --yes
 ```
 
-The canonical-name pool grows bottom-up: the seed in [supabase/seeds/taxonomy_nodes.sql](supabase/seeds/taxonomy_nodes.sql) ships ~20 well-known cocktails as `cocktail_aliases`; LLM resolutions add to it.
+The canonical-name pool grows bottom-up on staging: ~20 well-known cocktails are bootstrapped as `cocktail_aliases`, and LLM resolutions add to it. Restore a staging backup to get the current pool locally.
 
 The eval set is [dedup/eval_set.py](ingredients/src/ingredients/dedup/eval_set.py), run against the fixture taxonomy in [dedup/eval_fixture.py](ingredients/src/ingredients/dedup/eval_fixture.py) so eval results don't drift with seed changes.
 
@@ -215,10 +211,8 @@ Schema is the only thing that flows local → staging (via the migrations CI wor
 
 **Local dev** has two viable shapes:
 
-- **Schema-only:** `supabase db reset` is enough. You get the migrated schema, the auto-seeded reference data (taxonomy nodes, cocktail aliases, dev admin user), and an empty `recipes` table. Fine for UI work and migration writing.
-- **Schema + a snapshot of staging data:** restore a `scripts/backup-supabase.sh` dump into the local DB. See [docs/backups.md](docs/backups.md).
-
-The `supabase/seeds/recipes.sql` file is a frozen pg_dump from before this model was adopted. Useful as a one-shot way to populate a fresh local DB with the historical corpus; not refreshed.
+- **Schema-only:** `supabase db reset` is enough. You get the migrated schema and empty tables. Fine for UI work and migration writing, but you'll need to re-invite an admin via Studio after the reset to use anything that requires auth.
+- **Schema + a snapshot of staging data:** restore a `scripts/backup-supabase.sh` dump into the local DB. This is the only way to get current reference data (taxonomy, cocktail aliases) and any pipeline output locally. See [docs/backups.md](docs/backups.md).
 
 ## Hosting
 
