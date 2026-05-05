@@ -312,10 +312,10 @@ def run_resolve_pending(args: argparse.Namespace) -> int:
                 return 1
 
         if args.provider == "claude":
-            from ingredients.mapping.llm_provider_claude import ClaudeProvider
+            from common.llm.claude import ClaudeProvider
             provider = ClaudeProvider.from_env()
         else:
-            from ingredients.mapping.llm_provider_ollama import OllamaProvider
+            from common.llm.ollama import OllamaProvider
             provider = OllamaProvider.from_env()
 
         summary = run_phase2(db.conn, provider=provider, limit=args.limit)
@@ -523,10 +523,10 @@ def run_normalize_names(args: argparse.Namespace) -> int:
                     log.info("aborted by operator")
                     return 1
             if args.provider == "claude":
-                from ingredients.mapping.llm_provider_claude import ClaudeProvider
+                from common.llm.claude import ClaudeProvider
                 provider = ClaudeProvider.from_env()
             else:
-                from ingredients.mapping.llm_provider_ollama import OllamaProvider
+                from common.llm.ollama import OllamaProvider
                 provider = OllamaProvider.from_env()
             limit = getattr(args, "limit", None)
             counts = run_phase2(db.conn, provider=provider, limit=limit)

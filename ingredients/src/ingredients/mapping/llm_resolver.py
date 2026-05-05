@@ -11,14 +11,15 @@ Branching by LLM action:
 from __future__ import annotations
 
 import logging
-import time
 from collections import Counter
 
 import psycopg
 
+from common.llm import LLMProvider
+from common.llm.retry import resolve_with_retry as _resolve_with_retry_helper
+
 from .db import fetch_pending_llm_names, write_abstain, write_resolution
 from .lexical_layer import lexical_candidates
-from .llm_provider import LLMProvider
 from .mapper import MAPPER_VERSION
 from .normalize import normalize_name
 from .prompt import (
@@ -95,45 +96,6 @@ def _create_brand_node(
     return new_id
 
 
-def _resolve_with_retry(
-    provider: LLMProvider, *, system_prompt: str, user_prompt: str,
-    normalized_name: str, max_attempts: int = 3,
-    parse_fn=None,
-) -> dict | None:
-    """Call provider + parse; retry on any exception with exponential backoff.
-    Returns the parsed action dict, or None if all attempts failed.
-
-    ``parse_fn`` defaults to this module's ``parse_response``. Callers with a
-    different action vocabulary (e.g. dedup) can pass their own parser so that
-    the retry loop validates against the right set of actions."""
-    _parse = parse_fn if parse_fn is not None else parse_response
-    for attempt in range(max_attempts):
-        try:
-            raw = provider.resolve(
-                system_prompt=system_prompt, user_prompt=user_prompt,
-            ).raw_text
-            return _parse(raw)
-        except Exception as exc:
-            if attempt + 1 == max_attempts:
-                log.error(
-                    "LLM call exhausted retries for %r: %s",
-                    normalized_name, exc,
-                )
-                return None
-            sleep_for = 2 ** attempt   # 1s, 2s, 4s
-            log.warning(
-                "LLM call failed for %r (attempt %d/%d): %s — retrying in %ds",
-                normalized_name, attempt + 1, max_attempts, exc, sleep_for,
-            )
-            time.sleep(sleep_for)
-    return None
-
-
-# Public re-export so other stages (e.g. dedup) can reuse the retry helper
-# without depending on the orchestrator details.
-resolve_with_retry = _resolve_with_retry
-
-
 def run_phase2(
     conn: psycopg.Connection,
     *,
@@ -163,10 +125,11 @@ def run_phase2(
             user_prompt = build_user_prompt(
                 normalized_name=normalized, parser_unit=None, site=site, candidates=cands,
             )
-            action_obj = _resolve_with_retry(
+            action_obj = _resolve_with_retry_helper(
                 provider,
                 system_prompt=SYSTEM_PROMPT, user_prompt=user_prompt,
                 normalized_name=normalized,
+                parse_fn=parse_response,    # already imported from .prompt above
             )
             if action_obj is None:
                 # All retries exhausted; leave row at pending_llm and move on.

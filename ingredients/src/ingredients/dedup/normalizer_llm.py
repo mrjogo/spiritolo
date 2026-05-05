@@ -17,8 +17,8 @@ from collections import Counter
 
 import psycopg
 
-from ingredients.mapping.llm_provider import LLMProvider
-from ingredients.mapping.llm_resolver import resolve_with_retry
+from common.llm import LLMProvider
+from common.llm.retry import resolve_with_retry
 
 from .db import (
     add_cocktail_alias,

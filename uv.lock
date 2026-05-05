@@ -1121,8 +1121,6 @@ name = "spiritolo-ingredients"
 version = "0.1.0"
 source = { editable = "ingredients" }
 dependencies = [
-    { name = "anthropic" },
-    { name = "httpx" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
     { name = "spiritolo-common" },
@@ -1135,8 +1133,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.40" },
-    { name = "httpx", specifier = ">=0.27" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-dotenv", specifier = ">=1.0" },

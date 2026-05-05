@@ -7,7 +7,7 @@ from __future__ import annotations
 import psycopg
 
 from ingredients.mapping.db import write_pending
-from ingredients.mapping.llm_provider import ProviderResult
+from common.llm.provider import ProviderResult
 from ingredients.mapping.llm_resolver import run_phase2
 from ingredients.mapping.mapper import MAPPER_VERSION
 
@@ -176,7 +176,7 @@ def test_resolver_stops_after_interrupt_request(fixture_taxonomy):
     then the loop exits before processing remaining names."""
     import os
     import signal
-    from ingredients.mapping.llm_provider import ProviderResult
+    from common.llm.provider import ProviderResult
 
     conn, ids = fixture_taxonomy
     _seed_pending(conn, ["fancy gin variant", "another thing", "third name"])
@@ -283,7 +283,8 @@ def test_resolver_retries_on_provider_failure_then_continues_loop(fixture_taxono
             )
 
     # Skip the actual sleeping during the test.
-    monkeypatch.setattr(llm_resolver.time, "sleep", lambda _s: None)
+    import common.llm.retry as _retry_mod
+    monkeypatch.setattr(_retry_mod.time, "sleep", lambda _s: None)
 
     summary = llm_resolver.run_phase2(conn, provider=FlakyProvider())
 
