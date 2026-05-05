@@ -1095,6 +1095,7 @@ name = "spiritolo-common"
 version = "0.1.0"
 source = { editable = "common" }
 dependencies = [
+    { name = "anthropic" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
 ]
@@ -1106,6 +1107,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anthropic", specifier = ">=0.40" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-dotenv", specifier = ">=1.0" },

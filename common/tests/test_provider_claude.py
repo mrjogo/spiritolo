@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from ingredients.mapping.llm_provider_claude import ClaudeProvider
+from common.llm.claude import ClaudeProvider
 
 
 def _fake_anthropic_client(reply_text: str) -> MagicMock:
