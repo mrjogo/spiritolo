@@ -37,8 +37,10 @@ def build_upsert_sql(
 
 def resync_sequence_sql(table: OwnedTable) -> sql.Composed | None:
     """`select setval(<seq>, max(<pk>)) from <table>` — but safe when
-    the table is empty (max returns NULL, which setval rejects). We
-    coalesce to nextval(seq)-1 so an empty table is a no-op.
+    the table is empty (max returns NULL, which setval rejects) and
+    when the sequence has never been called. We coalesce max(pk) to 1
+    and take greatest with the sequence's current `last_value` so an
+    empty table with a fresh sequence is a no-op.
 
     Returns None for tables without a sequence (composite PKs).
     """

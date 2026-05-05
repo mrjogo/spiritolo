@@ -118,9 +118,11 @@ session, and if you do, re-take the backup before doing more work.
 |---|---|---|
 | `Sidecar not found` | The .meta.json is missing next to the dump | Re-take backup — older dumps predate this workflow. |
 | `Dump file sha256 differs` | The .dump file isn't the one the sidecar describes | You probably grabbed the wrong file. |
+| `Dump schema-only sha256 differs` | The dump's schema-only output doesn't match the sidecar (archive corruption or tampering) | Re-take backup. |
 | `Sidecar's staging fingerprint doesn't match` | --staging-db points at a different project than the dump | Confirm the URL. |
 | `Migration list mismatch` | A migration ran on staging since the backup | Re-take backup. |
 | `Staging was modified` | Someone wrote to staging after the backup | Re-take backup, redo work. |
+| `Staging changed between the pre-check and the apply txn` | A concurrent staging write landed during the brief read-then-write window | Re-run; if it persists, re-take backup. |
 | `Serialization conflict at COMMIT` | A concurrent staging write tripped SERIALIZABLE | Re-run --apply; if it persists, re-take backup. |
 
 [WORKFLOW_PLAN.md]: ../WORKFLOW_PLAN.md
