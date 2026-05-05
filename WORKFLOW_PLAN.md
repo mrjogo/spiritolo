@@ -27,21 +27,41 @@ me); honor system on "don't edit staging during a work session" is fine.
 
 ---
 
-## Pre-work — `updated_at` migration *(merged locally; staging deploy pending)*
+## Pre-work — `updated_at` migration *(shipped)*
 
 **Goal.** Add an auto-maintained `updated_at TIMESTAMPTZ` column to every
 public-schema table. Required so the uploader can compute the dirty set as
 "rows in local where `updated_at > <dump timestamp>`."
 
-**Status.** Migration written and applied locally. **Not yet deployed to
-staging.** Promote `main` → `staging` (`git checkout staging && git merge
---ff-only main && git push`) so the `deploy-migrations` workflow applies it.
-The staleness check in Stage 2 won't function meaningfully until staging
-tables actually have `updated_at`.
+---
 
-**Blocks.** Stage 2 (the uploader can be coded against local in the
-meantime, but its smoke tests against staging require the staging deploy
-first).
+## Pre-work — Deferrable FKs for the recipes / recipe_clusters cycle
+
+**Goal.** Make exactly the two FKs in the `recipes ↔ recipe_clusters` cycle
+`DEFERRABLE INITIALLY IMMEDIATE` so the uploader can issue
+`SET CONSTRAINTS ALL DEFERRED` inside its serializable transaction. Without
+this, the cycle between `recipes.cluster_id` and
+`recipe_clusters.representative_recipe_id` blocks any UPSERT batch that
+touches both sides.
+
+**Scope.** One migration that uses `ALTER TABLE ... ALTER CONSTRAINT ...
+DEFERRABLE INITIALLY IMMEDIATE` on the two named constraints
+(`recipes_cluster_id_fkey`, `recipe_clusters_representative_recipe_id_fkey`).
+`ALTER CONSTRAINT` is metadata-only — no row is touched, no validation
+re-pass is needed, no FK protection is dropped at any moment.
+`INITIALLY IMMEDIATE` keeps default behavior for every write path;
+`SET CONSTRAINTS ALL DEFERRED` is a no-op on FKs that aren't deferrable,
+so the broader schema is unaffected. Future cycles will need the same
+treatment per-cycle in their own migrations.
+
+**Blocks.** Stage 2's `--apply` path. Smoke tests for Stage 2 cannot exercise
+the deferred-constraint path against staging until this is deployed there.
+
+**Lands as.** Its own PR (`claude/stage2-uploader-prework`), promoted to
+staging via the standard `main → staging` flow before Stage 2's PR lands.
+
+See [docs/superpowers/specs/2026-05-05-stage-2-uploader-design.md](docs/superpowers/specs/2026-05-05-stage-2-uploader-design.md)
+for the full Stage 2 design and the role of this migration in it.
 
 ---
 
