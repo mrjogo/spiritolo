@@ -73,7 +73,7 @@ Stage CLIs (`fetch`, `classify`, `validate`, `extract`) share `--site` / `--limi
 
 - **`classify.py`** — local ollama on `content_type IS NULL` rows. Iterate prompts via `--review` against the checked-in eval set; use `--sample` for spot-checks. Bump `PROMPT_VERSION` after edits.
 - **`validate.py`** — fetch runs validation + drink scoring inline, so this CLI exists only to re-evaluate cached HTML after a version bump.
-- **`extract.py`** — parses Schema.org Recipe JSON-LD into Supabase `recipes`. UPSERTs on `source_url`; re-runs are idempotent. To re-extract: clear `extract_runs` rows.
+- **`extract.py`** — parses Schema.org Recipe JSON-LD into Supabase `recipes` at whatever `SUPABASE_DB_URL` points at. UPSERTs on `source_url`; re-runs are idempotent. To re-extract: clear `extract_runs` rows. Bulk runs follow the local-restore-then-upload flow — see [docs/upload.md](docs/upload.md).
 
 ## Spirits Taxonomy
 
@@ -112,6 +112,8 @@ cd ingredients && uv run python -m ingredients.cli --reset --except-version v1 -
 ```
 
 The eval set is `ingredients/src/ingredients/eval_set.py`. Add a new should-parse-as-X case whenever you teach the parser a new pattern; add a should-abstain case whenever you find an over-match.
+
+Writes go to whatever `SUPABASE_DB_URL` points at. Bulk runs use the local-restore-then-upload flow — see [docs/upload.md](docs/upload.md).
 
 **Common, scraper, ingredients packages.** `common/` holds shared utilities (`supabase_client`, `progress`, `summary`, `cli_common`); both `scraper/` (Zone 1) and `ingredients/` (Zone 2) depend on it via the root-level uv workspace.
 
@@ -155,6 +157,8 @@ Brand/expression nodes auto-create silently when the LLM proposes one with an ex
 The eval set is `ingredients/src/ingredients/mapping/eval_set.py`, run against the fixture taxonomy in `ingredients/src/ingredients/mapping/eval_fixture.py` so eval results don't drift with seed changes.
 
 `ANTHROPIC_API_KEY` is required for `--provider claude`; `OLLAMA_BASE_URL` defaults to `http://localhost:11434` for `--provider ollama`.
+
+Writes go to whatever `SUPABASE_DB_URL` points at — including the LLM-resolved nodes Phase 2 auto-creates. Bulk runs (especially Phase 2, which costs money) use the local-restore-then-upload flow — see [docs/upload.md](docs/upload.md).
 
 ## Recipe Dedup
 
@@ -205,9 +209,11 @@ The canonical-name pool grows bottom-up on staging: ~20 well-known cocktails are
 
 The eval set is [dedup/eval_set.py](ingredients/src/ingredients/dedup/eval_set.py), run against the fixture taxonomy in [dedup/eval_fixture.py](ingredients/src/ingredients/dedup/eval_fixture.py) so eval results don't drift with seed changes.
 
+Writes go to whatever `SUPABASE_DB_URL` points at. Bulk runs use the local-restore-then-upload flow — see [docs/upload.md](docs/upload.md).
+
 ## Data flow
 
-Schema is the only thing that flows local → staging (via the migrations CI workflow on push to the `staging` branch). **Pipeline data lives on staging** — it is the source of truth for `recipes`, `recipe_ingredients`, `recipe_clusters`, taxonomy growth, etc. Pipelines that mutate this data (the parser, mapper LLM phase, normalize-names LLM phase, cluster compute) should be pointed at staging via `SUPABASE_DB_URL` rather than producing local-only state that has to be sync'd back.
+Schema flows local → staging via the migrations CI workflow on push to the `staging` branch. **Pipeline data lives on staging** — staging is the source of truth for `recipes`, `recipe_ingredients`, `recipe_clusters`, taxonomy growth, etc. Bulk pipeline runs (the parser, mapper Phase 1+2, normalize-names Phase 1+2, cluster compute, promote-substances) happen against a local restore of staging and are pushed back through the uploader; see "Local-edit / staging-upload workflow" below. One-off SQL hand-edits and the curation UI hit staging directly.
 
 **Local dev** has two viable shapes:
 

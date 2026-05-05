@@ -1,5 +1,7 @@
 # Pipeline cheatsheet
 
+Every Zone-2 stage (and `extract`) writes to whatever `SUPABASE_DB_URL` points at. Bulk runs follow the local-restore-then-upload flow in [upload.md](upload.md): back up staging → restore locally → run pipelines → push the diff back through the uploader.
+
 ```mermaid
 %%{init: {'theme':'base', 'themeVariables': {
   'background': '#2a3531',

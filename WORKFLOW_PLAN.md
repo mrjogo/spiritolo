@@ -171,7 +171,7 @@ helper module imported by the script). Stage 3 reads from this list.
 
 ---
 
-## Stage 3 — Sweep the pipelines
+## Stage 3 — Sweep the pipelines *(shipped — single PR, not the planned 4 sub-PRs)*
 
 **Goal.** Each Supabase-writing pipeline gets its docs and any obvious safety
 net updated for the new workflow. **No structural code changes** — the
