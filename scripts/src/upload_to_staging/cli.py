@@ -11,6 +11,7 @@ import sys
 from urllib.parse import urlparse
 
 import psycopg
+from psycopg.types.json import Jsonb
 
 from .db import (
     fetch_applied_migrations,
@@ -200,13 +201,22 @@ def _print_plan(
         print("Dry run. Re-run with --apply to push.")
 
 
+def _coerce(value: object) -> object:
+    """Wrap dict/list values in Jsonb so psycopg can adapt them for jsonb columns."""
+    if isinstance(value, (dict, list)):
+        return Jsonb(value)
+    return value
+
+
 def _apply(
     staging: psycopg.Connection,
     sidecar: Sidecar,
     T: dt.datetime,
     dirty: dict[str, list[dict]],
 ) -> int:
-    staging.autocommit = False
+    # End any implicit transaction started by the pre-flight reads so the
+    # connection is in IDLE state before we open the serializable txn.
+    staging.rollback()
     try:
         with staging.cursor() as cur:
             cur.execute("set transaction isolation level serializable")
@@ -239,7 +249,7 @@ def _apply(
                     batch = rows[i:i + 1000]
                     cur.executemany(
                         stmt,
-                        [tuple(r[c] for c in cols) for r in batch],
+                        [tuple(_coerce(r[c]) for c in cols) for r in batch],
                     )
                 applied[table.name] = len(rows)
 

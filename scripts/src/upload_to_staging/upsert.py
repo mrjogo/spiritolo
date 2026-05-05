@@ -51,7 +51,13 @@ def resync_sequence_sql(table: OwnedTable) -> sql.Composed | None:
     seq = sql.Literal(table.sequence)
     return sql.SQL(
         "select setval({seq}, "
-        "  greatest(coalesce(max({pk}), 0), nextval({seq}) - 1), "
+        "  greatest(coalesce(max({pk}), 1), "
+        "           (select last_value from {seq_id})), "
         "  true) "
         "from public.{tbl}"
-    ).format(seq=seq, pk=pk, tbl=sql.Identifier(table.name))
+    ).format(
+        seq=seq,
+        pk=pk,
+        tbl=sql.Identifier(table.name),
+        seq_id=sql.Identifier(table.sequence),
+    )

@@ -123,7 +123,8 @@ DBNAME="${URL##*/}"; DBNAME="${DBNAME%%\?*}"
 FINGERPRINT=$(printf "%s:%s" "$HOST" "$DBNAME" | sha256sum | awk '{print $1}')
 
 DUMP_SHA=$(sha256sum "$OUT" | awk '{print $1}')
-SCHEMA_SHA=$(pg_restore --schema-only --no-owner --no-privileges "$OUT" \
+SCHEMA_SHA=$(pg_restore --schema-only --no-owner --no-privileges -f - "$OUT" \
+             | grep -v "^\\\\restrict\|^\\\\unrestrict" \
              | sha256sum | awk '{print $1}')
 
 cat > "$META" <<EOF_META
