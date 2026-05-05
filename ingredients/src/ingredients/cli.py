@@ -138,6 +138,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
                            help="Process at most N distinct pending names.")
     p_resolve.add_argument("--yes", action="store_true",
                            help="Skip the residual-count confirmation prompt.")
+    p_resolve.add_argument(
+        "--batch", action="store_true",
+        help="Use OpenAI Batch API (50%% off, ~24h SLA). "
+             "Only valid with --provider openai.",
+    )
+    p_resolve.add_argument(
+        "--ingest", metavar="BATCH_ID", default=None,
+        help="Ingest results from a previously submitted batch. "
+             "Implies --batch.",
+    )
+    p_resolve.add_argument(
+        "--wait", action="store_true",
+        help="With --batch, poll until completed and ingest in one command.",
+    )
+    p_resolve.add_argument(
+        "--poll-interval", type=int, default=600,
+        help="With --wait, seconds between status polls (default: 600).",
+    )
+    p_resolve.add_argument(
+        "--model", default=None,
+        help="Override the provider's default model id.",
+    )
 
     p_review = map_sub.add_parser(
         "review-proposals",
@@ -285,41 +307,104 @@ def run_worker(args: argparse.Namespace) -> int:
 
 def run_resolve_pending(args: argparse.Namespace) -> int:
     from ingredients.mapping.db import fetch_pending_llm_names
-    from ingredients.mapping.llm_resolver import run_phase2
+    from ingredients.mapping.llm_resolver import (
+        run_phase2, submit_phase2_batch, ingest_phase2_batch,
+    )
     from ingredients.mapping.mapper import MAPPER_VERSION
+    from pathlib import Path
+
+    BATCHES_DIR = Path("data/batches")
+
+    # Validate flag combos
+    if getattr(args, "batch", False) and args.provider != "openai":
+        log.error("--batch requires --provider openai")
+        return 2
+    if getattr(args, "ingest", None) and not getattr(args, "batch", False):
+        # --ingest implies --batch
+        args.batch = True
+    if getattr(args, "wait", False) and getattr(args, "ingest", None):
+        log.error("--wait and --ingest are mutually exclusive")
+        return 2
 
     db = IngredientsDatabase()
     try:
+        # ---- Batch ingest path ----
+        if getattr(args, "batch", False) and getattr(args, "ingest", None):
+            from common.llm.openai_batch import OpenAIBatchProvider
+            _model = getattr(args, "model", None)
+            provider = (
+                OpenAIBatchProvider.from_env(model_id=_model)
+                if _model else OpenAIBatchProvider.from_env()
+            )
+            counts = ingest_phase2_batch(
+                conn=db.conn, provider=provider,
+                batch_id=args.ingest, batches_dir=BATCHES_DIR,
+            )
+            print_summary(
+                f"Map resolve-pending ingest ({args.ingest})",
+                {"all": Counter(counts)}, mode="applied",
+            )
+            return 0
+
+        # ---- Pre-flight: count pending and confirm ----
         pending = fetch_pending_llm_names(db.conn, mapper_version=MAPPER_VERSION)
         if not pending:
             log.info("nothing pending; queue is empty")
             return 0
 
-        # Show residual count + top-N before any external call so the
-        # operator can choose to skip / hand-curate / proceed.
         log.info("%d distinct names pending Phase 2", len(pending))
         for n in pending[:20]:
             log.info("  %s", n)
         if len(pending) > 20:
             log.info("  ... and %d more", len(pending) - 20)
 
+        if getattr(args, "batch", False):
+            mode = "OpenAI Batch API (50% off, ~24h SLA)"
+        else:
+            mode = f"--provider {args.provider}"
         if not args.yes:
-            sys.stderr.write(f"Proceed with --provider {args.provider}? [y/N]: ")
+            sys.stderr.write(f"Proceed with {mode}? [y/N]: ")
             sys.stderr.flush()
             answer = sys.stdin.readline().strip().lower()
             if answer not in ("y", "yes"):
                 log.info("aborted by operator")
                 return 1
 
+        # ---- Batch submit (and optional --wait) path ----
+        if getattr(args, "batch", False):
+            from common.llm.openai_batch import OpenAIBatchProvider
+            _model = getattr(args, "model", None)
+            provider = (
+                OpenAIBatchProvider.from_env(model_id=_model)
+                if _model else OpenAIBatchProvider.from_env()
+            )
+            outcome = submit_phase2_batch(
+                db.conn, provider=provider,
+                batches_dir=BATCHES_DIR, limit=args.limit,
+            )
+            print(
+                f"submitted batch {outcome.submission.batch_id} "
+                f"({outcome.submission.request_count} requests, model={outcome.submission.model_id})"
+            )
+            print(f"sidecar: {outcome.sidecar_path}")
+            if getattr(args, "wait", False):
+                _wait_then_ingest_mapping(
+                    db, provider, outcome.submission.batch_id,
+                    BATCHES_DIR, getattr(args, "poll_interval", 600),
+                )
+            return 0
+
+        # ---- Sync path (existing) ----
+        _model = getattr(args, "model", None)
         if args.provider == "claude":
             from common.llm.claude import ClaudeProvider
-            provider = ClaudeProvider.from_env()
+            provider = ClaudeProvider.from_env(model_id=_model) if _model else ClaudeProvider.from_env()
         elif args.provider == "openai":
             from common.llm.openai import OpenAIProvider
-            provider = OpenAIProvider.from_env()
+            provider = OpenAIProvider.from_env(model_id=_model) if _model else OpenAIProvider.from_env()
         else:
             from common.llm.ollama import OllamaProvider
-            provider = OllamaProvider.from_env()
+            provider = OllamaProvider.from_env(model_id=_model) if _model else OllamaProvider.from_env()
 
         summary = run_phase2(db.conn, provider=provider, limit=args.limit)
         changes = {"all": Counter(summary)}
@@ -330,6 +415,34 @@ def run_resolve_pending(args: argparse.Namespace) -> int:
         return 0
     finally:
         db.close()
+
+
+def _wait_then_ingest_mapping(db, provider, batch_id, batches_dir, poll_interval):
+    import time
+    from ingredients.mapping.llm_resolver import ingest_phase2_batch
+    from common.interrupt import InterruptHandler
+    log.info("polling batch %s every %ds…", batch_id, poll_interval)
+    with InterruptHandler() as interrupt:
+        while True:
+            if interrupt.requested:
+                log.info("interrupted; batch %s remains submitted, run --ingest later", batch_id)
+                return
+            st = provider.status(batch_id)
+            log.info("status=%s (%d/%d)", st.state, st.completed, st.total)
+            if st.state == "completed":
+                break
+            if st.state in ("failed", "expired", "cancelled"):
+                log.error("batch ended in state %s", st.state)
+                return
+            time.sleep(poll_interval)
+    counts = ingest_phase2_batch(
+        conn=db.conn, provider=provider,
+        batch_id=batch_id, batches_dir=batches_dir,
+    )
+    print_summary(
+        f"Map resolve-pending ingest ({batch_id})",
+        {"all": Counter(counts)}, mode="applied",
+    )
 
 
 def run_review_proposals(args: argparse.Namespace) -> int:

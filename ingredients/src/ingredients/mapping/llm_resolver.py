@@ -16,6 +16,10 @@ from collections import Counter
 import psycopg
 
 from common.llm import LLMProvider
+from common.llm.batch_provider import BatchProvider, BatchRequest
+from common.llm.batch_runner import (
+    BatchSubmitOutcome, ingest_batch, submit_batch,
+)
 from common.llm.retry import resolve_with_retry as _resolve_with_retry_helper
 
 from .db import fetch_pending_llm_names, write_abstain, write_resolution
@@ -193,3 +197,114 @@ def run_phase2(
                 counts["abstain"] += 1
             progress(idx)
     return dict(counts)
+
+
+def submit_phase2_batch(
+    conn: psycopg.Connection,
+    *,
+    provider: BatchProvider,
+    batches_dir,
+    site: str | None = None,
+    limit: int | None = None,
+) -> BatchSubmitOutcome:
+    """Submit pending names as an OpenAI batch. Returns the submission +
+    sidecar path. Caller (CLI) prints the batch_id and exits."""
+    names = fetch_pending_llm_names(conn, mapper_version=MAPPER_VERSION, limit=limit)
+    if not names:
+        raise RuntimeError("nothing pending; queue is empty")
+
+    rows = []
+    for n in names:
+        cands = _candidates_with_parents(conn, n)
+        user_prompt = build_user_prompt(
+            normalized_name=n, parser_unit=None, site=site, candidates=cands,
+        )
+        rows.append((n, SYSTEM_PROMPT, user_prompt))
+
+    return submit_batch(
+        provider=provider, rows=rows,
+        to_request=lambda i, r: BatchRequest(
+            custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2],
+        ),
+        row_to_id=lambda r: r[0],
+        flow="mapping.resolve_pending",
+        version_constant=MAPPER_VERSION,
+        batches_dir=batches_dir,
+    )
+
+
+def ingest_phase2_batch(
+    conn: psycopg.Connection,
+    *,
+    provider: BatchProvider,
+    batch_id: str,
+    batches_dir,
+) -> dict[str, int]:
+    """Ingest a previously submitted batch's results. Per-row writes go
+    through the same write_resolution / write_abstain / propose_brand
+    paths as run_phase2."""
+
+    def on_result(row_id: str, raw_text: str | None, error: str | None) -> None:
+        if error or raw_text is None:
+            log.warning("batch result error for %r: %s", row_id, error)
+            return
+        try:
+            action_obj = parse_response(raw_text)
+        except Exception as exc:
+            log.warning("batch result parse failed for %r: %s", row_id, exc)
+            return
+        action = action_obj["action"]
+        normalized = row_id
+
+        if action == "chose":
+            write_resolution(
+                conn, normalized_name=normalized,
+                taxonomy_node_id=int(action_obj["node_id"]),
+                source="llm", mapper_version=MAPPER_VERSION,
+            )
+        elif action == "propose_brand":
+            cands = _candidates_with_parents(conn, normalized)
+            parent_id = _lookup_node_by_slug(conn, action_obj["parent_slug"])
+            if parent_id is None:
+                write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
+                return
+            try:
+                new_id = _create_brand_node(
+                    conn,
+                    slug=action_obj["slug"],
+                    display_name=action_obj["display_name"],
+                    parent_id=parent_id,
+                    node_kind=action_obj["node_kind"],
+                    raw_string=normalized,
+                    prompt_hash_value=prompt_hash(normalized, None, None, cands),
+                    model_id=provider.model_id,
+                )
+                write_resolution(
+                    conn, normalized_name=normalized, taxonomy_node_id=new_id,
+                    source="llm", mapper_version=MAPPER_VERSION,
+                )
+            except Exception:
+                conn.rollback()
+                raise
+        elif action == "propose_form":
+            cands = _candidates_with_parents(conn, normalized)
+            parent_id = _lookup_node_by_slug(conn, action_obj["parent_slug"])
+            enqueue_form_proposal(
+                conn,
+                raw_string=normalized,
+                proposed_slug=action_obj["slug"],
+                proposed_display_name=action_obj["display_name"],
+                proposed_parent_id=parent_id,
+                candidates=cands,
+                mapper_version=MAPPER_VERSION,
+            )
+        elif action == "abstain":
+            write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
+
+    return ingest_batch(
+        provider=provider, batch_id=batch_id,
+        flow="mapping.resolve_pending",
+        version_constant=MAPPER_VERSION,
+        on_result=on_result,
+        batches_dir=batches_dir,
+    )
