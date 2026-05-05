@@ -131,7 +131,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Phase 2 — drain the pending_llm queue using the chosen provider.",
     )
     p_resolve.add_argument(
-        "--provider", choices=["claude", "ollama"], required=True,
+        "--provider", choices=["claude", "ollama", "openai"], required=True,
         help="LLM provider to use.",
     )
     p_resolve.add_argument("--limit", type=int, default=None,
@@ -158,7 +158,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "resolve-pending",
         help="Phase 2 — drain the pending_llm queue using the chosen provider.",
     )
-    p_resolve_norm.add_argument("--provider", choices=["claude", "ollama"], required=True,
+    p_resolve_norm.add_argument("--provider", choices=["claude", "ollama", "openai"], required=True,
                                 help="LLM provider to use.")
     p_resolve_norm.add_argument("--limit", type=int, default=None,
                                 help="Process at most N distinct pending names.")
@@ -314,6 +314,9 @@ def run_resolve_pending(args: argparse.Namespace) -> int:
         if args.provider == "claude":
             from common.llm.claude import ClaudeProvider
             provider = ClaudeProvider.from_env()
+        elif args.provider == "openai":
+            from common.llm.openai import OpenAIProvider
+            provider = OpenAIProvider.from_env()
         else:
             from common.llm.ollama import OllamaProvider
             provider = OllamaProvider.from_env()
@@ -525,6 +528,9 @@ def run_normalize_names(args: argparse.Namespace) -> int:
             if args.provider == "claude":
                 from common.llm.claude import ClaudeProvider
                 provider = ClaudeProvider.from_env()
+            elif args.provider == "openai":
+                from common.llm.openai import OpenAIProvider
+                provider = OpenAIProvider.from_env()
             else:
                 from common.llm.ollama import OllamaProvider
                 provider = OllamaProvider.from_env()
