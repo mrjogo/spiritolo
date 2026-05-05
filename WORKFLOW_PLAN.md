@@ -35,7 +35,7 @@ public-schema table. Required so the uploader can compute the dirty set as
 
 ---
 
-## Pre-work — Deferrable FKs for the recipes / recipe_clusters cycle
+## Pre-work — Deferrable FKs for the recipes / recipe_clusters cycle *(shipped)*
 
 **Goal.** Make exactly the two FKs in the `recipes ↔ recipe_clusters` cycle
 `DEFERRABLE INITIALLY IMMEDIATE` so the uploader can issue

@@ -36,13 +36,13 @@ Use `migration up` when you want to add new migrations without losing local proc
 
 (If you ever need to invoke the `supabase` CLI from inside the devcontainer — uncommon — its Go resolver picks an IPv6 form of `host.docker.internal` that isn't routable, and it defaults to TLS which the local Postgres rejects. Both surface as `tls error (server refused TLS connection)`. Workaround: pass `--db-url` with your container's gateway IPv4 plus `?sslmode=disable`. The literal varies by environment — `getent hosts host.docker.internal` and `ip route` show what's reachable from your container.)
 
-**Test DB.** DB-integration tests (in `ingredients/tests/test_db.py`, et al) run against `TEST_DB_URL` — a *separate* Postgres database from `SUPABASE_DB_URL` — so `pytest` can `TRUNCATE … CASCADE` freely without nuking the dev data. Add this to `.env`:
+**Test DB.** DB-integration tests (`ingredients/tests/test_db.py`, the upload smoke tests in `scripts/tests/`, et al) run against `TEST_DB_URL` — a *separate* Postgres database from `SUPABASE_DB_URL` — so `pytest` can `TRUNCATE … CASCADE` freely without nuking the dev data. Add this to `.env`:
 
 ```
 TEST_DB_URL=postgresql://postgres:postgres@host.docker.internal:54322/spiritolo_test
 ```
 
-The `ingredients` conftest auto-creates the database if missing and applies any new `supabase/migrations/*.sql` files on session start (tracked in a `_test_db_migrations` table). With `TEST_DB_URL` unset, DB tests skip cleanly. The conftest refuses to run if `TEST_DB_URL` equals `SUPABASE_DB_URL` or points at the default `postgres` database.
+The `ingredients` conftest auto-creates `spiritolo_test` if missing and applies any new `supabase/migrations/*.sql` files on session start (tracked in a `_test_db_migrations` table). It refuses to run if `TEST_DB_URL` equals `SUPABASE_DB_URL` or points at the default `postgres` database. The `scripts` conftest (for the upload smoke tests) derives two ephemeral DBs from `TEST_DB_URL` (`<base>_upload_local`, `<base>_upload_staging`), drops+recreates them per session, and re-applies all migrations fresh — its names don't collide with the dev DB by construction. With `TEST_DB_URL` unset, DB tests in either suite skip cleanly.
 
 URL classifier needs ollama: `ollama pull qwen3:14b`.
 
