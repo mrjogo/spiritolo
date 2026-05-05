@@ -38,10 +38,12 @@ jobs:
           fi
           ./scripts/backup-supabase.sh
 
-      - name: Upload dump as workflow artifact
+      - name: Upload dump + sidecar as workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: spiritolo-staging-dump-${{ github.run_id }}
-          path: spiritolo-staging-*.dump
+          path: |
+            spiritolo-staging-*.dump
+            spiritolo-staging-*.dump.meta.json
           retention-days: 7
           if-no-files-found: error

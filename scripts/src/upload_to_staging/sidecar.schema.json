@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Spiritolo backup sidecar",
+  "description": "Metadata file written next to a Supabase pg_dump backup. The upload-to-staging script requires this file to exist and to validate against this schema before doing any other work.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "taken_at",
+    "staging_fingerprint",
+    "applied_migrations",
+    "dump_basename",
+    "dump_sha256",
+    "dump_schema_sha256",
+    "backup_script_version"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional reference to this schema for IDE autocomplete."
+    },
+    "taken_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC timestamp captured AFTER pg_dump returns successfully. Reference time T for the staleness/dirty-set computation."
+    },
+    "staging_fingerprint": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 of `host:dbname` from SUPABASE_STAGING_DB_URL. Password and port excluded — the host is enough to distinguish Supabase projects."
+    },
+    "applied_migrations": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Full list of `version` values from supabase_migrations.schema_migrations on staging at backup time. Order matches Postgres' default ordering."
+    },
+    "dump_basename": {
+      "type": "string",
+      "description": "Basename of the .dump file at write time. Lets the uploader detect renamed/diverged pairs."
+    },
+    "dump_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 of the dump file bytes."
+    },
+    "dump_schema_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "sha256 of `pg_restore --schema-only <dump>` output. Stable across pg_restore runs on the same dump (the archive's TOC is canonical)."
+    },
+    "backup_script_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Bumped if the sidecar format changes incompatibly."
+    }
+  }
+}

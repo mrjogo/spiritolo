@@ -1,2 +1,2 @@
 [tool.uv.workspace]
-members = ["common", "scraper", "ingredients"]
+members = ["common", "scraper", "ingredients", "scripts"]

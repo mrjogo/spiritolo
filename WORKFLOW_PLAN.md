@@ -35,7 +35,7 @@ public-schema table. Required so the uploader can compute the dirty set as
 
 ---
 
-## Pre-work — Deferrable FKs for the recipes / recipe_clusters cycle
+## Pre-work — Deferrable FKs for the recipes / recipe_clusters cycle *(shipped)*
 
 **Goal.** Make exactly the two FKs in the `recipes ↔ recipe_clusters` cycle
 `DEFERRABLE INITIALLY IMMEDIATE` so the uploader can issue
@@ -103,7 +103,7 @@ restore — there is no separate "seed locally" path anymore.
 
 ---
 
-## Stage 2 — Build the uploader script
+## Stage 2 — Build the uploader script *(shipped)*
 
 **Goal.** Implement `scripts/upload-to-staging.sh` (or `.py` — session
 chooses). All protections live here.
