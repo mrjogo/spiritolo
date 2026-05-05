@@ -17,6 +17,7 @@ import {
   TX_LINK_DIM,
   TX_BROWN_FAINT,
   nodeRadius,
+  type NodeSizeMode,
 } from './palette';
 
 const SHOW_LABEL_AT = 1.2;
@@ -44,6 +45,7 @@ interface Props {
   height: number;
   dimmedIds?: Set<number>;
   dagMode?: DagMode;
+  sizeMode?: NodeSizeMode;
   onNodeClick: (node: TaxonomyNode) => void;
   onNodeHover: (node: TaxonomyNode | null) => void;
   onLinkClick?: (link: RuntimeLink) => void;
@@ -57,7 +59,7 @@ function endpointId(end: TaxonomyNode | number): number {
 
 export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCanvas(
   {
-    nodes, links, width, height, dimmedIds, dagMode,
+    nodes, links, width, height, dimmedIds, dagMode, sizeMode = 'recipes',
     onNodeClick, onNodeHover, onLinkClick, onLinkHover, onBackgroundClick,
   },
   ref,
@@ -84,13 +86,14 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
       'collide',
       bboxCollide((node: unknown) => {
         const n = node as TaxonomyNode;
-        const r = nodeRadius(n);
+        const r = nodeRadius(n, sizeMode);
         const halfW = n.labelW / 2 + r + PAD;
         const halfH = n.labelH / 2 + r + PAD;
         return [[-halfW, -halfH], [halfW, halfH]];
       }).iterations(2),
     );
-  }, []);
+    fg.d3ReheatSimulation();
+  }, [sizeMode]);
 
   const data = useMemo(() => ({ nodes, links }), [nodes, links]);
 
@@ -104,7 +107,7 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
       dagMode={dagMode}
       dagLevelDistance={80}
       nodeRelSize={4}
-      nodeVal={(n) => nodeRadius(n as TaxonomyNode)}
+      nodeVal={(n) => nodeRadius(n as TaxonomyNode, sizeMode)}
       linkColor={(l) => {
         const link = l as RuntimeLink;
         const sId = endpointId(link.source);
@@ -133,13 +136,13 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
         const n = node as TaxonomyNode & { x: number; y: number };
         const dimmed = dimmedIds?.has(n.id) ?? false;
         ctx.globalAlpha = dimmed ? 0.18 : 1;
-        drawNode(n, ctx);
+        drawNode(n, ctx, sizeMode);
         if (globalScale > SHOW_LABEL_AT) {
           ctx.font = LABEL_FONT;
           ctx.fillStyle = TX_BROWN_FAINT;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
-          ctx.fillText(n.display_name, n.x, n.y + nodeRadius(n) + 3);
+          ctx.fillText(n.display_name, n.x, n.y + nodeRadius(n, sizeMode) + 3);
         }
         ctx.globalAlpha = 1;
       }}
@@ -151,10 +154,11 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
 function drawNode(
   node: TaxonomyNode & { x: number; y: number },
   ctx: CanvasRenderingContext2D,
+  sizeMode: NodeSizeMode,
 ) {
   const role = effectiveKind(node);
   const fill = ROLE_FILL[role];
-  const radius = nodeRadius(node);
+  const radius = nodeRadius(node, sizeMode);
   const outerR = radius + 2.5;
 
   // Outer dark cap
