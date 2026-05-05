@@ -16,7 +16,7 @@ Dump the Supabase staging Postgres (public schema, custom format, gz=9) to a
 timestamped file: <dest>/spiritolo-staging-<YYYYMMDD-HHMMSSZ>[-<label>].dump
 
 Options:
-  -d, --dest DIR    Destination folder (created if missing). Default: ./backups
+  -d, --dest DIR    Destination folder (created if missing). Default: . (cwd)
   -l, --label TAG   Optional suffix appended to the filename (e.g. before-migration).
   -h, --help        Show this help.
 
@@ -27,7 +27,7 @@ the transaction pooler (port 6543) breaks pg_dump.
 EOF
 }
 
-DEST="$(pwd)/backups"
+DEST="."
 LABEL=""
 while [[ $# -gt 0 ]]; do
   case "$1" in

@@ -21,9 +21,6 @@
 # Local data — HTML archive and scraper state DB
 data/
 
-# Local Postgres dumps from scripts/backup-supabase.sh
-backups/
-
 # Python artifacts
 __pycache__/
 *.py[cod]
