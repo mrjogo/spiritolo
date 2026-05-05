@@ -63,10 +63,10 @@ Stage CLIs (`fetch`, `classify`, `validate`, `extract`) share `--site` / `--limi
 
 | Stage | Constant | File |
 |---|---|---|
-| URL classification | `PROMPT_VERSION` | [classify_prompt.py](scraper/src/classify_prompt.py) |
-| HTML validation | `VALIDATOR_VERSION` | [validation.py](scraper/src/validation.py) |
-| Drink scoring | `SCORER_VERSION` | [classify_drink.py](scraper/src/classify_drink.py) |
-| JSON-LD extraction | `EXTRACTOR_VERSION` | [extract.py](scraper/src/extract.py) |
+| URL classification | `PROMPT_VERSION` | [classify_prompt.py](scraper/src/scraper/classify_prompt.py) |
+| HTML validation | `VALIDATOR_VERSION` | [validation.py](scraper/src/scraper/validation.py) |
+| Drink scoring | `SCORER_VERSION` | [classify_drink.py](scraper/src/scraper/classify_drink.py) |
+| JSON-LD extraction | `EXTRACTOR_VERSION` | [extract.py](scraper/src/scraper/extract.py) |
 | Ingredient → taxonomy mapping | `MAPPER_VERSION` | [mapping/mapper.py](ingredients/src/ingredients/mapping/mapper.py) |
 
 ## Pipeline stages
