@@ -40,3 +40,4 @@ htmlcov/
 # Playwright MCP screenshot/snapshot scratch (kept local, never committed)
 .playwright-mcp/
 /*.png
+data/batches/
