@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
-# Back up the Supabase hosted Postgres (public schema) to a custom-format pg_dump.
+# Back up the Supabase hosted Postgres `public` schema to a custom-format
+# pg_dump. Excludes `public.profiles` — those rows FK to `auth.users`,
+# which Supabase manages and we don't dump; on restore, admins re-invite
+# themselves and re-flip `is_admin` from Studio.
 #
 # Local: source the repo .env first, then `./scripts/backup-supabase.sh`.
 # CI:    set SUPABASE_STAGING_DB_URL in the workflow env.
@@ -82,6 +85,7 @@ echo "Backing up staging public schema → $OUT"
 pg_dump \
   --dbname="$URL" \
   --schema=public \
+  --exclude-table=public.profiles \
   --format=custom \
   --no-owner \
   --no-privileges \
