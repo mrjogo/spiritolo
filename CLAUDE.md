@@ -214,6 +214,32 @@ Schema is the only thing that flows local → staging (via the migrations CI wor
 - **Schema-only:** `supabase db reset` is enough. You get the migrated schema, empty tables, and a pre-seeded `admin@local.test` magic-link user (see [supabase/seeds/dev_admin_user.local-only.sql](supabase/seeds/dev_admin_user.local-only.sql) — the only seed file). Fine for UI work and migration writing.
 - **Schema + a snapshot of staging data:** restore a `scripts/backup-supabase.sh` dump into the local DB. This is the only way to get current reference data (taxonomy, cocktail aliases) and any pipeline output locally. The dev admin seed survives the restore (`profiles` and `auth.users` are excluded from the dump). See [docs/backups.md](docs/backups.md).
 
+## Local-edit / staging-upload workflow
+
+For any pipeline run that would write to Supabase, prefer this flow over
+hitting staging directly:
+
+1. `scripts/backup-supabase.sh` — produces `<file>.dump` plus
+   `<file>.dump.meta.json` (sidecar).
+2. `pg_restore` the dump into local Supabase
+   (see [docs/backups.md](docs/backups.md)).
+3. Run pipelines pointed at local (`SUPABASE_DB_URL` already points
+   there in the devcontainer .env).
+4. Push the diff back:
+
+   ```bash
+   uv run --package spiritolo-scripts python -m upload_to_staging \
+     --dump path/to/<file>.dump            # dry-run
+   uv run --package spiritolo-scripts python -m upload_to_staging \
+     --dump path/to/<file>.dump --apply    # actually push
+   ```
+
+The uploader refuses to run if the sidecar is missing, if the dump
+doesn't match the staging URL it was taken from, if a migration landed
+during the work session, or if staging was written to during the work
+session. Full flow + checks + failure modes documented in
+[docs/upload.md](docs/upload.md).
+
 ## Hosting
 
 The app is hosted on Supabase + Vercel free tiers under the project name
