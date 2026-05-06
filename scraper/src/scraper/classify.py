@@ -136,19 +136,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         "Overrides --site/--category/--n.")
     p.add_argument(
         "--batch", action="store_true",
-        help="Use OpenAI Batch API. Only valid with --provider openai.",
+        help="Use OpenAI Batch API. Loops submit→poll→ingest until the "
+             "queue (or --limit) is drained. Only valid with --provider openai.",
     )
     p.add_argument(
         "--ingest", metavar="BATCH_ID", default=None,
-        help="Ingest a previously submitted classify batch. Implies --batch.",
+        help="Ingest a previously submitted classify batch and exit. "
+             "Implies --batch.",
     )
     p.add_argument(
-        "--wait", action="store_true",
-        help="With --batch, poll until completed and ingest in one command.",
+        "--chunk-size", type=int, default=2000,
+        help="With --batch, URLs per submitted batch (default: 2000, "
+             "sized for the gpt-5-mini 5M enqueued-token tier).",
     )
     p.add_argument(
         "--poll-interval", type=int, default=600,
-        help="With --wait, seconds between status polls (default: 600).",
+        help="With --batch, seconds between status polls (default: 600).",
     )
     add_reset_args(p, stage="classify_url_runs")
     return p
@@ -309,9 +312,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.ingest and not args.batch:
         # --ingest implies --batch
         args.batch = True
-    if args.wait and args.ingest:
-        print("ERROR: --wait and --ingest are mutually exclusive", file=sys.stderr)
-        return 2
 
     if args.batch:
         return run_batch(args)
@@ -535,10 +535,13 @@ def ingest_classify_batch(
 
 
 def run_batch(args: argparse.Namespace) -> int:
+    """Batch entry point: ingest-only when --ingest is given; otherwise
+    drain in chunks (submit → poll → ingest, repeating)."""
     import time
 
     from common.interrupt import InterruptHandler
     from common.llm.openai_batch import OpenAIBatchProvider
+    from common.llm.sidecar import mark_failed
 
     BATCHES_DIR = Path("data/batches")
 
@@ -562,44 +565,107 @@ def run_batch(args: argparse.Namespace) -> int:
             )
             return 0
 
-        outcome = submit_classify_batch(
-            db, provider=provider, batches_dir=BATCHES_DIR,
-            site=args.site, limit=args.limit,
-        )
-        print(
-            f"submitted batch {outcome.submission.batch_id} "
-            f"({outcome.submission.request_count} requests, model={outcome.submission.model_id})"
-        )
-        print(f"sidecar: {outcome.sidecar_path}")
+        # ---- Drain in chunks ----
+        chunk_size = getattr(args, "chunk_size", 2000)
+        total_limit = args.limit  # None means "drain everything"
+        poll_interval = args.poll_interval
 
-        if args.wait:
-            log.info("polling batch %s every %ds…", outcome.submission.batch_id, args.poll_interval)
-            with InterruptHandler() as interrupt:
+        RATE_LIMIT_BACKOFF = 30 * 60
+
+        def _is_enqueue_limit(exc: Exception) -> bool:
+            text = str(exc).lower()
+            if "enqueued token limit" in text or "enqueued tokens" in text:
+                return True
+            return getattr(exc, "status_code", None) == 429
+
+        chunk_idx = 0
+        drained = 0
+        aggregate: Counter = Counter()
+        with InterruptHandler() as interrupt:
+            while True:
+                if interrupt.requested:
+                    log.info(
+                        "interrupted; %d chunks ingested, leaving any in-flight "
+                        "batches submitted (use --ingest <id> to drain later)",
+                        chunk_idx,
+                    )
+                    break
+                if total_limit is not None and drained >= total_limit:
+                    log.info("--limit %d reached; stopping after %d chunks",
+                             total_limit, chunk_idx)
+                    break
+
+                pending_ct = db.count_unclassified(site=args.site)
+                if pending_ct == 0:
+                    log.info("queue drained; all chunks ingested")
+                    break
+
+                chunk_idx += 1
+                this_chunk = chunk_size
+                if total_limit is not None:
+                    this_chunk = min(chunk_size, total_limit - drained)
+                log.info(
+                    "chunk %d: %d URLs pending; submitting up to %d",
+                    chunk_idx, pending_ct, this_chunk,
+                )
+
                 while True:
                     if interrupt.requested:
-                        log.info("interrupted; batch remains submitted, run --ingest later")
-                        return 0
-                    st = provider.status(outcome.submission.batch_id)
-                    log.info("status=%s (%d/%d)", st.state, st.completed, st.total)
+                        break
+                    try:
+                        outcome = submit_classify_batch(
+                            db, provider=provider, batches_dir=BATCHES_DIR,
+                            site=args.site, limit=this_chunk,
+                        )
+                        break
+                    except Exception as exc:
+                        if not _is_enqueue_limit(exc):
+                            raise
+                        log.warning(
+                            "enqueue-limit hit on chunk %d; sleeping %d min "
+                            "and retrying: %s", chunk_idx, RATE_LIMIT_BACKOFF // 60, exc,
+                        )
+                        time.sleep(RATE_LIMIT_BACKOFF)
+                if interrupt.requested:
+                    break
+
+                batch_id = outcome.submission.batch_id
+                log.info("chunk %d submitted: batch %s (%d requests)",
+                         chunk_idx, batch_id, outcome.submission.request_count)
+
+                while True:
+                    if interrupt.requested:
+                        break
+                    st = provider.status(batch_id)
+                    log.info("chunk %d status=%s (%d/%d)",
+                             chunk_idx, st.state, st.completed, st.total)
                     if st.state == "completed":
                         break
                     if st.state in ("failed", "expired", "cancelled"):
-                        log.error("batch ended in state %s", st.state)
-                        from common.llm.sidecar import mark_failed
-                        mark_failed(
-                            BATCHES_DIR / f"{outcome.submission.batch_id}.json",
-                            state=st.state,
+                        log.error(
+                            "chunk %d batch %s ended in state %s — stopping",
+                            chunk_idx, batch_id, st.state,
                         )
+                        mark_failed(BATCHES_DIR / f"{batch_id}.json", state=st.state)
                         return 1
-                    time.sleep(args.poll_interval)
-            counts = ingest_classify_batch(
-                db=db, provider=provider, batch_id=outcome.submission.batch_id,
-                batches_dir=BATCHES_DIR,
-            )
-            print_summary(
-                f"Classify ingest ({outcome.submission.batch_id})",
-                {"all": Counter(counts)},
-            )
+                    time.sleep(poll_interval)
+                if interrupt.requested:
+                    break
+
+                counts = ingest_classify_batch(
+                    db=db, provider=provider, batch_id=batch_id,
+                    batches_dir=BATCHES_DIR,
+                )
+                for k, v in counts.items():
+                    aggregate[k] += v
+                drained += outcome.submission.request_count
+                log.info("chunk %d ingested: %s (drained %d total)",
+                         chunk_idx, dict(counts), drained)
+
+        print_summary(
+            f"Classify ({chunk_idx} chunks, {drained} drained)",
+            {"all": aggregate},
+        )
         return 0
     finally:
         db.close()

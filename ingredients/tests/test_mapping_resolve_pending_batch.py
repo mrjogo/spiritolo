@@ -93,10 +93,10 @@ def test_ingest_phase2_batch_dispatches_writes_per_action(tmp_path, monkeypatch)
     assert counts["ok"] == 2
 
 
-def _make_run_all_args(chunk_size: int = 2) -> argparse.Namespace:
+def _make_drain_args(chunk_size: int = 2, limit=None) -> argparse.Namespace:
     return argparse.Namespace(
-        provider="openai", limit=None, yes=True, batch=True,
-        ingest=None, wait=False, run_all=True, chunk_size=chunk_size,
+        provider="openai", limit=limit, yes=True, batch=True,
+        ingest=None, chunk_size=chunk_size,
         poll_interval=0, model=None,
     )
 
@@ -108,7 +108,7 @@ def test_run_all_drains_queue_in_chunks(tmp_path, monkeypatch):
     by chunk_size per ingest cycle to simulate names being marked llm/abstain
     each pass. Verifies the loop terminates when the queue is empty and
     that aggregate counts roll up across chunks."""
-    from ingredients.cli import _run_all_mapping
+    from ingredients.cli import _drain_mapping_in_chunks
     from common.llm.batch_provider import BatchResult, BatchStatus, BatchSubmission
 
     # Queue starts at 5 names; each ingest cycle removes 2 (chunk_size).
@@ -178,9 +178,9 @@ def test_run_all_drains_queue_in_chunks(tmp_path, monkeypatch):
     # Run the loop.
     db = MagicMock()
     db.conn = MagicMock()
-    rc = _run_all_mapping(
+    rc = _drain_mapping_in_chunks(
         db, provider, tmp_path,
-        chunk_size=2, poll_interval=0,
+        chunk_size=2, total_limit=None, poll_interval=0,
     )
     assert rc == 0
     # 5 names, chunks of 2 → 3 chunks (2, 2, 1).
@@ -191,7 +191,7 @@ def test_run_all_drains_queue_in_chunks(tmp_path, monkeypatch):
 def test_run_all_retries_on_enqueue_token_limit(tmp_path, monkeypatch):
     """When OpenAI returns the 'Enqueued token limit reached' error,
     --all sleeps and retries instead of aborting."""
-    from ingredients.cli import _run_all_mapping
+    from ingredients.cli import _drain_mapping_in_chunks
     from common.llm.batch_provider import BatchResult, BatchStatus, BatchSubmission
 
     pending = ["x", "y"]
@@ -251,12 +251,144 @@ def test_run_all_retries_on_enqueue_token_limit(tmp_path, monkeypatch):
 
     db = MagicMock()
     db.conn = MagicMock()
-    rc = _run_all_mapping(
+    rc = _drain_mapping_in_chunks(
         db, provider, tmp_path,
-        chunk_size=2, poll_interval=0,
+        chunk_size=2, total_limit=None, poll_interval=0,
     )
     assert rc == 0
     assert submit_count["n"] == 2  # one rejection + one success
     # Confirm a 30-min backoff sleep happened.
     assert any(s >= 30 * 60 for s in sleep_calls), \
         f"expected an enqueue-limit backoff sleep, got {sleep_calls}"
+
+
+def test_drain_respects_total_limit(tmp_path, monkeypatch):
+    """`--limit N` caps the total names drained across chunks. With
+    chunk_size=2 and total_limit=4, the drain stops after exactly 2
+    chunks even though more names remain pending."""
+    from ingredients.cli import _drain_mapping_in_chunks
+    from common.llm.batch_provider import BatchResult, BatchStatus, BatchSubmission
+
+    pending = ["a", "b", "c", "d", "e", "f", "g"]
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.fetch_pending_llm_names",
+        lambda conn, mapper_version, limit=None: pending[:limit] if limit else list(pending),
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.db.fetch_pending_llm_names",
+        lambda conn, mapper_version, limit=None: pending[:limit] if limit else list(pending),
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.lexical_layer.bulk_lexical_candidates",
+        lambda conn, names, limit=20: {n: [] for n in names},
+    )
+
+    def _write_resolution(conn, normalized_name, taxonomy_node_id, source, mapper_version):
+        if normalized_name in pending:
+            pending.remove(normalized_name)
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.write_resolution", _write_resolution,
+    )
+
+    submit_calls: list[int] = []
+    def _submit(requests):
+        reqs = list(requests)
+        submit_calls.append(len(reqs))
+        return BatchSubmission(
+            batch_id=f"batch_{len(submit_calls)}", provider="openai",
+            model_id="gpt-5-mini", request_count=len(reqs),
+        )
+    provider = MagicMock()
+    provider.model_id = "gpt-5-mini"
+    provider.submit.side_effect = _submit
+
+    def _status(batch_id):
+        return BatchStatus(batch_id=batch_id, state="completed",
+                           completed=submit_calls[-1], total=submit_calls[-1])
+    provider.status.side_effect = _status
+
+    from common.llm.sidecar import load_sidecar
+    def _fetch_results(batch_id):
+        sc = load_sidecar(batch_id, batches_dir=tmp_path)
+        return iter([
+            BatchResult(custom_id=cid, raw_text='{"action": "chose", "node_id": 1}',
+                        error=None)
+            for cid in sc.request_map.keys()
+        ])
+    provider.fetch_results.side_effect = _fetch_results
+
+    db = MagicMock()
+    db.conn = MagicMock()
+    rc = _drain_mapping_in_chunks(
+        db, provider, tmp_path,
+        chunk_size=2, total_limit=4, poll_interval=0,
+    )
+    assert rc == 0
+    # 7 names pending, chunk_size=2, limit=4 → 2 chunks of 2 each, then stop.
+    assert submit_calls == [2, 2]
+    # 4 names drained; 3 remain in the queue (untouched by this run).
+    assert len(pending) == 3
+
+
+def test_drain_chunk_size_capped_by_remaining_limit(tmp_path, monkeypatch):
+    """If chunk_size > remaining_limit, the chunk shrinks to fit the cap.
+    chunk_size=10 + total_limit=3 → one chunk of 3, not 10."""
+    from ingredients.cli import _drain_mapping_in_chunks
+    from common.llm.batch_provider import BatchResult, BatchStatus, BatchSubmission
+
+    pending = ["a", "b", "c", "d", "e"]
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.fetch_pending_llm_names",
+        lambda conn, mapper_version, limit=None: pending[:limit] if limit else list(pending),
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.db.fetch_pending_llm_names",
+        lambda conn, mapper_version, limit=None: pending[:limit] if limit else list(pending),
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.lexical_layer.bulk_lexical_candidates",
+        lambda conn, names, limit=20: {n: [] for n in names},
+    )
+
+    def _write_resolution(conn, normalized_name, taxonomy_node_id, source, mapper_version):
+        if normalized_name in pending:
+            pending.remove(normalized_name)
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.write_resolution", _write_resolution,
+    )
+
+    submit_calls: list[int] = []
+    def _submit(requests):
+        reqs = list(requests)
+        submit_calls.append(len(reqs))
+        return BatchSubmission(
+            batch_id=f"batch_{len(submit_calls)}", provider="openai",
+            model_id="gpt-5-mini", request_count=len(reqs),
+        )
+    provider = MagicMock()
+    provider.model_id = "gpt-5-mini"
+    provider.submit.side_effect = _submit
+
+    def _status(batch_id):
+        return BatchStatus(batch_id=batch_id, state="completed",
+                           completed=submit_calls[-1], total=submit_calls[-1])
+    provider.status.side_effect = _status
+
+    from common.llm.sidecar import load_sidecar
+    def _fetch_results(batch_id):
+        sc = load_sidecar(batch_id, batches_dir=tmp_path)
+        return iter([
+            BatchResult(custom_id=cid, raw_text='{"action": "chose", "node_id": 1}',
+                        error=None)
+            for cid in sc.request_map.keys()
+        ])
+    provider.fetch_results.side_effect = _fetch_results
+
+    db = MagicMock()
+    db.conn = MagicMock()
+    rc = _drain_mapping_in_chunks(
+        db, provider, tmp_path,
+        chunk_size=10, total_limit=3, poll_interval=0,
+    )
+    assert rc == 0
+    assert submit_calls == [3]  # one chunk of 3, capped by total_limit
