@@ -58,4 +58,7 @@ class OpenAIProvider:
             kwargs["reasoning_effort"] = "minimal"
         resp = self.client.chat.completions.create(**kwargs)
         text = resp.choices[0].message.content or ""
+        # See common.llm.openai_batch._strip_nul_from_json_text for why.
+        from .openai_batch import _strip_nul_from_json_text
+        text = _strip_nul_from_json_text(text) or ""
         return ProviderResult(raw_text=text, model_id=self.model_id)

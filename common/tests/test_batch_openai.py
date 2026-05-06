@@ -127,11 +127,15 @@ def test_submit_omits_reasoning_effort_for_non_gpt5_models():
 
 
 def test_fetch_results_strips_nul_bytes_from_content():
-    """gpt-5-mini occasionally emits NUL bytes in JSON output. PostgreSQL
-    TEXT columns reject those (psycopg.DataError), so the provider strips
-    them at the edge before downstream code touches the value."""
+    """gpt-5-mini emits NUL bytes in two forms — a literal 0x00 in the JSON
+    source, OR more commonly a \\u0000 escape inside a string value that
+    decodes to NUL after json.loads. Both must be stripped before downstream
+    json.loads + Postgres write, otherwise psycopg.DataError mid-loop."""
     nul = chr(0)
-    dirty_content = '{"slug":"foo' + nul + 'bar"}'
+    # Two cases in one batch: literal 0x00 in JSON syntax, AND \u0000 escape
+    # inside a string value (the form gpt-5-mini actually emits in practice).
+    literal_form = '{"slug":"foo' + nul + 'bar"}'
+    escaped_form = r'{"slug":"baz\u0000qux"}'
 
     client = _stub_openai_client()
     fake_batch = MagicMock(
@@ -143,7 +147,14 @@ def test_fetch_results_strips_nul_bytes_from_content():
         json.dumps({
             "custom_id": "r0",
             "response": {"status_code": 200, "body": {
-                "choices": [{"message": {"content": dirty_content}}]
+                "choices": [{"message": {"content": literal_form}}]
+            }},
+            "error": None,
+        }) + "\n" +
+        json.dumps({
+            "custom_id": "r1",
+            "response": {"status_code": 200, "body": {
+                "choices": [{"message": {"content": escaped_form}}]
             }},
             "error": None,
         }) + "\n"
@@ -154,6 +165,16 @@ def test_fetch_results_strips_nul_bytes_from_content():
     client.files.content.return_value = fake_resp
 
     p = OpenAIBatchProvider(client=client, model_id="gpt-5-mini")
-    [result] = list(p.fetch_results("batch_xyz"))
-    assert result.raw_text == '{"slug":"foobar"}'
-    assert nul not in (result.raw_text or "")
+    results = list(p.fetch_results("batch_xyz"))
+    assert len(results) == 2
+
+    # Both raw_text values are valid JSON with NUL stripped — and crucially,
+    # parsing them does NOT yield NUL in any string value either.
+    for r in results:
+        assert nul not in (r.raw_text or "")
+        parsed = json.loads(r.raw_text)
+        assert nul not in parsed["slug"]
+
+    # The escaped form was the actual bug; assert it specifically.
+    parsed_escaped = json.loads(results[1].raw_text)
+    assert parsed_escaped["slug"] == "bazqux"

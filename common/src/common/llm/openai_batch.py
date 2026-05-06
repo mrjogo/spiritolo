@@ -129,11 +129,43 @@ class OpenAIBatchProvider:
                    .get("choices", [])
             )
             content = choices[0].get("message", {}).get("content") if choices else None
-            # gpt-5-mini occasionally emits literal NUL (0x00) bytes in
-            # otherwise-valid JSON output, especially around weird unicode in
-            # ingredient strings. PostgreSQL TEXT columns reject NUL bytes
-            # outright (psycopg.DataError) — strip them at the provider edge
-            # so downstream writers don't have to know about it.
-            if content is not None:
-                content = content.replace("\x00", "")
+            content = _strip_nul_from_json_text(content)
             yield BatchResult(custom_id=custom_id, raw_text=content, error=None)
+
+
+def _strip_nul_from_json_text(text: str | None) -> str | None:
+    """Strip NUL bytes from a JSON-formatted string at the provider edge.
+
+    gpt-5-mini occasionally emits NUL in two forms:
+      - literal 0x00 bytes in the JSON source (rare, but possible).
+      - \\u0000 escapes inside string values — common around weird unicode
+        in ingredient strings. These survive a naive content.replace("\\x00", "")
+        because they're 6 ASCII chars in the source until json.loads decodes
+        them, at which point downstream writers hit Postgres and crash with
+        psycopg.DataError ("text fields cannot contain NUL bytes").
+
+    We parse + deep-strip + re-serialize so both forms are gone from the
+    raw_text every BatchResult carries. If the content isn't JSON-parseable
+    (model returned non-JSON despite response_format), fall through with a
+    naive strip — downstream parse_response will still fail loudly, but at
+    least we won't crash the writer with NUL bytes.
+    """
+    if text is None:
+        return None
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return text.replace("\x00", "")
+    # Compact separators preserve the wire-format shape callers may have
+    # been depending on. parse_response() doesn't care, but tests do.
+    return json.dumps(_deep_strip_nul(parsed), separators=(",", ":"))
+
+
+def _deep_strip_nul(obj):
+    if isinstance(obj, str):
+        return obj.replace("\x00", "")
+    if isinstance(obj, dict):
+        return {_deep_strip_nul(k): _deep_strip_nul(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_deep_strip_nul(v) for v in obj]
+    return obj

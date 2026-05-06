@@ -17,7 +17,10 @@ def test_resolve_returns_provider_result_with_model_id():
     client = _fake_openai_client('{"action": "chose", "node_id": 7}')
     p = OpenAIProvider(client=client, model_id="gpt-5-mini")
     out = p.resolve(system_prompt="sys", user_prompt="u")
-    assert out.raw_text == '{"action": "chose", "node_id": 7}'
+    # NUL-strip re-serializes with compact separators; the parsed dict is
+    # what matters to downstream parse_response, not whitespace.
+    import json as _json
+    assert _json.loads(out.raw_text) == {"action": "chose", "node_id": 7}
     assert out.model_id == "gpt-5-mini"
     client.chat.completions.create.assert_called_once()
     kwargs = client.chat.completions.create.call_args.kwargs
