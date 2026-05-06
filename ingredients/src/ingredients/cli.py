@@ -154,7 +154,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p_resolve.add_argument(
         "--poll-interval", type=int, default=600,
-        help="With --wait, seconds between status polls (default: 600).",
+        help="With --wait or --all, seconds between status polls (default: 600).",
+    )
+    p_resolve.add_argument(
+        "--all", action="store_true", dest="run_all",
+        help="With --batch, drain the entire pending queue: submit a chunk, "
+             "poll until completed, ingest, repeat. Sleeps + retries on the "
+             "OpenAI enqueued-token-limit (429). Run under nohup/tmux for "
+             "fire-and-forget. Survives Ctrl-C cleanly (sidecars persist).",
+    )
+    p_resolve.add_argument(
+        "--chunk-size", type=int, default=2000,
+        help="With --all, names per submitted batch (default: 2000, sized "
+             "for the gpt-5-mini 5M enqueued-token tier).",
     )
     p_resolve.add_argument(
         "--model", default=None,
@@ -347,6 +359,16 @@ def run_resolve_pending(args: argparse.Namespace) -> int:
     if getattr(args, "wait", False) and getattr(args, "ingest", None):
         log.error("--wait and --ingest are mutually exclusive")
         return 2
+    if getattr(args, "run_all", False):
+        if not getattr(args, "batch", False):
+            log.error("--all requires --batch")
+            return 2
+        if getattr(args, "ingest", None):
+            log.error("--all and --ingest are mutually exclusive")
+            return 2
+        if args.limit is not None:
+            log.error("--all manages chunking via --chunk-size; do not pass --limit")
+            return 2
 
     db = IngredientsDatabase()
     try:
@@ -392,7 +414,7 @@ def run_resolve_pending(args: argparse.Namespace) -> int:
                 log.info("aborted by operator")
                 return 1
 
-        # ---- Batch submit (and optional --wait) path ----
+        # ---- Batch submit (and optional --wait or --all) path ----
         if getattr(args, "batch", False):
             from common.llm.openai_batch import OpenAIBatchProvider
             _model = getattr(args, "model", None)
@@ -400,6 +422,12 @@ def run_resolve_pending(args: argparse.Namespace) -> int:
                 OpenAIBatchProvider.from_env(model_id=_model)
                 if _model else OpenAIBatchProvider.from_env()
             )
+            if getattr(args, "run_all", False):
+                return _run_all_mapping(
+                    db, provider, BATCHES_DIR,
+                    chunk_size=args.chunk_size,
+                    poll_interval=getattr(args, "poll_interval", 600),
+                )
             outcome = submit_phase2_batch(
                 db.conn, provider=provider,
                 batches_dir=BATCHES_DIR, limit=args.limit,
@@ -465,6 +493,114 @@ def _wait_then_ingest_mapping(db, provider, batch_id, batches_dir, poll_interval
         f"Map resolve-pending ingest ({batch_id})",
         {"all": Counter(counts)}, mode="applied",
     )
+
+
+def _run_all_mapping(db, provider, batches_dir, *, chunk_size, poll_interval):
+    """Drain the entire pending_llm queue chunk by chunk: submit a chunk,
+    poll until completed, ingest, repeat. Intended to be run under
+    nohup/tmux for true fire-and-forget."""
+    import time
+    from ingredients.mapping.db import fetch_pending_llm_names
+    from ingredients.mapping.llm_resolver import (
+        ingest_phase2_batch, submit_phase2_batch,
+    )
+    from ingredients.mapping.mapper import MAPPER_VERSION
+    from common.interrupt import InterruptHandler
+
+    # Sleep when OpenAI's enqueued-token tier rejects a submit. The error
+    # is structurally a 429 with message "Enqueued token limit reached…";
+    # we look for either the HTTP status or the literal phrase to be robust
+    # across SDK versions.
+    RATE_LIMIT_BACKOFF = 30 * 60   # 30 minutes — long enough for an
+                                    # in-flight batch to free some headroom.
+
+    def _is_enqueue_limit(exc: Exception) -> bool:
+        text = str(exc).lower()
+        if "enqueued token limit" in text or "enqueued tokens" in text:
+            return True
+        status = getattr(exc, "status_code", None)
+        return status == 429
+
+    chunk_idx = 0
+    aggregate_counts: Counter[str] = Counter()
+    with InterruptHandler() as interrupt:
+        while True:
+            if interrupt.requested:
+                log.info("interrupted; %d chunks ingested, leaving any in-flight "
+                         "batches submitted (use --ingest <id> to drain later)",
+                         chunk_idx)
+                break
+
+            remaining = fetch_pending_llm_names(
+                db.conn, mapper_version=MAPPER_VERSION,
+            )
+            if not remaining:
+                log.info("queue drained; all chunks ingested")
+                break
+
+            chunk_idx += 1
+            log.info("chunk %d: %d names still pending", chunk_idx, len(remaining))
+
+            # ---- submit (with 429 backoff) ----
+            while True:
+                if interrupt.requested:
+                    break
+                try:
+                    outcome = submit_phase2_batch(
+                        db.conn, provider=provider,
+                        batches_dir=batches_dir, limit=chunk_size,
+                    )
+                    break
+                except Exception as exc:
+                    if not _is_enqueue_limit(exc):
+                        raise
+                    log.warning(
+                        "enqueue-limit hit on chunk %d; sleeping %d min "
+                        "and retrying: %s", chunk_idx, RATE_LIMIT_BACKOFF // 60, exc,
+                    )
+                    time.sleep(RATE_LIMIT_BACKOFF)
+            if interrupt.requested:
+                break
+
+            batch_id = outcome.submission.batch_id
+            log.info(
+                "chunk %d submitted: batch %s (%d requests)",
+                chunk_idx, batch_id, outcome.submission.request_count,
+            )
+
+            # ---- poll until completed ----
+            while True:
+                if interrupt.requested:
+                    break
+                st = provider.status(batch_id)
+                log.info("chunk %d status=%s (%d/%d)",
+                         chunk_idx, st.state, st.completed, st.total)
+                if st.state == "completed":
+                    break
+                if st.state in ("failed", "expired", "cancelled"):
+                    log.error(
+                        "chunk %d batch %s ended in state %s — stopping --all",
+                        chunk_idx, batch_id, st.state,
+                    )
+                    return 1
+                time.sleep(poll_interval)
+            if interrupt.requested:
+                break
+
+            # ---- ingest ----
+            counts = ingest_phase2_batch(
+                conn=db.conn, provider=provider,
+                batch_id=batch_id, batches_dir=batches_dir,
+            )
+            for k, v in counts.items():
+                aggregate_counts[k] += v
+            log.info("chunk %d ingested: %s", chunk_idx, dict(counts))
+
+    print_summary(
+        f"Map resolve-pending --all ({chunk_idx} chunks)",
+        {"all": aggregate_counts}, mode="applied",
+    )
+    return 0
 
 
 def _wait_then_ingest_dedup(db, provider, batch_id, batches_dir, poll_interval):
