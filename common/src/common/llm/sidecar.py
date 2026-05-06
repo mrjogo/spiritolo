@@ -4,6 +4,10 @@ back to the right writers.
 Path: data/batches/<batch_id>.json (configurable per-call).
 On successful ingest, file is renamed <batch_id>.json.ingested so re-runs
 noisily skip; remove the suffix to force re-ingest.
+On terminal failure (state in failed/expired/cancelled), file is renamed
+<batch_id>.json.<state> so the operator can see at a glance which batches
+are live and which are dead. To retry against a re-submitted batch, the
+operator just removes the suffix.
 """
 
 from __future__ import annotations
@@ -45,6 +49,12 @@ def write_sidecar(sc: Sidecar, *, batches_dir: Path) -> Path:
     return path
 
 
+# Terminal suffixes a sidecar may carry. `.ingested` = success.
+# `.failed` / `.expired` / `.cancelled` = batch ended in that state on the
+# provider side; no results to ingest.
+_TERMINAL_SUFFIXES = ("ingested", "failed", "expired", "cancelled")
+
+
 def load_sidecar(
     batch_id: str, *, batches_dir: Path,
     expected_flow: str | None = None,
@@ -53,12 +63,21 @@ def load_sidecar(
     """Load sidecar by batch_id. Optionally enforce flow + version match."""
     path = batches_dir / f"{batch_id}.json"
     if not path.exists():
-        ingested = batches_dir / f"{batch_id}.json.ingested"
-        if ingested.exists():
-            raise SidecarMismatch(
-                f"sidecar for {batch_id} already ingested "
-                f"(at {ingested}). Remove the .ingested suffix to force re-ingest."
-            )
+        for suffix in _TERMINAL_SUFFIXES:
+            terminal = batches_dir / f"{batch_id}.json.{suffix}"
+            if terminal.exists():
+                if suffix == "ingested":
+                    raise SidecarMismatch(
+                        f"sidecar for {batch_id} already ingested "
+                        f"(at {terminal}). Remove the .ingested suffix to "
+                        "force re-ingest."
+                    )
+                raise SidecarMismatch(
+                    f"sidecar for {batch_id} previously marked {suffix!r} "
+                    f"(batch ended in that state on the provider side; at "
+                    f"{terminal}). Submit a new batch — there are no results "
+                    "to ingest from this one."
+                )
         raise FileNotFoundError(
             f"no sidecar at {path} — re-derive from OpenAI dashboard or re-submit."
         )
@@ -80,5 +99,16 @@ def load_sidecar(
 def mark_ingested(sidecar_path: Path) -> Path:
     """Rename <batch_id>.json → <batch_id>.json.ingested. Idempotent."""
     new_path = sidecar_path.with_suffix(sidecar_path.suffix + ".ingested")
+    sidecar_path.rename(new_path)
+    return new_path
+
+
+def mark_failed(sidecar_path: Path, *, state: str = "failed") -> Path:
+    """Rename <batch_id>.json → <batch_id>.json.<state> for a batch that
+    ended in a non-recoverable state on the provider (failed/expired/cancelled).
+    Returns the new path."""
+    if state not in ("failed", "expired", "cancelled"):
+        raise ValueError(f"unknown terminal state {state!r}")
+    new_path = sidecar_path.with_suffix(sidecar_path.suffix + f".{state}")
     sidecar_path.rename(new_path)
     return new_path

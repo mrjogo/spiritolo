@@ -585,6 +585,11 @@ def run_batch(args: argparse.Namespace) -> int:
                         break
                     if st.state in ("failed", "expired", "cancelled"):
                         log.error("batch ended in state %s", st.state)
+                        from common.llm.sidecar import mark_failed
+                        mark_failed(
+                            BATCHES_DIR / f"{outcome.submission.batch_id}.json",
+                            state=st.state,
+                        )
                         return 1
                     time.sleep(args.poll_interval)
             counts = ingest_classify_batch(

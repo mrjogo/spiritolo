@@ -483,6 +483,8 @@ def _wait_then_ingest_mapping(db, provider, batch_id, batches_dir, poll_interval
                 break
             if st.state in ("failed", "expired", "cancelled"):
                 log.error("batch ended in state %s", st.state)
+                from common.llm.sidecar import mark_failed
+                mark_failed(batches_dir / f"{batch_id}.json", state=st.state)
                 return
             time.sleep(poll_interval)
     counts = ingest_phase2_batch(
@@ -582,6 +584,8 @@ def _run_all_mapping(db, provider, batches_dir, *, chunk_size, poll_interval):
                         "chunk %d batch %s ended in state %s — stopping --all",
                         chunk_idx, batch_id, st.state,
                     )
+                    from common.llm.sidecar import mark_failed
+                    mark_failed(batches_dir / f"{batch_id}.json", state=st.state)
                     return 1
                 time.sleep(poll_interval)
             if interrupt.requested:
@@ -619,6 +623,8 @@ def _wait_then_ingest_dedup(db, provider, batch_id, batches_dir, poll_interval):
                 break
             if st.state in ("failed", "expired", "cancelled"):
                 log.error("batch ended in state %s", st.state)
+                from common.llm.sidecar import mark_failed
+                mark_failed(batches_dir / f"{batch_id}.json", state=st.state)
                 return
             time.sleep(poll_interval)
     counts = ingest_normalize_names_batch(

@@ -129,4 +129,11 @@ class OpenAIBatchProvider:
                    .get("choices", [])
             )
             content = choices[0].get("message", {}).get("content") if choices else None
+            # gpt-5-mini occasionally emits literal NUL (0x00) bytes in
+            # otherwise-valid JSON output, especially around weird unicode in
+            # ingredient strings. PostgreSQL TEXT columns reject NUL bytes
+            # outright (psycopg.DataError) — strip them at the provider edge
+            # so downstream writers don't have to know about it.
+            if content is not None:
+                content = content.replace("\x00", "")
             yield BatchResult(custom_id=custom_id, raw_text=content, error=None)

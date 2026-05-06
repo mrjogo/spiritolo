@@ -124,3 +124,36 @@ def test_submit_omits_reasoning_effort_for_non_gpt5_models():
         body = body.decode()
     line = json.loads(body.splitlines()[0])
     assert "reasoning_effort" not in line["body"]
+
+
+def test_fetch_results_strips_nul_bytes_from_content():
+    """gpt-5-mini occasionally emits NUL bytes in JSON output. PostgreSQL
+    TEXT columns reject those (psycopg.DataError), so the provider strips
+    them at the edge before downstream code touches the value."""
+    nul = chr(0)
+    dirty_content = '{"slug":"foo' + nul + 'bar"}'
+
+    client = _stub_openai_client()
+    fake_batch = MagicMock(
+        id="batch_xyz", status="completed",
+        output_file_id="file_out", error_file_id=None,
+    )
+    client.batches.retrieve.return_value = fake_batch
+    payload = (
+        json.dumps({
+            "custom_id": "r0",
+            "response": {"status_code": 200, "body": {
+                "choices": [{"message": {"content": dirty_content}}]
+            }},
+            "error": None,
+        }) + "\n"
+    ).encode()
+    fake_resp = MagicMock()
+    fake_resp.text = payload.decode()
+    fake_resp.read.return_value = payload
+    client.files.content.return_value = fake_resp
+
+    p = OpenAIBatchProvider(client=client, model_id="gpt-5-mini")
+    [result] = list(p.fetch_results("batch_xyz"))
+    assert result.raw_text == '{"slug":"foobar"}'
+    assert nul not in (result.raw_text or "")

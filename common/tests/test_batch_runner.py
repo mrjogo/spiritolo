@@ -162,3 +162,34 @@ def test_ingest_refuses_when_status_not_completed(tmp_path):
             flow="mapping.resolve_pending", version_constant="v3",
             on_result=lambda *a: None, batches_dir=tmp_path,
         )
+
+
+@pytest.mark.parametrize("state", ["failed", "expired", "cancelled"])
+def test_ingest_marks_sidecar_failed_on_terminal_states(tmp_path, state):
+    """Provider-side terminal failure must NOT raise. The sidecar gets
+    renamed `<batch_id>.json.<state>` and the function returns a count
+    dict so callers / --all loops can log + move on without a stack trace."""
+    submit_batch(
+        provider=_stub_provider(),
+        rows=[("v", "s", "u")],
+        to_request=lambda i, r: BatchRequest(custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2]),
+        row_to_id=lambda r: r[0],
+        flow="mapping.resolve_pending", version_constant="v3",
+        batches_dir=tmp_path,
+    )
+
+    ingest_provider = MagicMock()
+    ingest_provider.status.return_value = BatchStatus(
+        batch_id="batch_abc", state=state, completed=0, total=1,
+    )
+
+    counts = ingest_batch(
+        provider=ingest_provider, batch_id="batch_abc",
+        flow="mapping.resolve_pending", version_constant="v3",
+        on_result=lambda *a: None, batches_dir=tmp_path,
+    )
+    assert counts == {state: 1}
+    assert (tmp_path / f"batch_abc.json.{state}").exists()
+    assert not (tmp_path / "batch_abc.json").exists()
+    # fetch_results must not be called — there's nothing to drain.
+    ingest_provider.fetch_results.assert_not_called()

@@ -4,7 +4,8 @@ from pathlib import Path
 import pytest
 
 from common.llm.sidecar import (
-    Sidecar, SidecarMismatch, load_sidecar, mark_ingested, write_sidecar,
+    Sidecar, SidecarMismatch, load_sidecar, mark_failed, mark_ingested,
+    write_sidecar,
 )
 
 
@@ -82,4 +83,45 @@ def test_load_refuses_already_ingested(tmp_path):
     path = write_sidecar(sc, batches_dir=tmp_path)
     mark_ingested(path)
     with pytest.raises(SidecarMismatch, match="already ingested"):
+        load_sidecar("b1", batches_dir=tmp_path)
+
+
+@pytest.mark.parametrize("state", ["failed", "expired", "cancelled"])
+def test_mark_failed_renames_file(tmp_path, state):
+    sc = Sidecar(
+        batch_id="b1", provider="openai",
+        flow="mapping.resolve_pending", model_id="gpt-5-mini",
+        version_constant="v3", submitted_at="2026-05-05T12:00:00Z",
+        request_map={"r0": "vodka"},
+    )
+    path = write_sidecar(sc, batches_dir=tmp_path)
+    new_path = mark_failed(path, state=state)
+    assert new_path == tmp_path / f"b1.json.{state}"
+    assert new_path.exists()
+    assert not path.exists()
+
+
+def test_mark_failed_rejects_unknown_state(tmp_path):
+    sc = Sidecar(
+        batch_id="b1", provider="openai",
+        flow="mapping.resolve_pending", model_id="gpt-5-mini",
+        version_constant="v3", submitted_at="2026-05-05T12:00:00Z",
+        request_map={},
+    )
+    path = write_sidecar(sc, batches_dir=tmp_path)
+    with pytest.raises(ValueError, match="unknown terminal state"):
+        mark_failed(path, state="completed")
+
+
+@pytest.mark.parametrize("state", ["failed", "expired", "cancelled"])
+def test_load_refuses_after_mark_failed(tmp_path, state):
+    sc = Sidecar(
+        batch_id="b1", provider="openai",
+        flow="mapping.resolve_pending", model_id="gpt-5-mini",
+        version_constant="v3", submitted_at="2026-05-05T12:00:00Z",
+        request_map={},
+    )
+    path = write_sidecar(sc, batches_dir=tmp_path)
+    mark_failed(path, state=state)
+    with pytest.raises(SidecarMismatch, match=state):
         load_sidecar("b1", batches_dir=tmp_path)
