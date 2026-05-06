@@ -227,18 +227,49 @@ def submit_phase2_batch(
 ) -> BatchSubmitOutcome:
     """Submit pending names as an OpenAI batch. Returns the submission +
     sidecar path. Caller (CLI) prints the batch_id and exits."""
+    from common.progress import make_progress
+    from .lexical_layer import bulk_lexical_candidates
+
     names = fetch_pending_llm_names(conn, mapper_version=MAPPER_VERSION, limit=limit)
     if not names:
         raise RuntimeError("nothing pending; queue is empty")
+    total = len(names)
 
+    log.info("fetching lexical candidates for %d distinct names…", total)
+    candidates_by_name = bulk_lexical_candidates(conn, names)
+    all_node_ids = sorted({
+        c["node_id"] for cands in candidates_by_name.values() for c in cands
+    })
+
+    log.info("fetching parent slugs for %d candidate nodes…", len(all_node_ids))
+    parents_by_child: dict[int, list[str]] = {}
+    if all_node_ids:
+        parent_rows = conn.execute(
+            """
+            select e.child_id, n.slug
+            from taxonomy_edges e
+            join taxonomy_nodes n on n.id = e.parent_id
+            where e.child_id = any(%s)
+            """,
+            (all_node_ids,),
+        ).fetchall()
+        for child, slug in parent_rows:
+            parents_by_child.setdefault(child, []).append(slug)
+
+    log.info("building %d prompts…", total)
+    progress = make_progress(total=total)
     rows = []
-    for n in names:
-        cands = _candidates_with_parents(conn, n)
+    for idx, n in enumerate(names, start=1):
+        cands = candidates_by_name.get(n, [])
+        for c in cands:
+            c["parents"] = parents_by_child.get(c["node_id"], [])
         user_prompt = build_user_prompt(
             normalized_name=n, parser_unit=None, site=site, candidates=cands,
         )
         rows.append((n, SYSTEM_PROMPT, user_prompt))
+        progress(idx)
 
+    log.info("submitting %d-request batch to %s…", total, provider.model_id)
     return submit_batch(
         provider=provider, rows=rows,
         to_request=lambda i, r: BatchRequest(

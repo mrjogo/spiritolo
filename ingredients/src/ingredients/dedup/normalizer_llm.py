@@ -118,21 +118,28 @@ def submit_normalize_names_batch(
     limit: int | None = None,
 ) -> BatchSubmitOutcome:
     """Submit pending canonical-name resolutions as an OpenAI batch."""
+    from common.progress import make_progress
+
     raw_names = fetch_pending_canonical_names(
         conn, normalizer_version=NORMALIZER_VERSION, limit=limit,
     )
     if not raw_names:
         raise RuntimeError("nothing pending; queue is empty")
+    total = len(raw_names)
 
+    log.info("building %d prompts (lexical lookup per name)…", total)
+    progress = make_progress(total=total)
     rows = []
-    for raw in raw_names:
+    for idx, raw in enumerate(raw_names, start=1):
         normalized = normalize_cocktail_name(raw)
         cands = lexical_candidates(conn, normalized, limit=20)
         user_prompt = build_user_prompt(
             raw_name=raw, normalized=normalized, candidates=cands,
         )
         rows.append((raw, SYSTEM_PROMPT, user_prompt))
+        progress(idx)
 
+    log.info("submitting %d-request batch to %s…", total, provider.model_id)
     return submit_batch(
         provider=provider, rows=rows,
         to_request=lambda i, r: BatchRequest(

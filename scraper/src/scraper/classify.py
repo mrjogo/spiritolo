@@ -463,12 +463,15 @@ def submit_classify_batch(
     rows = db.get_unclassified(site=site, limit=limit)
     if not rows:
         raise RuntimeError("nothing pending; queue is empty")
+    total = len(rows)
 
+    log.info("building %d prompts…", total)
     payload = []
     for r in rows:
         user = build_user_message(r["url"], r.get("sitemap_source"))
         payload.append((r["url"], SYSTEM_PROMPT, user))
 
+    log.info("submitting %d-request batch to %s…", total, provider.model_id)
     return submit_batch(
         provider=provider, rows=payload,
         to_request=lambda i, p: BatchRequest(
