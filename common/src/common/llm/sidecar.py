@@ -103,6 +103,29 @@ def mark_ingested(sidecar_path: Path) -> Path:
     return new_path
 
 
+def find_ingestable_batch_ids(
+    batches_dir: Path, *, include_ingested: bool = False,
+) -> list[str]:
+    """Return sorted batch_ids whose sidecar is in `batches_dir`.
+
+    Always includes `<id>.json` (live, not yet drained).
+    With `include_ingested=True`, also includes `<id>.json.ingested` —
+    callers planning to re-ingest must `force_unmark_ingested` each id
+    before `load_sidecar`.
+
+    Skips terminal-failed sidecars (`.failed`/`.expired`/`.cancelled`):
+    those batches have no provider-side results to drain.
+    """
+    ids: set[str] = set()
+    for p in batches_dir.iterdir():
+        n = p.name
+        if n.endswith(".json"):
+            ids.add(n[: -len(".json")])
+        elif include_ingested and n.endswith(".json.ingested"):
+            ids.add(n[: -len(".json.ingested")])
+    return sorted(ids)
+
+
 def force_unmark_ingested(batch_id: str, *, batches_dir: Path) -> Path:
     """Rename <batch_id>.json.ingested → <batch_id>.json so the next
     load_sidecar call accepts it. No-op if the unsuffixed path is already

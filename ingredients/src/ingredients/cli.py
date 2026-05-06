@@ -363,24 +363,20 @@ def run_resolve_pending(args: argparse.Namespace) -> int:
         # ---- Batch ingest path (drain a previously-submitted batch) ----
         if getattr(args, "batch", False) and getattr(args, "ingest", None):
             from common.llm.openai_batch import OpenAIBatchProvider
-            from common.llm.sidecar import force_unmark_ingested
+            from common.llm.sidecar import (
+                SidecarMismatch, find_ingestable_batch_ids,
+                force_unmark_ingested,
+            )
             _model = getattr(args, "model", None)
             provider = (
                 OpenAIBatchProvider.from_env(model_id=_model)
                 if _model else OpenAIBatchProvider.from_env()
             )
-            if getattr(args, "force", False):
-                force_unmark_ingested(args.ingest, batches_dir=BATCHES_DIR)
-                log.info("--force: unmarked .ingested for %s", args.ingest)
-            counts = ingest_phase2_batch(
-                conn=db.conn, provider=provider,
-                batch_id=args.ingest, batches_dir=BATCHES_DIR,
+            force = getattr(args, "force", False)
+            return _run_mapping_ingest(
+                db, provider, args.ingest, force=force,
+                default_dir=BATCHES_DIR,
             )
-            print_summary(
-                f"Map resolve-pending ingest ({args.ingest})",
-                {"all": Counter(counts)}, mode="applied",
-            )
-            return 0
 
         # ---- Pre-flight: count pending and confirm ----
         pending = fetch_pending_llm_names(db.conn, mapper_version=MAPPER_VERSION)
@@ -449,6 +445,57 @@ def run_resolve_pending(args: argparse.Namespace) -> int:
         return 0
     finally:
         db.close()
+
+
+def _run_mapping_ingest(db, provider, ingest_arg, *, force: bool, default_dir):
+    """Ingest one batch (when ingest_arg is a batch_id) or every loadable
+    sidecar in a directory (when ingest_arg is a path to a directory).
+    With force=True, also re-ingests sidecars marked .ingested. Skips
+    terminal-failed sidecars (.failed/.expired/.cancelled) — those have
+    no provider-side results to drain."""
+    import os
+    from pathlib import Path
+    from ingredients.mapping.llm_resolver import ingest_phase2_batch
+    from common.llm.sidecar import (
+        SidecarMismatch, find_ingestable_batch_ids, force_unmark_ingested,
+    )
+
+    if os.path.isdir(ingest_arg):
+        batches_dir = Path(ingest_arg)
+        batch_ids = find_ingestable_batch_ids(
+            batches_dir, include_ingested=force,
+        )
+        if not batch_ids:
+            log.info("no sidecars found in %s", batches_dir)
+            return 0
+        log.info("ingesting %d batches from %s", len(batch_ids), batches_dir)
+    else:
+        batches_dir = default_dir
+        batch_ids = [ingest_arg]
+
+    aggregate: Counter[str] = Counter()
+    for bid in batch_ids:
+        try:
+            if force:
+                force_unmark_ingested(bid, batches_dir=batches_dir)
+            counts = ingest_phase2_batch(
+                conn=db.conn, provider=provider,
+                batch_id=bid, batches_dir=batches_dir,
+            )
+            log.info("  %s: %s", bid, dict(counts))
+            for k, v in counts.items():
+                aggregate[k] += v
+        except (SidecarMismatch, FileNotFoundError) as exc:
+            log.warning("skipping %s: %s", bid, exc)
+            continue
+
+    label = (
+        f"Map resolve-pending ingest ({len(batch_ids)} batches from {ingest_arg})"
+        if os.path.isdir(ingest_arg)
+        else f"Map resolve-pending ingest ({ingest_arg})"
+    )
+    print_summary(label, {"all": aggregate}, mode="applied")
+    return 0
 
 
 def _drain_mapping_in_chunks(
@@ -581,6 +628,54 @@ def _drain_mapping_in_chunks(
         f"Map resolve-pending ({chunk_idx} chunks, {drained} drained)",
         {"all": aggregate_counts}, mode="applied",
     )
+    return 0
+
+
+def _run_dedup_ingest(db, provider, ingest_arg, *, force: bool, default_dir):
+    """Same shape as `_run_mapping_ingest`, but for dedup. See that
+    function for the behavioral spec."""
+    import os
+    from pathlib import Path
+    from ingredients.dedup.normalizer_llm import ingest_normalize_names_batch
+    from common.llm.sidecar import (
+        SidecarMismatch, find_ingestable_batch_ids, force_unmark_ingested,
+    )
+
+    if os.path.isdir(ingest_arg):
+        batches_dir = Path(ingest_arg)
+        batch_ids = find_ingestable_batch_ids(
+            batches_dir, include_ingested=force,
+        )
+        if not batch_ids:
+            log.info("no sidecars found in %s", batches_dir)
+            return 0
+        log.info("ingesting %d batches from %s", len(batch_ids), batches_dir)
+    else:
+        batches_dir = default_dir
+        batch_ids = [ingest_arg]
+
+    aggregate: Counter[str] = Counter()
+    for bid in batch_ids:
+        try:
+            if force:
+                force_unmark_ingested(bid, batches_dir=batches_dir)
+            counts = ingest_normalize_names_batch(
+                conn=db.conn, provider=provider,
+                batch_id=bid, batches_dir=batches_dir,
+            )
+            log.info("  %s: %s", bid, dict(counts))
+            for k, v in counts.items():
+                aggregate[k] += v
+        except (SidecarMismatch, FileNotFoundError) as exc:
+            log.warning("skipping %s: %s", bid, exc)
+            continue
+
+    label = (
+        f"normalize-names ingest ({len(batch_ids)} batches from {ingest_arg})"
+        if os.path.isdir(ingest_arg)
+        else f"normalize-names resolve-pending ingest ({ingest_arg})"
+    )
+    print_summary(label, {"all": aggregate}, mode="applied")
     return 0
 
 
@@ -896,24 +991,16 @@ def run_normalize_names(args: argparse.Namespace) -> int:
             # ---- Batch ingest path (drain a previously-submitted batch) ----
             if getattr(args, "batch", False) and getattr(args, "ingest", None):
                 from common.llm.openai_batch import OpenAIBatchProvider
-                from common.llm.sidecar import force_unmark_ingested
                 _model = getattr(args, "model", None)
                 provider = (
                     OpenAIBatchProvider.from_env(model_id=_model)
                     if _model else OpenAIBatchProvider.from_env()
                 )
-                if getattr(args, "force", False):
-                    force_unmark_ingested(args.ingest, batches_dir=BATCHES_DIR)
-                    log.info("--force: unmarked .ingested for %s", args.ingest)
-                counts = ingest_normalize_names_batch(
-                    conn=db.conn, provider=provider,
-                    batch_id=args.ingest, batches_dir=BATCHES_DIR,
+                force = getattr(args, "force", False)
+                return _run_dedup_ingest(
+                    db, provider, args.ingest, force=force,
+                    default_dir=BATCHES_DIR,
                 )
-                print_summary(
-                    f"normalize-names resolve-pending ingest ({args.ingest})",
-                    {"all": Counter(counts)}, mode="applied",
-                )
-                return 0
 
             # ---- Pre-flight: count pending and confirm ----
             residuals = fetch_pending_canonical_names(db.conn, normalizer_version=NORMALIZER_VERSION)

@@ -538,6 +538,54 @@ def ingest_classify_batch(
     )
 
 
+def _run_classify_ingest(db, provider, ingest_arg, *, force: bool, default_dir):
+    """Ingest one batch (when ingest_arg is a batch_id) or every loadable
+    sidecar in a directory (when ingest_arg is a path to a directory).
+    See ingredients/cli.py:_run_mapping_ingest for the spec — same shape."""
+    import os
+    from pathlib import Path
+    from common.llm.sidecar import (
+        SidecarMismatch, find_ingestable_batch_ids, force_unmark_ingested,
+    )
+
+    if os.path.isdir(ingest_arg):
+        batches_dir = Path(ingest_arg)
+        batch_ids = find_ingestable_batch_ids(
+            batches_dir, include_ingested=force,
+        )
+        if not batch_ids:
+            log.info("no sidecars found in %s", batches_dir)
+            return 0
+        log.info("ingesting %d batches from %s", len(batch_ids), batches_dir)
+    else:
+        batches_dir = default_dir
+        batch_ids = [ingest_arg]
+
+    aggregate: Counter = Counter()
+    for bid in batch_ids:
+        try:
+            if force:
+                force_unmark_ingested(bid, batches_dir=batches_dir)
+            counts = ingest_classify_batch(
+                db=db, provider=provider, batch_id=bid,
+                batches_dir=batches_dir,
+            )
+            log.info("  %s: %s", bid, dict(counts))
+            for k, v in counts.items():
+                aggregate[k] += v
+        except (SidecarMismatch, FileNotFoundError) as exc:
+            log.warning("skipping %s: %s", bid, exc)
+            continue
+
+    label = (
+        f"Classify ingest ({len(batch_ids)} batches from {ingest_arg})"
+        if os.path.isdir(ingest_arg)
+        else f"Classify ingest ({ingest_arg})"
+    )
+    print_summary(label, {"all": aggregate})
+    return 0
+
+
 def run_batch(args: argparse.Namespace) -> int:
     """Batch entry point: ingest-only when --ingest is given; otherwise
     drain in chunks (submit → poll → ingest, repeating)."""
@@ -559,19 +607,11 @@ def run_batch(args: argparse.Namespace) -> int:
         provider = OpenAIBatchProvider.from_env(**provider_kwargs)
 
         if args.ingest:
-            from common.llm.sidecar import force_unmark_ingested
-            if getattr(args, "force", False):
-                force_unmark_ingested(args.ingest, batches_dir=BATCHES_DIR)
-                log.info("--force: unmarked .ingested for %s", args.ingest)
-            counts = ingest_classify_batch(
-                db=db, provider=provider, batch_id=args.ingest,
-                batches_dir=BATCHES_DIR,
+            return _run_classify_ingest(
+                db, provider, args.ingest,
+                force=getattr(args, "force", False),
+                default_dir=BATCHES_DIR,
             )
-            print_summary(
-                f"Classify ingest ({args.ingest})",
-                {"all": Counter(counts)},
-            )
-            return 0
 
         # ---- Drain in chunks ----
         chunk_size = getattr(args, "chunk_size", 2000)
