@@ -47,6 +47,10 @@ def test_submit_uploads_jsonl_then_creates_batch():
     assert lines[0]["body"]["model"] == "gpt-5-mini"
     assert lines[0]["body"]["messages"][0] == {"role": "system", "content": "s"}
     assert lines[0]["body"]["messages"][1] == {"role": "user", "content": "u0"}
+    # gpt-5-family token + reasoning settings (see openai_batch.py docstring).
+    assert lines[0]["body"]["max_completion_tokens"] == 2048
+    assert lines[0]["body"]["reasoning_effort"] == "minimal"
+    assert lines[0]["body"]["response_format"] == {"type": "json_object"}
 
     # batches.create called with the uploaded file id + 24h window.
     assert client.batches.create.call_count == 1
@@ -105,3 +109,18 @@ def test_fetch_results_streams_parsed_results():
         BatchResult(custom_id="r0", raw_text='{"action":"chose"}', error=None),
         BatchResult(custom_id="r1", raw_text=None, error="rate limited"),
     ]
+
+
+def test_submit_omits_reasoning_effort_for_non_gpt5_models():
+    """gpt-4o-mini and older reject reasoning_effort with a 400."""
+    client = _stub_openai_client()
+    client.files.create.return_value = MagicMock(id="file_x")
+    client.batches.create.return_value = MagicMock(id="batch_y")
+    p = OpenAIBatchProvider(client=client, model_id="gpt-4o-mini")
+    p.submit([BatchRequest(custom_id="r0", system_prompt="s", user_prompt="u")])
+    raw = client.files.create.call_args.kwargs["file"]
+    body = raw if isinstance(raw, (bytes, str)) else raw.read()
+    if isinstance(body, bytes):
+        body = body.decode()
+    line = json.loads(body.splitlines()[0])
+    assert "reasoning_effort" not in line["body"]

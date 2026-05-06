@@ -1,6 +1,14 @@
 """OpenAI sync provider. Defaults to gpt-5-mini.
 
 For batch (50% off, ~24h SLA), see openai_batch.py.
+
+gpt-5-family models charge reasoning tokens against `max_completion_tokens`,
+so the budget must cover both the (invisible) reasoning trace and the
+(visible) output. We default to 2048 to leave headroom; for our pure
+structured-retrieval prompts we also pin `reasoning_effort='minimal'`
+so the model doesn't burn the budget thinking about a question that
+doesn't need thinking. Without these two together, gpt-5-mini routinely
+returns empty content with finish_reason='length'.
 """
 
 from __future__ import annotations
@@ -11,7 +19,12 @@ from dataclasses import dataclass
 from .provider import ProviderResult
 
 DEFAULT_MODEL = "gpt-5-mini"
-DEFAULT_MAX_TOKENS = 256
+DEFAULT_MAX_TOKENS = 2048
+
+
+def _is_gpt5_family(model_id: str) -> bool:
+    """gpt-5/gpt-5-mini/gpt-5-nano accept reasoning_effort. Older models error."""
+    return model_id.startswith("gpt-5")
 
 
 @dataclass
@@ -32,14 +45,17 @@ class OpenAIProvider:
         return cls(client=openai.OpenAI(api_key=api_key), model_id=model_id)
 
     def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
-        resp = self.client.chat.completions.create(
-            model=self.model_id,
-            max_completion_tokens=self.max_tokens,
-            messages=[
+        kwargs = {
+            "model": self.model_id,
+            "max_completion_tokens": self.max_tokens,
+            "messages": [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            response_format={"type": "json_object"},
-        )
+            "response_format": {"type": "json_object"},
+        }
+        if _is_gpt5_family(self.model_id):
+            kwargs["reasoning_effort"] = "minimal"
+        resp = self.client.chat.completions.create(**kwargs)
         text = resp.choices[0].message.content or ""
         return ProviderResult(raw_text=text, model_id=self.model_id)
