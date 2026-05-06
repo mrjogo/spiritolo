@@ -139,4 +139,6 @@ cat > "$META" <<EOF_META
 }
 EOF_META
 
+chmod 444 "$OUT" "$META"
+
 ls -lh "$OUT" "$META"
