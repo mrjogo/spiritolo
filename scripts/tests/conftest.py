@@ -19,6 +19,13 @@ from dotenv import load_dotenv
 
 load_dotenv(pathlib.Path(__file__).resolve().parent.parent.parent / ".env")
 
+# Defensive: see ingredients/tests/conftest.py for the same reasoning —
+# any code path that defaults to SUPABASE_DB_URL must fail loud, never
+# silently wipe the dev DB.
+os.environ["SUPABASE_DB_URL"] = (
+    "postgresql://invalid:invalid@127.0.0.1:1/SUPABASE_DB_URL_must_not_be_used_in_tests"
+)
+
 _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 _MIGRATIONS_DIR = _REPO_ROOT / "supabase" / "migrations"
 

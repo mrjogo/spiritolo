@@ -20,12 +20,12 @@ import os
 import sys
 from collections import Counter
 
-from spiritolo_common.cli_common import (
+from common.cli_common import (
     add_reset_args, confirm_reset, describe_reset_scope,
 )
-from spiritolo_common.interrupt import InterruptHandler
-from spiritolo_common.progress import make_progress
-from spiritolo_common.summary import print_summary
+from common.interrupt import InterruptHandler
+from common.progress import make_progress
+from common.summary import print_summary
 
 from ingredients.db import IngredientsDatabase
 from ingredients.eval_set import run_eval
@@ -131,13 +131,42 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Phase 2 — drain the pending_llm queue using the chosen provider.",
     )
     p_resolve.add_argument(
-        "--provider", choices=["claude", "ollama"], required=True,
+        "--provider", choices=["claude", "ollama", "openai"], required=True,
         help="LLM provider to use.",
     )
     p_resolve.add_argument("--limit", type=int, default=None,
                            help="Process at most N distinct pending names.")
     p_resolve.add_argument("--yes", action="store_true",
                            help="Skip the residual-count confirmation prompt.")
+    p_resolve.add_argument(
+        "--batch", action="store_true",
+        help="Use OpenAI Batch API (50%% off, ~24h SLA). Loops "
+             "submit→poll→ingest until the queue (or --limit) is drained. "
+             "Only valid with --provider openai.",
+    )
+    p_resolve.add_argument(
+        "--ingest", metavar="BATCH_ID", default=None,
+        help="Ingest results from a previously submitted batch and exit. "
+             "Implies --batch.",
+    )
+    p_resolve.add_argument(
+        "--force", action="store_true",
+        help="With --ingest, re-ingest a sidecar already marked .ingested. "
+             "Idempotent against the DB — UPSERTs replay the same writes.",
+    )
+    p_resolve.add_argument(
+        "--chunk-size", type=int, default=2000,
+        help="With --batch, names per submitted batch (default: 2000, "
+             "sized for the gpt-5-mini 5M enqueued-token tier).",
+    )
+    p_resolve.add_argument(
+        "--poll-interval", type=int, default=600,
+        help="With --batch, seconds between status polls (default: 600).",
+    )
+    p_resolve.add_argument(
+        "--model", default=None,
+        help="Override the provider's default model id.",
+    )
 
     p_review = map_sub.add_parser(
         "review-proposals",
@@ -158,12 +187,40 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "resolve-pending",
         help="Phase 2 — drain the pending_llm queue using the chosen provider.",
     )
-    p_resolve_norm.add_argument("--provider", choices=["claude", "ollama"], required=True,
+    p_resolve_norm.add_argument("--provider", choices=["claude", "ollama", "openai"], required=True,
                                 help="LLM provider to use.")
     p_resolve_norm.add_argument("--limit", type=int, default=None,
                                 help="Process at most N distinct pending names.")
     p_resolve_norm.add_argument("--yes", action="store_true",
                                 help="Skip the residual-count confirmation prompt.")
+    p_resolve_norm.add_argument(
+        "--batch", action="store_true",
+        help="Use OpenAI Batch API (50%% off, ~24h SLA). Loops "
+             "submit→poll→ingest until the queue (or --limit) is drained. "
+             "Only valid with --provider openai.",
+    )
+    p_resolve_norm.add_argument(
+        "--ingest", metavar="BATCH_ID", default=None,
+        help="Ingest results from a previously submitted batch and exit. "
+             "Implies --batch.",
+    )
+    p_resolve_norm.add_argument(
+        "--force", action="store_true",
+        help="With --ingest, re-ingest a sidecar already marked .ingested.",
+    )
+    p_resolve_norm.add_argument(
+        "--chunk-size", type=int, default=2000,
+        help="With --batch, names per submitted batch (default: 2000, "
+             "sized for the gpt-5-mini 5M enqueued-token tier).",
+    )
+    p_resolve_norm.add_argument(
+        "--poll-interval", type=int, default=600,
+        help="With --batch, seconds between status polls (default: 600).",
+    )
+    p_resolve_norm.add_argument(
+        "--model", default=None,
+        help="Override the provider's default model id.",
+    )
 
     p_list_pending = norm_sub.add_parser(
         "list-pending",
@@ -285,38 +342,99 @@ def run_worker(args: argparse.Namespace) -> int:
 
 def run_resolve_pending(args: argparse.Namespace) -> int:
     from ingredients.mapping.db import fetch_pending_llm_names
-    from ingredients.mapping.llm_resolver import run_phase2
+    from ingredients.mapping.llm_resolver import (
+        run_phase2, submit_phase2_batch, ingest_phase2_batch,
+    )
     from ingredients.mapping.mapper import MAPPER_VERSION
+    from pathlib import Path
+
+    BATCHES_DIR = Path("data/batches")
+
+    # Validate flag combos
+    if getattr(args, "batch", False) and args.provider != "openai":
+        log.error("--batch requires --provider openai")
+        return 2
+    if getattr(args, "ingest", None) and not getattr(args, "batch", False):
+        # --ingest implies --batch
+        args.batch = True
 
     db = IngredientsDatabase()
     try:
+        # ---- Batch ingest path (drain a previously-submitted batch) ----
+        if getattr(args, "batch", False) and getattr(args, "ingest", None):
+            from common.llm.openai_batch import OpenAIBatchProvider
+            from common.llm.sidecar import (
+                SidecarMismatch, find_ingestable_batch_ids,
+                force_unmark_ingested,
+            )
+            _model = getattr(args, "model", None)
+            provider = (
+                OpenAIBatchProvider.from_env(model_id=_model)
+                if _model else OpenAIBatchProvider.from_env()
+            )
+            force = getattr(args, "force", False)
+            return _run_mapping_ingest(
+                db, provider, args.ingest, force=force,
+                default_dir=BATCHES_DIR,
+            )
+
+        # ---- Pre-flight: count pending and confirm ----
         pending = fetch_pending_llm_names(db.conn, mapper_version=MAPPER_VERSION)
         if not pending:
             log.info("nothing pending; queue is empty")
             return 0
 
-        # Show residual count + top-N before any external call so the
-        # operator can choose to skip / hand-curate / proceed.
         log.info("%d distinct names pending Phase 2", len(pending))
         for n in pending[:20]:
             log.info("  %s", n)
         if len(pending) > 20:
             log.info("  ... and %d more", len(pending) - 20)
 
+        if getattr(args, "batch", False):
+            target = (
+                f"at most {args.limit} of {len(pending)}"
+                if args.limit is not None else f"all {len(pending)}"
+            )
+            mode = (
+                f"OpenAI Batch API (50% off, ~24h SLA per chunk; "
+                f"chunk_size={args.chunk_size}, draining {target})"
+            )
+        else:
+            mode = f"--provider {args.provider}"
         if not args.yes:
-            sys.stderr.write(f"Proceed with --provider {args.provider}? [y/N]: ")
+            sys.stderr.write(f"Proceed with {mode}? [y/N]: ")
             sys.stderr.flush()
             answer = sys.stdin.readline().strip().lower()
             if answer not in ("y", "yes"):
                 log.info("aborted by operator")
                 return 1
 
+        # ---- Batch path: drain in chunks until queue/limit exhausted ----
+        if getattr(args, "batch", False):
+            from common.llm.openai_batch import OpenAIBatchProvider
+            _model = getattr(args, "model", None)
+            provider = (
+                OpenAIBatchProvider.from_env(model_id=_model)
+                if _model else OpenAIBatchProvider.from_env()
+            )
+            return _drain_mapping_in_chunks(
+                db, provider, BATCHES_DIR,
+                chunk_size=args.chunk_size,
+                total_limit=args.limit,
+                poll_interval=getattr(args, "poll_interval", 600),
+            )
+
+        # ---- Sync path (existing) ----
+        _model = getattr(args, "model", None)
         if args.provider == "claude":
-            from ingredients.mapping.llm_provider_claude import ClaudeProvider
-            provider = ClaudeProvider.from_env()
+            from common.llm.claude import ClaudeProvider
+            provider = ClaudeProvider.from_env(model_id=_model) if _model else ClaudeProvider.from_env()
+        elif args.provider == "openai":
+            from common.llm.openai import OpenAIProvider
+            provider = OpenAIProvider.from_env(model_id=_model) if _model else OpenAIProvider.from_env()
         else:
-            from ingredients.mapping.llm_provider_ollama import OllamaProvider
-            provider = OllamaProvider.from_env()
+            from common.llm.ollama import OllamaProvider
+            provider = OllamaProvider.from_env(model_id=_model) if _model else OllamaProvider.from_env()
 
         summary = run_phase2(db.conn, provider=provider, limit=args.limit)
         changes = {"all": Counter(summary)}
@@ -327,6 +445,356 @@ def run_resolve_pending(args: argparse.Namespace) -> int:
         return 0
     finally:
         db.close()
+
+
+def _run_mapping_ingest(db, provider, ingest_arg, *, force: bool, default_dir):
+    """Ingest one batch (when ingest_arg is a batch_id) or every loadable
+    sidecar in a directory (when ingest_arg is a path to a directory).
+    With force=True, also re-ingests sidecars marked .ingested. Skips
+    terminal-failed sidecars (.failed/.expired/.cancelled) — those have
+    no provider-side results to drain."""
+    import os
+    from pathlib import Path
+    from ingredients.mapping.llm_resolver import ingest_phase2_batch
+    from common.llm.sidecar import (
+        SidecarMismatch, find_ingestable_batch_ids, force_unmark_ingested,
+    )
+
+    if os.path.isdir(ingest_arg):
+        batches_dir = Path(ingest_arg)
+        batch_ids = find_ingestable_batch_ids(
+            batches_dir, include_ingested=force,
+        )
+        if not batch_ids:
+            log.info("no sidecars found in %s", batches_dir)
+            return 0
+        log.info("ingesting %d batches from %s", len(batch_ids), batches_dir)
+    else:
+        batches_dir = default_dir
+        batch_ids = [ingest_arg]
+
+    aggregate: Counter[str] = Counter()
+    for bid in batch_ids:
+        try:
+            if force:
+                force_unmark_ingested(bid, batches_dir=batches_dir)
+            counts = ingest_phase2_batch(
+                conn=db.conn, provider=provider,
+                batch_id=bid, batches_dir=batches_dir,
+            )
+            log.info("  %s: %s", bid, dict(counts))
+            for k, v in counts.items():
+                aggregate[k] += v
+        except (SidecarMismatch, FileNotFoundError) as exc:
+            log.warning("skipping %s: %s", bid, exc)
+            continue
+
+    label = (
+        f"Map resolve-pending ingest ({len(batch_ids)} batches from {ingest_arg})"
+        if os.path.isdir(ingest_arg)
+        else f"Map resolve-pending ingest ({ingest_arg})"
+    )
+    print_summary(label, {"all": aggregate}, mode="applied")
+    return 0
+
+
+def _drain_mapping_in_chunks(
+    db, provider, batches_dir,
+    *, chunk_size: int, total_limit: int | None, poll_interval: int,
+):
+    """Drain the pending_llm queue chunk by chunk: submit a chunk, poll
+    until completed, ingest, repeat. Intended to be run under nohup/tmux
+    for true fire-and-forget on large queues.
+
+    `total_limit` caps the number of distinct names drained across all
+    chunks (so `--limit 4000 --chunk-size 2000` runs exactly 2 chunks).
+    `total_limit=None` drains until the queue is empty.
+
+    Each chunk's per-chunk size is min(chunk_size, total_limit_remaining).
+    """
+    import time
+    from ingredients.mapping.db import fetch_pending_llm_names
+    from ingredients.mapping.llm_resolver import (
+        ingest_phase2_batch, submit_phase2_batch,
+    )
+    from ingredients.mapping.mapper import MAPPER_VERSION
+    from common.interrupt import InterruptHandler
+
+    # Sleep when OpenAI's enqueued-token tier rejects a submit. The error
+    # is structurally a 429 with message "Enqueued token limit reached…";
+    # we look for either the HTTP status or the literal phrase to be robust
+    # across SDK versions.
+    RATE_LIMIT_BACKOFF = 30 * 60   # 30 minutes — long enough for an
+                                    # in-flight batch to free some headroom.
+
+    def _is_enqueue_limit(exc: Exception) -> bool:
+        text = str(exc).lower()
+        if "enqueued token limit" in text or "enqueued tokens" in text:
+            return True
+        status = getattr(exc, "status_code", None)
+        return status == 429
+
+    chunk_idx = 0
+    drained = 0
+    aggregate_counts: Counter[str] = Counter()
+    with InterruptHandler() as interrupt:
+        while True:
+            if interrupt.requested:
+                log.info("interrupted; %d chunks ingested, leaving any in-flight "
+                         "batches submitted (use --ingest <id> to drain later)",
+                         chunk_idx)
+                break
+            if total_limit is not None and drained >= total_limit:
+                log.info("--limit %d reached; stopping after %d chunks",
+                         total_limit, chunk_idx)
+                break
+
+            remaining = fetch_pending_llm_names(
+                db.conn, mapper_version=MAPPER_VERSION,
+            )
+            if not remaining:
+                log.info("queue drained; all chunks ingested")
+                break
+
+            chunk_idx += 1
+            this_chunk = chunk_size
+            if total_limit is not None:
+                this_chunk = min(chunk_size, total_limit - drained)
+            log.info(
+                "chunk %d: %d names pending; submitting up to %d",
+                chunk_idx, len(remaining), this_chunk,
+            )
+
+            # ---- submit (with 429 backoff) ----
+            while True:
+                if interrupt.requested:
+                    break
+                try:
+                    outcome = submit_phase2_batch(
+                        db.conn, provider=provider,
+                        batches_dir=batches_dir, limit=this_chunk,
+                    )
+                    break
+                except Exception as exc:
+                    if not _is_enqueue_limit(exc):
+                        raise
+                    log.warning(
+                        "enqueue-limit hit on chunk %d; sleeping %d min "
+                        "and retrying: %s", chunk_idx, RATE_LIMIT_BACKOFF // 60, exc,
+                    )
+                    time.sleep(RATE_LIMIT_BACKOFF)
+            if interrupt.requested:
+                break
+
+            batch_id = outcome.submission.batch_id
+            log.info(
+                "chunk %d submitted: batch %s (%d requests)",
+                chunk_idx, batch_id, outcome.submission.request_count,
+            )
+
+            # ---- poll until completed ----
+            while True:
+                if interrupt.requested:
+                    break
+                st = provider.status(batch_id)
+                log.info("chunk %d status=%s (%d/%d)",
+                         chunk_idx, st.state, st.completed, st.total)
+                if st.state == "completed":
+                    break
+                if st.state in ("failed", "expired", "cancelled"):
+                    log.error(
+                        "chunk %d batch %s ended in state %s — stopping",
+                        chunk_idx, batch_id, st.state,
+                    )
+                    from common.llm.sidecar import mark_failed
+                    mark_failed(batches_dir / f"{batch_id}.json", state=st.state)
+                    return 1
+                time.sleep(poll_interval)
+            if interrupt.requested:
+                break
+
+            # ---- ingest ----
+            counts = ingest_phase2_batch(
+                conn=db.conn, provider=provider,
+                batch_id=batch_id, batches_dir=batches_dir,
+            )
+            for k, v in counts.items():
+                aggregate_counts[k] += v
+            drained += outcome.submission.request_count
+            log.info("chunk %d ingested: %s (drained %d total)",
+                     chunk_idx, dict(counts), drained)
+
+    print_summary(
+        f"Map resolve-pending ({chunk_idx} chunks, {drained} drained)",
+        {"all": aggregate_counts}, mode="applied",
+    )
+    return 0
+
+
+def _run_dedup_ingest(db, provider, ingest_arg, *, force: bool, default_dir):
+    """Same shape as `_run_mapping_ingest`, but for dedup. See that
+    function for the behavioral spec."""
+    import os
+    from pathlib import Path
+    from ingredients.dedup.normalizer_llm import ingest_normalize_names_batch
+    from common.llm.sidecar import (
+        SidecarMismatch, find_ingestable_batch_ids, force_unmark_ingested,
+    )
+
+    if os.path.isdir(ingest_arg):
+        batches_dir = Path(ingest_arg)
+        batch_ids = find_ingestable_batch_ids(
+            batches_dir, include_ingested=force,
+        )
+        if not batch_ids:
+            log.info("no sidecars found in %s", batches_dir)
+            return 0
+        log.info("ingesting %d batches from %s", len(batch_ids), batches_dir)
+    else:
+        batches_dir = default_dir
+        batch_ids = [ingest_arg]
+
+    aggregate: Counter[str] = Counter()
+    for bid in batch_ids:
+        try:
+            if force:
+                force_unmark_ingested(bid, batches_dir=batches_dir)
+            counts = ingest_normalize_names_batch(
+                conn=db.conn, provider=provider,
+                batch_id=bid, batches_dir=batches_dir,
+            )
+            log.info("  %s: %s", bid, dict(counts))
+            for k, v in counts.items():
+                aggregate[k] += v
+        except (SidecarMismatch, FileNotFoundError) as exc:
+            log.warning("skipping %s: %s", bid, exc)
+            continue
+
+    label = (
+        f"normalize-names ingest ({len(batch_ids)} batches from {ingest_arg})"
+        if os.path.isdir(ingest_arg)
+        else f"normalize-names resolve-pending ingest ({ingest_arg})"
+    )
+    print_summary(label, {"all": aggregate}, mode="applied")
+    return 0
+
+
+def _drain_dedup_in_chunks(
+    db, provider, batches_dir,
+    *, chunk_size: int, total_limit: int | None, poll_interval: int,
+):
+    """Drain the pending-canonical-names queue in chunks. Same shape as
+    `_drain_mapping_in_chunks`; differs only in which writer functions
+    are called and the version constant. See that function for the full
+    rationale on chunking, 429 backoff, and Ctrl-C handling."""
+    import time
+    from ingredients.dedup.db import fetch_pending_canonical_names
+    from ingredients.dedup.normalizer_llm import (
+        ingest_normalize_names_batch, submit_normalize_names_batch,
+    )
+    from ingredients.dedup.version import NORMALIZER_VERSION
+    from common.interrupt import InterruptHandler
+
+    RATE_LIMIT_BACKOFF = 30 * 60
+
+    def _is_enqueue_limit(exc: Exception) -> bool:
+        text = str(exc).lower()
+        if "enqueued token limit" in text or "enqueued tokens" in text:
+            return True
+        return getattr(exc, "status_code", None) == 429
+
+    chunk_idx = 0
+    drained = 0
+    aggregate_counts: Counter[str] = Counter()
+    with InterruptHandler() as interrupt:
+        while True:
+            if interrupt.requested:
+                log.info("interrupted; %d chunks ingested, leaving any in-flight "
+                         "batches submitted (use --ingest <id> to drain later)",
+                         chunk_idx)
+                break
+            if total_limit is not None and drained >= total_limit:
+                log.info("--limit %d reached; stopping after %d chunks",
+                         total_limit, chunk_idx)
+                break
+
+            remaining = fetch_pending_canonical_names(
+                db.conn, normalizer_version=NORMALIZER_VERSION,
+            )
+            if not remaining:
+                log.info("queue drained; all chunks ingested")
+                break
+
+            chunk_idx += 1
+            this_chunk = chunk_size
+            if total_limit is not None:
+                this_chunk = min(chunk_size, total_limit - drained)
+            log.info(
+                "chunk %d: %d names pending; submitting up to %d",
+                chunk_idx, len(remaining), this_chunk,
+            )
+
+            while True:
+                if interrupt.requested:
+                    break
+                try:
+                    outcome = submit_normalize_names_batch(
+                        db.conn, provider=provider,
+                        batches_dir=batches_dir, limit=this_chunk,
+                    )
+                    break
+                except Exception as exc:
+                    if not _is_enqueue_limit(exc):
+                        raise
+                    log.warning(
+                        "enqueue-limit hit on chunk %d; sleeping %d min "
+                        "and retrying: %s", chunk_idx, RATE_LIMIT_BACKOFF // 60, exc,
+                    )
+                    time.sleep(RATE_LIMIT_BACKOFF)
+            if interrupt.requested:
+                break
+
+            batch_id = outcome.submission.batch_id
+            log.info(
+                "chunk %d submitted: batch %s (%d requests)",
+                chunk_idx, batch_id, outcome.submission.request_count,
+            )
+
+            while True:
+                if interrupt.requested:
+                    break
+                st = provider.status(batch_id)
+                log.info("chunk %d status=%s (%d/%d)",
+                         chunk_idx, st.state, st.completed, st.total)
+                if st.state == "completed":
+                    break
+                if st.state in ("failed", "expired", "cancelled"):
+                    log.error(
+                        "chunk %d batch %s ended in state %s — stopping",
+                        chunk_idx, batch_id, st.state,
+                    )
+                    from common.llm.sidecar import mark_failed
+                    mark_failed(batches_dir / f"{batch_id}.json", state=st.state)
+                    return 1
+                time.sleep(poll_interval)
+            if interrupt.requested:
+                break
+
+            counts = ingest_normalize_names_batch(
+                conn=db.conn, provider=provider,
+                batch_id=batch_id, batches_dir=batches_dir,
+            )
+            for k, v in counts.items():
+                aggregate_counts[k] += v
+            drained += outcome.submission.request_count
+            log.info("chunk %d ingested: %s (drained %d total)",
+                     chunk_idx, dict(counts), drained)
+
+    print_summary(
+        f"normalize-names resolve-pending ({chunk_idx} chunks, {drained} drained)",
+        {"all": aggregate_counts}, mode="applied",
+    )
+    return 0
 
 
 def run_review_proposals(args: argparse.Namespace) -> int:
@@ -503,9 +971,38 @@ def run_normalize_names(args: argparse.Namespace) -> int:
     from ingredients.dedup.version import NORMALIZER_VERSION
 
     if getattr(args, "normalize_cmd", None) == "resolve-pending":
-        from ingredients.dedup.normalizer_llm import run_phase2
+        from ingredients.dedup.normalizer_llm import (
+            run_phase2, submit_normalize_names_batch, ingest_normalize_names_batch,
+        )
+        from pathlib import Path
+
+        BATCHES_DIR = Path("data/batches")
+
+        # Validate flag combos
+        if getattr(args, "batch", False) and args.provider != "openai":
+            log.error("--batch requires --provider openai")
+            return 2
+        if getattr(args, "ingest", None) and not getattr(args, "batch", False):
+            # --ingest implies --batch
+            args.batch = True
+
         db = IngredientsDatabase()
         try:
+            # ---- Batch ingest path (drain a previously-submitted batch) ----
+            if getattr(args, "batch", False) and getattr(args, "ingest", None):
+                from common.llm.openai_batch import OpenAIBatchProvider
+                _model = getattr(args, "model", None)
+                provider = (
+                    OpenAIBatchProvider.from_env(model_id=_model)
+                    if _model else OpenAIBatchProvider.from_env()
+                )
+                force = getattr(args, "force", False)
+                return _run_dedup_ingest(
+                    db, provider, args.ingest, force=force,
+                    default_dir=BATCHES_DIR,
+                )
+
+            # ---- Pre-flight: count pending and confirm ----
             residuals = fetch_pending_canonical_names(db.conn, normalizer_version=NORMALIZER_VERSION)
             if not residuals:
                 log.info("nothing pending; queue is empty")
@@ -515,19 +1012,54 @@ def run_normalize_names(args: argparse.Namespace) -> int:
                 log.info("  %s", n)
             if len(residuals) > 20:
                 log.info("  ... and %d more", len(residuals) - 20)
+
+            limit = getattr(args, "limit", None)
+            chunk_size = getattr(args, "chunk_size", 2000)
+            if getattr(args, "batch", False):
+                target = (
+                    f"at most {limit} of {len(residuals)}"
+                    if limit is not None else f"all {len(residuals)}"
+                )
+                mode = (
+                    f"OpenAI Batch API (50% off, ~24h SLA per chunk; "
+                    f"chunk_size={chunk_size}, draining {target})"
+                )
+            else:
+                mode = f"--provider {args.provider}"
             if not args.yes:
-                sys.stderr.write(f"Proceed with --provider {args.provider}? [y/N]: ")
+                sys.stderr.write(f"Proceed with {mode}? [y/N]: ")
                 sys.stderr.flush()
                 answer = sys.stdin.readline().strip().lower()
                 if answer not in ("y", "yes"):
                     log.info("aborted by operator")
                     return 1
+
+            # ---- Batch path: drain in chunks until queue/limit exhausted ----
+            if getattr(args, "batch", False):
+                from common.llm.openai_batch import OpenAIBatchProvider
+                _model = getattr(args, "model", None)
+                provider = (
+                    OpenAIBatchProvider.from_env(model_id=_model)
+                    if _model else OpenAIBatchProvider.from_env()
+                )
+                return _drain_dedup_in_chunks(
+                    db, provider, BATCHES_DIR,
+                    chunk_size=chunk_size,
+                    total_limit=limit,
+                    poll_interval=getattr(args, "poll_interval", 600),
+                )
+
+            # ---- Sync path (existing) ----
+            _model = getattr(args, "model", None)
             if args.provider == "claude":
-                from ingredients.mapping.llm_provider_claude import ClaudeProvider
-                provider = ClaudeProvider.from_env()
+                from common.llm.claude import ClaudeProvider
+                provider = ClaudeProvider.from_env(model_id=_model) if _model else ClaudeProvider.from_env()
+            elif args.provider == "openai":
+                from common.llm.openai import OpenAIProvider
+                provider = OpenAIProvider.from_env(model_id=_model) if _model else OpenAIProvider.from_env()
             else:
-                from ingredients.mapping.llm_provider_ollama import OllamaProvider
-                provider = OllamaProvider.from_env()
+                from common.llm.ollama import OllamaProvider
+                provider = OllamaProvider.from_env(model_id=_model) if _model else OllamaProvider.from_env()
             limit = getattr(args, "limit", None)
             counts = run_phase2(db.conn, provider=provider, limit=limit)
             changes = {"all": Counter(counts)}

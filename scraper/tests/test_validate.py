@@ -13,8 +13,8 @@ snapshots the pre-run pages.status / pages.content_type onto those eval rows so
 
 from pathlib import Path
 
-from scraper.src.db import Database
-from scraper.src.validate import revalidate
+from scraper.db import Database
+from scraper.validate import revalidate
 
 
 IMBIBE_STYLE_DRINK = """<!DOCTYPE html>

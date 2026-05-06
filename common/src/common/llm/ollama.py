@@ -1,15 +1,11 @@
-"""Ollama provider for Phase 2.
-
-Calls the local /api/generate endpoint over HTTP. No streaming.
-The classify pipeline already pulls qwen3:14b; reuse that model here.
-"""
+"""Ollama provider (sync). Calls the local /api/generate endpoint over HTTP."""
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 
-from .llm_provider import ProviderResult
+from .provider import ProviderResult
 
 DEFAULT_MODEL = "qwen3:14b"
 DEFAULT_BASE_URL = "http://localhost:11434"

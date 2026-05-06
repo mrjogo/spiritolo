@@ -7,8 +7,8 @@ import requests
 import yaml
 from lxml import etree
 
-from scraper.src.client import USER_AGENT, ScraperAPIClient
-from scraper.src.db import Database
+from scraper.client import USER_AGENT, ScraperAPIClient
+from scraper.db import Database
 
 SITEMAP_NS = {"sm": "http://www.sitemaps.org/schemas/sitemap/0.9"}
 

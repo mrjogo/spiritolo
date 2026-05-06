@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from ingredients.mapping.llm_provider_ollama import OllamaProvider
+from common.llm.ollama import OllamaProvider
 
 
 def _fake_httpx_client(reply_text: str) -> MagicMock:

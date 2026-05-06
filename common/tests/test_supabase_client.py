@@ -1,4 +1,4 @@
-"""Tests for pure helpers in spiritolo_common.supabase_client.
+"""Tests for pure helpers in common.supabase_client.
 
 These don't open a Postgres connection; they exercise the URL-shape
 heuristics the DB wrappers use to warn when SUPABASE_DB_URL looks like
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 
-from spiritolo_common.supabase_client import (
+from common.supabase_client import (
     looks_like_supabase_pooler,
     warn_if_staging_url,
 )
@@ -49,7 +49,7 @@ class TestLooksLikeSupabasePooler:
 class TestWarnIfStagingUrl:
     def test_warns_on_pooler(self, caplog):
         url = "postgresql://postgres.abc:pw@aws-0-us-east-1.pooler.supabase.com:5432/postgres"
-        with caplog.at_level(logging.WARNING, logger="spiritolo_common"):
+        with caplog.at_level(logging.WARNING, logger="common"):
             warn_if_staging_url(url)
         msgs = [r.message for r in caplog.records]
         assert any("pooler" in m.lower() for m in msgs), msgs
@@ -57,6 +57,6 @@ class TestWarnIfStagingUrl:
 
     def test_silent_on_local(self, caplog):
         url = "postgresql://postgres:postgres@host.docker.internal:54322/postgres"
-        with caplog.at_level(logging.WARNING, logger="spiritolo_common"):
+        with caplog.at_level(logging.WARNING, logger="common"):
             warn_if_staging_url(url)
         assert caplog.records == []

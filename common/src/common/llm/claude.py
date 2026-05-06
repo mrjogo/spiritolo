@@ -1,15 +1,11 @@
-"""Anthropic Claude provider for Phase 2.
-
-Defaults to Haiku 4.5; the resolver may instantiate a Sonnet 4.6 instance
-on retry for low-confidence cases (deferred — out of scope for v1 plan).
-"""
+"""Anthropic Claude provider (sync). Defaults to Haiku 4.5."""
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 
-from .llm_provider import ProviderResult
+from .provider import ProviderResult
 
 DEFAULT_MODEL = "claude-haiku-4-5"
 DEFAULT_MAX_TOKENS = 256
@@ -28,7 +24,7 @@ class ClaudeProvider:
         if not api_key:
             raise RuntimeError(
                 "ANTHROPIC_API_KEY not set. Add it to .env or export before "
-                "running `map resolve-pending --provider claude`."
+                "running --provider claude."
             )
         return cls(client=anthropic.Anthropic(api_key=api_key), model_id=model_id)
 
@@ -39,6 +35,5 @@ class ClaudeProvider:
             system=system_prompt,
             messages=[{"role": "user", "content": user_prompt}],
         )
-        # Anthropic returns a list of content blocks; the first one is text.
         text = msg.content[0].text
         return ProviderResult(raw_text=text, model_id=self.model_id)

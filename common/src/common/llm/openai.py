@@ -1,0 +1,64 @@
+"""OpenAI sync provider. Defaults to gpt-5-mini.
+
+For batch (50% off, ~24h SLA), see openai_batch.py.
+
+gpt-5-family models charge reasoning tokens against `max_completion_tokens`,
+so the budget must cover both the (invisible) reasoning trace and the
+(visible) output. We default to 2048 to leave headroom; for our pure
+structured-retrieval prompts we also pin `reasoning_effort='minimal'`
+so the model doesn't burn the budget thinking about a question that
+doesn't need thinking. Without these two together, gpt-5-mini routinely
+returns empty content with finish_reason='length'.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+
+from .provider import ProviderResult
+
+DEFAULT_MODEL = "gpt-5-mini"
+DEFAULT_MAX_TOKENS = 2048
+
+
+def _is_gpt5_family(model_id: str) -> bool:
+    """gpt-5/gpt-5-mini/gpt-5-nano accept reasoning_effort. Older models error."""
+    return model_id.startswith("gpt-5")
+
+
+@dataclass
+class OpenAIProvider:
+    client: object               # openai.OpenAI; typed as object so tests can pass a Mock.
+    model_id: str = DEFAULT_MODEL
+    max_tokens: int = DEFAULT_MAX_TOKENS
+
+    @classmethod
+    def from_env(cls, *, model_id: str = DEFAULT_MODEL) -> "OpenAIProvider":
+        import openai
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            raise RuntimeError(
+                "OPENAI_API_KEY not set. Add it to .env or export before "
+                "running --provider openai."
+            )
+        return cls(client=openai.OpenAI(api_key=api_key), model_id=model_id)
+
+    def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+        kwargs = {
+            "model": self.model_id,
+            "max_completion_tokens": self.max_tokens,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            "response_format": {"type": "json_object"},
+        }
+        if _is_gpt5_family(self.model_id):
+            kwargs["reasoning_effort"] = "minimal"
+        resp = self.client.chat.completions.create(**kwargs)
+        text = resp.choices[0].message.content or ""
+        # See common.llm.openai_batch._strip_nul_from_json_text for why.
+        from .openai_batch import _strip_nul_from_json_text
+        text = _strip_nul_from_json_text(text) or ""
+        return ProviderResult(raw_text=text, model_id=self.model_id)

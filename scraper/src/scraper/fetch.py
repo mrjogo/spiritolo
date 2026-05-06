@@ -8,14 +8,14 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-from spiritolo_common.interrupt import InterruptHandler
-from spiritolo_common.progress import make_progress
-from spiritolo_common.summary import print_summary
+from common.interrupt import InterruptHandler
+from common.progress import make_progress
+from common.summary import print_summary
 
-from scraper.src.classify_drink import SCORER_VERSION, classify_drink_scored
-from scraper.src.client import ScraperAPIClient, ScraperAPIError, AuthError, QuotaExhaustedError
-from scraper.src.db import Database
-from scraper.src.validation import VALIDATOR_VERSION, validate
+from scraper.classify_drink import SCORER_VERSION, classify_drink_scored
+from scraper.client import ScraperAPIClient, ScraperAPIError, AuthError, QuotaExhaustedError
+from scraper.db import Database
+from scraper.validation import VALIDATOR_VERSION, validate
 
 load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
@@ -116,7 +116,7 @@ def fetch_pages(
     ``dict[str, Counter]`` keyed by site, with categories like the JSON-LD
     ``@type`` of the fetched page (Recipe, NewsArticle, …), ``blocked``
     (validator rejection), or ``error`` (network/HTTP failure). Renders via
-    ``spiritolo_common.summary.print_summary``.
+    ``common.summary.print_summary``.
 
     ``paused_sites`` is reported separately because it isn't a count — it's
     a side-effect (circuit-breaker tripped). Returned for tests / pipeline

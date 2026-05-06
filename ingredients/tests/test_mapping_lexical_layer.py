@@ -1,7 +1,8 @@
 import pytest
 
 from ingredients.mapping.lexical_layer import (
-    LEXICAL_MIN_SIM, LEXICAL_RATIO, lexical_candidates, resolve_lexical,
+    LEXICAL_MIN_SIM, LEXICAL_RATIO, bulk_lexical_candidates,
+    lexical_candidates, resolve_lexical,
 )
 from ingredients.mapping.types import Pending, Resolved
 
@@ -40,6 +41,30 @@ def test_lexical_candidates_returns_top_n_with_scores(fixture_taxonomy):
     assert cands[0]["display_name"] == "Tanqueray"
     assert cands[0]["similarity"] >= LEXICAL_MIN_SIM
     assert "node_id" in cands[0]
+
+
+def test_bulk_lexical_candidates_matches_per_name(fixture_taxonomy):
+    """bulk_lexical_candidates is the batch-mode optimization: results for
+    each name must match what per-name lexical_candidates would return."""
+    conn, _ = fixture_taxonomy
+    names = ["tanqueray", "lemon juicee", "totally unrelated phrase"]
+    bulk = bulk_lexical_candidates(conn, names, limit=5)
+
+    assert set(bulk.keys()) == set(names)
+    for n in names:
+        per_name = lexical_candidates(conn, n, limit=5)
+        # Same set of node_ids and same scores (order-equivalent).
+        assert {(c["node_id"], round(c["similarity"], 6)) for c in bulk[n]} == \
+               {(c["node_id"], round(c["similarity"], 6)) for c in per_name}
+        # And bulk preserves descending similarity order.
+        sims = [c["similarity"] for c in bulk[n]]
+        assert sims == sorted(sims, reverse=True)
+
+
+def test_bulk_lexical_candidates_handles_empty_input(fixture_taxonomy):
+    conn, _ = fixture_taxonomy
+    assert bulk_lexical_candidates(conn, []) == {}
+    assert bulk_lexical_candidates(conn, ["", ""]) == {}
 
 
 def test_thresholds_are_tunable_constants():

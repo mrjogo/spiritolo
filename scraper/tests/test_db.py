@@ -2,7 +2,7 @@ import threading
 
 import pytest
 
-from scraper.src.db import (
+from scraper.db import (
     Database,
     DatabaseNotMigratedError,
     _expected_signature,
@@ -476,7 +476,7 @@ def test_get_unextracted_returns_drink_recipe_buckets_with_html(tmp_db):
     "already extracted" check is against Supabase (the source of truth),
     not the local audit table, because Supabase can be wiped independently.
     """
-    from scraper.src.db import Database
+    from scraper.db import Database
     db = Database(tmp_db)
     db.add_urls_batch(
         "difs",
@@ -518,7 +518,7 @@ def test_get_unextracted_returns_drink_recipe_buckets_with_html(tmp_db):
 def test_record_extract_upsert_latest_only(tmp_db):
     """Re-recording overwrites the prior extract_runs row for the same page
     (latest-only)."""
-    from scraper.src.db import Database
+    from scraper.db import Database
     db = Database(tmp_db)
     db.add_url("difs", "https://x/a")
     page_id = db.conn.execute("SELECT id FROM pages").fetchone()["id"]
@@ -543,7 +543,7 @@ def test_clear_extract_runs_covers_drink_buckets(tmp_db):
     """clear_extract_runs deletes extract_runs rows on both likely_drink_recipe
     and confirmed_drink pages — same scope as the extractor queue. Must NOT
     touch food/other buckets."""
-    from scraper.src.db import Database
+    from scraper.db import Database
     db = Database(tmp_db)
     db.add_urls_batch("difs", ["https://x/a", "https://x/b", "https://x/c"])
     db.set_content_type("https://x/a", "likely_drink_recipe")
@@ -572,7 +572,7 @@ def test_clear_extract_runs_covers_drink_buckets(tmp_db):
 
 
 def test_clear_extract_runs_scoped_by_site(tmp_db):
-    from scraper.src.db import Database
+    from scraper.db import Database
     db = Database(tmp_db)
     db.add_url("site_a", "https://a/1")
     db.add_url("site_b", "https://b/1")
@@ -599,7 +599,7 @@ def test_record_extract_no_recipe_removes_from_candidates(tmp_db):
     re-testing HTML that the extractor already determined has no Recipe.
     Successful-extraction rows do NOT gate the candidate list; that's what
     Supabase is for."""
-    from scraper.src.db import Database
+    from scraper.db import Database
     db = Database(tmp_db)
     db.add_urls_batch("difs", ["https://x/a"])
     db.set_content_type("https://x/a", "likely_drink_recipe")
@@ -1221,7 +1221,7 @@ def test_db_safe_from_multiple_threads(tmp_db):
     """Regression: Database used to raise 'SQLite objects created in a thread
     can only be used in that same thread' when accessed from worker threads.
     After adding check_same_thread=False + an internal lock, this must work."""
-    from scraper.src.db import Database
+    from scraper.db import Database
     db = Database(tmp_db)
     errors: list[Exception] = []
 

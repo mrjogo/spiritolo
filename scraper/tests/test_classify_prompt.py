@@ -1,4 +1,4 @@
-from scraper.src.classify_prompt import (
+from scraper.classify_prompt import (
     LABELS,
     PROMPT_VERSION,
     RESPONSE_SCHEMA,

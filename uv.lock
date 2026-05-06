@@ -559,16 +559,22 @@ wheels = [
 ]
 
 [[package]]
-name = "ollama"
-version = "0.6.1"
+name = "openai"
+version = "2.34.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
+    { name = "anyio" },
+    { name = "distro" },
     { name = "httpx" },
+    { name = "jiter" },
     { name = "pydantic" },
+    { name = "sniffio" },
+    { name = "tqdm" },
+    { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/9d/5a/652dac4b7affc2b37b95386f8ae78f22808af09d720689e3d7a86b6ed98e/ollama-0.6.1.tar.gz", hash = "sha256:478c67546836430034b415ed64fa890fd3d1ff91781a9d548b3325274e69d7c6", size = 51620, upload-time = "2025-11-13T23:02:17.416Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7b/89/f1e78f5f828f4e97a6ebca8f45c6b35667da12b074ac490dc8362b882279/openai-2.34.0.tar.gz", hash = "sha256:828b4efcbb126352c2b5eb97d33ae890c92a71ab72511aefc1b7fe64aeccb07b", size = 759556, upload-time = "2026-05-04T17:34:08.721Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/47/4f/4a617ee93d8208d2bcf26b2d8b9402ceaed03e3853c754940e2290fed063/ollama-0.6.1-py3-none-any.whl", hash = "sha256:fc4c984b345735c5486faeee67d8a265214a31cbb828167782dc642ce0a2bf8c", size = 14354, upload-time = "2025-11-13T23:02:16.292Z" },
+    { url = "https://files.pythonhosted.org/packages/f2/40/f090499f10514515081d09cb9da09f25b821eb20497e9423afe4f07b4ecf/openai-2.34.0-py3-none-any.whl", hash = "sha256:c996a71b1a210f3569844572ad4c609307e978515fb76877cf449b72596e549e", size = 1316535, upload-time = "2026-05-04T17:34:06.773Z" },
 ]
 
 [[package]]
@@ -1095,6 +1101,9 @@ name = "spiritolo-common"
 version = "0.1.0"
 source = { editable = "common" }
 dependencies = [
+    { name = "anthropic" },
+    { name = "httpx" },
+    { name = "openai" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
 ]
@@ -1106,6 +1115,9 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anthropic", specifier = ">=0.40" },
+    { name = "httpx", specifier = ">=0.27" },
+    { name = "openai", specifier = ">=1.50" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
@@ -1117,8 +1129,6 @@ name = "spiritolo-ingredients"
 version = "0.1.0"
 source = { editable = "ingredients" }
 dependencies = [
-    { name = "anthropic" },
-    { name = "httpx" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
     { name = "spiritolo-common" },
@@ -1131,8 +1141,6 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "anthropic", specifier = ">=0.40" },
-    { name = "httpx", specifier = ">=0.27" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
@@ -1149,7 +1157,6 @@ dependencies = [
     { name = "cssselect" },
     { name = "extruct" },
     { name = "lxml" },
-    { name = "ollama" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -1170,7 +1177,6 @@ requires-dist = [
     { name = "cssselect", specifier = ">=1.2" },
     { name = "extruct", specifier = ">=0.18.0" },
     { name = "lxml", specifier = ">=5.0" },
-    { name = "ollama", specifier = ">=0.4" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23" },
@@ -1208,6 +1214,18 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0" },
 ]
 provides-extras = ["dev"]
+
+[[package]]
+name = "tqdm"
+version = "4.67.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/09/a9/6ba95a270c6f1fbcd8dac228323f2777d886cb206987444e4bce66338dd4/tqdm-4.67.3.tar.gz", hash = "sha256:7d825f03f89244ef73f1d4ce193cb1774a8179fd96f31d7e1dcde62092b960bb", size = 169598, upload-time = "2026-02-03T17:35:53.048Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/16/e1/3079a9ff9b8e11b846c6ac5c8b5bfb7ff225eee721825310c91b3b50304f/tqdm-4.67.3-py3-none-any.whl", hash = "sha256:ee1e4c0e59148062281c49d80b25b67771a127c85fc9676d3be5f243206826bf", size = 78374, upload-time = "2026-02-03T17:35:50.982Z" },
+]
 
 [[package]]
 name = "typing-extensions"

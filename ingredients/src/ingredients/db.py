@@ -1,7 +1,7 @@
 """Postgres data-access layer for the ingredient parser worker.
 
 All queries are written against Supabase Postgres (the local one in dev).
-Connection credentials come from SUPABASE_DB_URL via spiritolo_common.
+Connection credentials come from SUPABASE_DB_URL via common.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any, Iterable
 import psycopg
 from dotenv import load_dotenv
 
-from spiritolo_common.supabase_client import warn_if_staging_url
+from common.supabase_client import warn_if_staging_url
 
 
 def _env_url() -> str:
@@ -83,17 +83,31 @@ class IngredientsDatabase:
         self, *, recipe_id: int, rows: Iterable[dict[str, Any]],
         parser_version: str,
     ) -> None:
-        """Replace all recipe_ingredients rows for `recipe_id` atomically.
+        """Replace recipe_ingredients rows for `recipe_id` atomically.
+
+        UPSERTs on (recipe_id, position) so existing row IDs survive
+        re-parses — the upload-back-to-staging workflow UPSERTs by id, so
+        a delete+reinsert pattern would generate fresh local IDs that
+        collide with staging's surviving (recipe_id, position) uniqueness.
+        Rows whose position no longer appears in the new parse are deleted.
+
+        Mapper-owned fields (taxonomy_node_id, mapper_*, role*) are
+        cleared when the parsed `name` for a position changes — the
+        prior mapping is stale. Otherwise they're preserved, so a reparse
+        that doesn't touch names doesn't blow away the mapper's work.
 
         Each row dict must contain: position, raw_text, amount, amount_max,
         unit, name, modifier, parse_status, parser_rule.
         """
+        rows_list = list(rows)
+        new_positions = [r["position"] for r in rows_list]
         with self.conn.transaction():
             self.conn.execute(
-                "delete from recipe_ingredients where recipe_id = %s",
-                (recipe_id,),
+                "delete from recipe_ingredients "
+                "where recipe_id = %s and position <> all(%s)",
+                (recipe_id, new_positions),
             )
-            for r in rows:
+            for r in rows_list:
                 self.conn.execute(
                     """
                     insert into recipe_ingredients (
@@ -101,6 +115,35 @@ class IngredientsDatabase:
                         amount, amount_max, unit, name, modifier,
                         parse_status, parser_rule, parser_version
                     ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    on conflict (recipe_id, position) do update set
+                        raw_text = excluded.raw_text,
+                        amount = excluded.amount,
+                        amount_max = excluded.amount_max,
+                        unit = excluded.unit,
+                        name = excluded.name,
+                        modifier = excluded.modifier,
+                        parse_status = excluded.parse_status,
+                        parser_rule = excluded.parser_rule,
+                        parser_version = excluded.parser_version,
+                        parsed_at = now(),
+                        taxonomy_node_id = case
+                            when recipe_ingredients.name is distinct from excluded.name
+                            then null else recipe_ingredients.taxonomy_node_id end,
+                        mapper_source = case
+                            when recipe_ingredients.name is distinct from excluded.name
+                            then null else recipe_ingredients.mapper_source end,
+                        mapper_version = case
+                            when recipe_ingredients.name is distinct from excluded.name
+                            then null else recipe_ingredients.mapper_version end,
+                        mapper_at = case
+                            when recipe_ingredients.name is distinct from excluded.name
+                            then null else recipe_ingredients.mapper_at end,
+                        role = case
+                            when recipe_ingredients.name is distinct from excluded.name
+                            then null else recipe_ingredients.role end,
+                        role_source = case
+                            when recipe_ingredients.name is distinct from excluded.name
+                            then null else recipe_ingredients.role_source end
                     """,
                     (
                         recipe_id, r["position"], r["raw_text"],

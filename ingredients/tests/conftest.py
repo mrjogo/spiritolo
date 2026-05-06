@@ -27,6 +27,14 @@ from dotenv import load_dotenv
 
 load_dotenv(pathlib.Path(__file__).resolve().parent.parent.parent / ".env")
 
+# Defensive: any test that accidentally connects via SUPABASE_DB_URL
+# (e.g. SupabaseClient() with no explicit url) silently wipes the dev DB.
+# Override with an invalid sentinel after .env loads so any such fall-back
+# fails loudly. Tests that need a real Postgres must use TEST_DB_URL.
+os.environ["SUPABASE_DB_URL"] = (
+    "postgresql://invalid:invalid@127.0.0.1:1/SUPABASE_DB_URL_must_not_be_used_in_tests"
+)
+
 _REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 _MIGRATIONS_DIR = _REPO_ROOT / "supabase" / "migrations"
 

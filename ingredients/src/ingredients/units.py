@@ -334,6 +334,9 @@ BARE_INGREDIENT_ALIASES: dict[str, str] = {
     "agave nectar": "agave nectar",
     "horseradish": "horseradish",
     "agave": "agave",
+    "ginger": "ginger",
+    "ginger root": "ginger",
+    "gingerroot": "ginger",
 }
 
 

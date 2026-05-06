@@ -289,6 +289,55 @@ _PARSE_CASES: list[EvalCase] = [
              expect_status="parsed", expect_rule="lexical_qty",
              expect_amount=None, expect_unit="dash",
              expect_name="pure vanilla extract"),
+    # v9: hanging-hyphen qty (`1- ounce X` corpus typo).
+    EvalCase("1- ounce gin", "punch",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=1.0, expect_unit="oz", expect_name="gin"),
+    EvalCase("1/2- ounce lime juice", "punch",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=0.5, expect_unit="oz", expect_name="lime juice"),
+    # v9: hanging-hyphen range (`1/4- to 1/2-inch piece`). The leading qty
+    # is the size in inches, not a count, so it's dropped along with `inch`;
+    # the row falls through to no_qty_known_noun anchored on `cinnamon`.
+    EvalCase("2- to 3-inch cinnamon stick", "marthastewart",
+             expect_status="parsed", expect_rule="no_qty_known_noun",
+             expect_amount=None, expect_unit=None, expect_name="cinnamon stick"),
+    # `quart` IS a real volume unit, so the range survives.
+    EvalCase("4- to 6-quart slow cooker and cheesecloth", "marthastewart",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=4.0, expect_amount_max=6.0,
+             expect_unit="quart", expect_name="slow cooker and cheesecloth"),
+    # v9: leading size annotation strip — the leading number is a SIZE
+    # (inches/cm), not a count of items, so we drop it along with the size
+    # word. amount=None reflects the genuine "we don't know the count" state.
+    EvalCase("3-inch cinnamon stick", "punch",
+             expect_status="parsed", expect_rule="no_qty_known_noun",
+             expect_amount=None, expect_unit=None, expect_name="cinnamon stick"),
+    EvalCase("1-inch knob fresh ginger, peeled", "thekitchn",
+             expect_status="parsed", expect_rule="lexical_qty",
+             expect_amount=None, expect_unit="knob",
+             expect_name="fresh ginger, peeled"),
+    EvalCase("½-inch ginger root", "punch",
+             expect_status="parsed", expect_rule="no_qty_known_noun",
+             expect_amount=None, expect_unit=None, expect_name="ginger root"),
+    # v9: doubled unit (`1/2 ounce ounce X` corpus typo).
+    EvalCase("1/2 ounce ounce grapefruit syrup (see Editor's Note)", "punch",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=0.5, expect_unit="oz",
+             expect_name="grapefruit syrup (see editor's note)"),
+    EvalCase("2 ounces ounces Roger Groult Calvados", "punch",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=2.0, expect_unit="oz",
+             expect_name="roger groult calvados"),
+    # v9: range with repeated unit (`3/4 cup to 1 cup X`).
+    EvalCase("3/4 cup to 1 cup freshly squeezed orange juice", "seriouseats",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=0.75, expect_amount_max=1.0,
+             expect_unit="cup", expect_name="freshly squeezed orange juice"),
+    EvalCase("1/4 ounce to 1/2 ounce vanilla syrup", "punch",
+             expect_status="parsed", expect_rule="qty_unit",
+             expect_amount=0.25, expect_amount_max=0.5,
+             expect_unit="oz", expect_name="vanilla syrup"),
 ]
 
 # Should-abstain cases (kept in sync with test_rule_abstain.py).

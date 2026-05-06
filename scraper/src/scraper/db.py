@@ -12,7 +12,7 @@ class DatabaseNotMigratedError(RuntimeError):
     would produce.
 
     The constructor never mutates the database — callers must run
-    ``python -m scraper.src.db migrate --db <path>`` (or call ``migrate(path)``
+    ``python -m scraper.db migrate --db <path>`` (or call ``migrate(path)``
     programmatically) before opening it.
     """
 
@@ -330,7 +330,7 @@ class Database:
         if not path.exists():
             raise DatabaseNotMigratedError(
                 f"No SQLite database at {path}. Create it with:\n"
-                f"  cd scraper && uv run python -m scraper.src.db migrate --db {path}"
+                f"  cd scraper && uv run python -m scraper.db migrate --db {path}"
             )
         self.conn = sqlite3.connect(path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
@@ -343,7 +343,7 @@ class Database:
                 f"Schema at {path} doesn't match what migrate() would produce.\n"
                 f"{_signature_diff(actual, expected)}\n"
                 f"Run:\n"
-                f"  cd scraper && uv run python -m scraper.src.db migrate --db {path}"
+                f"  cd scraper && uv run python -m scraper.db migrate --db {path}"
             )
 
     def close(self):

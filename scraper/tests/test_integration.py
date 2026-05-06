@@ -2,10 +2,10 @@
 
 import responses
 
-from scraper.src.client import ScraperAPIClient
-from scraper.src.db import Database
-from scraper.src.discover import discover_sitemap
-from scraper.src.fetch import fetch_pages
+from scraper.client import ScraperAPIClient
+from scraper.db import Database
+from scraper.discover import discover_sitemap
+from scraper.fetch import fetch_pages
 
 
 SITEMAP = """<?xml version="1.0" encoding="UTF-8"?>

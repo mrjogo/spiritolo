@@ -7,7 +7,7 @@ from typing import Iterator
 
 from ingredients.dedup.normalizer_llm import run_phase2
 from ingredients.dedup.version import NORMALIZER_VERSION
-from ingredients.mapping.llm_provider import ProviderResult
+from common.llm.provider import ProviderResult
 
 
 @dataclass

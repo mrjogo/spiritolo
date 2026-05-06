@@ -7,7 +7,7 @@ from __future__ import annotations
 import psycopg
 
 from ingredients.mapping.db import write_pending
-from ingredients.mapping.llm_provider import ProviderResult
+from common.llm.provider import ProviderResult
 from ingredients.mapping.llm_resolver import run_phase2
 from ingredients.mapping.mapper import MAPPER_VERSION
 
@@ -100,6 +100,57 @@ def test_resolver_auto_creates_brand_with_existing_parent(fixture_taxonomy):
     assert summary == {"propose_brand": 1}
 
 
+def test_resolver_idempotent_when_two_rows_propose_same_brand_slug(fixture_taxonomy):
+    """In batch mode, two pending names can both propose the same brand slug
+    (prompts are built against a frozen candidate set so neither call sees
+    the other's auto-created node). The second proposal must not crash on
+    the slug UNIQUE constraint — it must resolve to the existing node."""
+    conn, ids = fixture_taxonomy
+    _seed_pending(conn, ["bombay sapphire", "bombay sapphire gin"])
+    provider = StubProvider({
+        "bombay sapphire": (
+            '{"action": "propose_brand", "slug": "bombay_sapphire", '
+            '"display_name": "Bombay Sapphire", "parent_slug": "london_dry_gin", '
+            '"node_kind": "brand"}'
+        ),
+        "bombay sapphire gin": (
+            '{"action": "propose_brand", "slug": "bombay_sapphire", '
+            '"display_name": "Bombay Sapphire", "parent_slug": "london_dry_gin", '
+            '"node_kind": "brand"}'
+        ),
+    })
+    summary = run_phase2(conn, provider=provider)
+
+    # Exactly one node was created; both rows resolved to it.
+    nodes = conn.execute(
+        "select id from taxonomy_nodes where slug = 'bombay_sapphire'"
+    ).fetchall()
+    assert len(nodes) == 1
+    new_id = nodes[0][0]
+
+    rows = conn.execute(
+        "select lower(trim(name)), taxonomy_node_id, mapper_source "
+        "from recipe_ingredients where lower(trim(name)) like 'bombay sapphire%' "
+        "order by name"
+    ).fetchall()
+    assert rows == [
+        ("bombay sapphire", new_id, "llm"),
+        ("bombay sapphire gin", new_id, "llm"),
+    ]
+
+    # One edge, one provenance row — duplicates collapsed silently.
+    edges = conn.execute(
+        "select count(*) from taxonomy_edges where child_id = %s", (new_id,),
+    ).fetchone()[0]
+    assert edges == 1
+    prov_count = conn.execute(
+        "select count(*) from taxonomy_provenance where node_id = %s", (new_id,),
+    ).fetchone()[0]
+    assert prov_count == 1
+
+    assert summary == {"propose_brand": 2}
+
+
 def test_resolver_abstains_when_proposed_parent_missing(fixture_taxonomy):
     conn, _ = fixture_taxonomy
     _seed_pending(conn, ["mystery liqueur"])
@@ -176,7 +227,7 @@ def test_resolver_stops_after_interrupt_request(fixture_taxonomy):
     then the loop exits before processing remaining names."""
     import os
     import signal
-    from ingredients.mapping.llm_provider import ProviderResult
+    from common.llm.provider import ProviderResult
 
     conn, ids = fixture_taxonomy
     _seed_pending(conn, ["fancy gin variant", "another thing", "third name"])
@@ -283,7 +334,8 @@ def test_resolver_retries_on_provider_failure_then_continues_loop(fixture_taxono
             )
 
     # Skip the actual sleeping during the test.
-    monkeypatch.setattr(llm_resolver.time, "sleep", lambda _s: None)
+    import common.llm.retry as _retry_mod
+    monkeypatch.setattr(_retry_mod.time, "sleep", lambda _s: None)
 
     summary = llm_resolver.run_phase2(conn, provider=FlakyProvider())
 

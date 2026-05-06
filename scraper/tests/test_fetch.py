@@ -2,8 +2,8 @@ import hashlib
 import threading
 from unittest.mock import MagicMock
 
-from scraper.src.db import Database
-from scraper.src.fetch import (
+from scraper.db import Database
+from scraper.fetch import (
     url_to_filename,
     save_html,
     check_circuit_breaker,
@@ -408,7 +408,7 @@ def test_fetch_pages_preflight_prints_budget(tmp_db, tmp_path, make_mock_client,
 
 def test_fetch_pages_aborts_on_preflight_auth_error(tmp_db, tmp_path, capsys):
     from unittest.mock import MagicMock
-    from scraper.src.client import AuthError
+    from scraper.client import AuthError
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipes/margarita")
     db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
@@ -434,7 +434,7 @@ def test_fetch_pages_aborts_on_preflight_auth_error(tmp_db, tmp_path, capsys):
 
 def test_fetch_pages_aborts_on_preflight_scraperapi_error(tmp_db, tmp_path, capsys):
     from unittest.mock import MagicMock
-    from scraper.src.client import ScraperAPIError
+    from scraper.client import ScraperAPIError
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipes/margarita")
     db.set_content_type("https://example.com/recipes/margarita", "likely_drink_recipe")
@@ -478,7 +478,7 @@ def test_fetch_pages_parallel_happy_path(tmp_db, tmp_path, make_mock_client, sam
 
 def test_fetch_pages_aborts_on_quota_mid_run(tmp_db, tmp_path, make_mock_client, sample_recipe_html, capsys):
     """After a QuotaExhaustedError, remaining URLs must stay pending (not marked failed)."""
-    from scraper.src.client import QuotaExhaustedError
+    from scraper.client import QuotaExhaustedError
     db = Database(tmp_db)
     urls = [f"https://example.com/recipes/{i}" for i in range(10)]
     for url in urls:

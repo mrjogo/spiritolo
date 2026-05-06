@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from html.parser import HTMLParser
 from urllib.parse import urlparse
 
-from scraper.src.structured import (
+from scraper.structured import (
     extract_structured,
     iter_jsonld_objects,
     iter_microdata_items,
@@ -205,6 +205,6 @@ def validate(html: str, url: str | None = None) -> ValidationResult:
     return ValidationResult("unverified", "No structured data found")
 
 
-# classify_drink lives in scraper.src.classify_drink — kept as a re-export so
+# classify_drink lives in scraper.classify_drink — kept as a re-export so
 # existing callers (fetch.py, revalidate.py, tests) don't need to change.
-from scraper.src.classify_drink import classify_drink  # noqa: E402, F401
+from scraper.classify_drink import classify_drink  # noqa: E402, F401

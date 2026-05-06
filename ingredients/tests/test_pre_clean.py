@@ -44,6 +44,49 @@ def test_pre_clean_decodes_html_entities():
     assert pre_clean("1 oz gin") == "1 oz gin"
 
 
+def test_pre_clean_hanging_hyphen_qty_unit():
+    # v9: corpus typo `1- ounce X` (stray space after the dash) normalises.
+    assert pre_clean("1- ounce gin") == "1 ounce gin"
+    assert pre_clean("1/2- ounce lime juice") == "1/2 ounce lime juice"
+
+
+def test_pre_clean_hanging_hyphen_range():
+    # v9: `2- to 3-inch X` first collapses to `2 to 3 inch X`, then the
+    # leading-size-annotation strip drops the qty AND `inch` together
+    # (the qty was the size, not a count).
+    assert pre_clean("2- to 3-inch cinnamon stick") == "cinnamon stick"
+    # `quart` IS a real volume unit, so the range survives the size strip.
+    assert pre_clean("4- to 6-quart slow cooker") == "4 to 6 quart slow cooker"
+
+
+def test_pre_clean_leading_size_annotation_strip():
+    # v9: `inch`/`cm`/`mm`/`foot` describe physical size, not row qty;
+    # the leading number is the size, so we drop both.
+    assert pre_clean("3-inch cinnamon stick") == "cinnamon stick"
+    assert pre_clean("1-inch knob fresh ginger") == "knob fresh ginger"
+    assert pre_clean("12 1/8-inch-thick slices cucumber") == "slices cucumber"
+    # Real volume units are NOT stripped — handled by `_HYPHEN_QTY_UNIT_RE`.
+    assert pre_clean("1/2-ounce dry vermouth") == "1/2 ounce dry vermouth"
+    # Mid-string `inch` annotation is left alone.
+    assert pre_clean("1 750-ml bottle of vodka") == "1 750-ml bottle of vodka"
+
+
+def test_pre_clean_doubled_unit():
+    # v9: `1/2 ounce ounce X` corpus typo strips the duplicate.
+    assert pre_clean("1/2 ounce ounce grapefruit syrup") == "1/2 ounce grapefruit syrup"
+    assert pre_clean("2 ounces ounces Roger Groult Calvados") == "2 ounces Roger Groult Calvados"
+    # Different units (corpus error of a different kind) are NOT collapsed.
+    assert pre_clean("1/4 cup ounces gin") == "1/4 cup ounces gin"
+
+
+def test_pre_clean_range_with_repeated_unit():
+    # v9: `3/4 cup to 1 cup X` collapses to `3/4 to 1 cup X`.
+    assert pre_clean("3/4 cup to 1 cup orange juice") == "3/4 to 1 cup orange juice"
+    assert pre_clean("1/4 ounce to 1/2 ounce vanilla syrup") == "1/4 to 1/2 ounce vanilla syrup"
+    # Different canonical units are left alone.
+    assert pre_clean("2 tablespoons to 1/4 cup syrup") == "2 tablespoons to 1/4 cup syrup"
+
+
 def test_parse_result_default_shape():
     r = ParseResult(raw_text="x", parse_status="unparseable")
     assert r.raw_text == "x"

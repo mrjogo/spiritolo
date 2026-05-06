@@ -1,4 +1,4 @@
-from scraper.src.validation import validate, ValidationResult, classify_drink
+from scraper.validation import validate, ValidationResult, classify_drink
 
 
 def test_valid_recipe_with_jsonld(sample_recipe_html):
