@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 
 from common.llm.sidecar import (
-    Sidecar, SidecarMismatch, load_sidecar, mark_failed, mark_ingested,
-    write_sidecar,
+    Sidecar, SidecarMismatch, force_unmark_ingested, load_sidecar,
+    mark_failed, mark_ingested, write_sidecar,
 )
 
 
@@ -125,3 +125,43 @@ def test_load_refuses_after_mark_failed(tmp_path, state):
     mark_failed(path, state=state)
     with pytest.raises(SidecarMismatch, match=state):
         load_sidecar("b1", batches_dir=tmp_path)
+
+
+def test_force_unmark_ingested_renames_back(tmp_path):
+    sc = Sidecar(
+        batch_id="b1", provider="openai",
+        flow="mapping.resolve_pending", model_id="gpt-5-mini",
+        version_constant="v3", submitted_at="2026-05-05T12:00:00Z",
+        request_map={"r0": "vodka"},
+    )
+    path = write_sidecar(sc, batches_dir=tmp_path)
+    mark_ingested(path)
+    assert (tmp_path / "b1.json.ingested").exists()
+    assert not (tmp_path / "b1.json").exists()
+
+    new_path = force_unmark_ingested("b1", batches_dir=tmp_path)
+    assert new_path == tmp_path / "b1.json"
+    assert new_path.exists()
+    assert not (tmp_path / "b1.json.ingested").exists()
+
+    # And load_sidecar accepts it again.
+    loaded = load_sidecar("b1", batches_dir=tmp_path)
+    assert loaded == sc
+
+
+def test_force_unmark_ingested_is_noop_when_already_unsuffixed(tmp_path):
+    sc = Sidecar(
+        batch_id="b1", provider="openai",
+        flow="mapping.resolve_pending", model_id="gpt-5-mini",
+        version_constant="v3", submitted_at="2026-05-05T12:00:00Z",
+        request_map={},
+    )
+    write_sidecar(sc, batches_dir=tmp_path)
+    new_path = force_unmark_ingested("b1", batches_dir=tmp_path)
+    assert new_path == tmp_path / "b1.json"
+    assert new_path.exists()
+
+
+def test_force_unmark_ingested_raises_when_neither_exists(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        force_unmark_ingested("nope", batches_dir=tmp_path)

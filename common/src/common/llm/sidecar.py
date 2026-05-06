@@ -103,6 +103,27 @@ def mark_ingested(sidecar_path: Path) -> Path:
     return new_path
 
 
+def force_unmark_ingested(batch_id: str, *, batches_dir: Path) -> Path:
+    """Rename <batch_id>.json.ingested → <batch_id>.json so the next
+    load_sidecar call accepts it. No-op if the unsuffixed path is already
+    present. Raises FileNotFoundError if neither exists.
+
+    Used by `--ingest BATCH_ID --force`. Does NOT touch .failed/.expired/
+    .cancelled sidecars — those batches have no results on the provider
+    side, re-ingesting them would just re-mark them.
+    """
+    unsuffixed = batches_dir / f"{batch_id}.json"
+    ingested = batches_dir / f"{batch_id}.json.ingested"
+    if unsuffixed.exists():
+        return unsuffixed
+    if ingested.exists():
+        ingested.rename(unsuffixed)
+        return unsuffixed
+    raise FileNotFoundError(
+        f"no sidecar at {unsuffixed} or {ingested}"
+    )
+
+
 def mark_failed(sidecar_path: Path, *, state: str = "failed") -> Path:
     """Rename <batch_id>.json → <batch_id>.json.<state> for a batch that
     ended in a non-recoverable state on the provider (failed/expired/cancelled).

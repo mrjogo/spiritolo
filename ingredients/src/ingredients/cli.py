@@ -150,6 +150,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
              "Implies --batch.",
     )
     p_resolve.add_argument(
+        "--force", action="store_true",
+        help="With --ingest, re-ingest a sidecar already marked .ingested. "
+             "Idempotent against the DB — UPSERTs replay the same writes.",
+    )
+    p_resolve.add_argument(
         "--chunk-size", type=int, default=2000,
         help="With --batch, names per submitted batch (default: 2000, "
              "sized for the gpt-5-mini 5M enqueued-token tier).",
@@ -198,6 +203,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--ingest", metavar="BATCH_ID", default=None,
         help="Ingest results from a previously submitted batch and exit. "
              "Implies --batch.",
+    )
+    p_resolve_norm.add_argument(
+        "--force", action="store_true",
+        help="With --ingest, re-ingest a sidecar already marked .ingested.",
     )
     p_resolve_norm.add_argument(
         "--chunk-size", type=int, default=2000,
@@ -354,11 +363,15 @@ def run_resolve_pending(args: argparse.Namespace) -> int:
         # ---- Batch ingest path (drain a previously-submitted batch) ----
         if getattr(args, "batch", False) and getattr(args, "ingest", None):
             from common.llm.openai_batch import OpenAIBatchProvider
+            from common.llm.sidecar import force_unmark_ingested
             _model = getattr(args, "model", None)
             provider = (
                 OpenAIBatchProvider.from_env(model_id=_model)
                 if _model else OpenAIBatchProvider.from_env()
             )
+            if getattr(args, "force", False):
+                force_unmark_ingested(args.ingest, batches_dir=BATCHES_DIR)
+                log.info("--force: unmarked .ingested for %s", args.ingest)
             counts = ingest_phase2_batch(
                 conn=db.conn, provider=provider,
                 batch_id=args.ingest, batches_dir=BATCHES_DIR,
@@ -883,11 +896,15 @@ def run_normalize_names(args: argparse.Namespace) -> int:
             # ---- Batch ingest path (drain a previously-submitted batch) ----
             if getattr(args, "batch", False) and getattr(args, "ingest", None):
                 from common.llm.openai_batch import OpenAIBatchProvider
+                from common.llm.sidecar import force_unmark_ingested
                 _model = getattr(args, "model", None)
                 provider = (
                     OpenAIBatchProvider.from_env(model_id=_model)
                     if _model else OpenAIBatchProvider.from_env()
                 )
+                if getattr(args, "force", False):
+                    force_unmark_ingested(args.ingest, batches_dir=BATCHES_DIR)
+                    log.info("--force: unmarked .ingested for %s", args.ingest)
                 counts = ingest_normalize_names_batch(
                     conn=db.conn, provider=provider,
                     batch_id=args.ingest, batches_dir=BATCHES_DIR,

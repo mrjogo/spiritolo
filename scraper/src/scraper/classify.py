@@ -145,6 +145,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
              "Implies --batch.",
     )
     p.add_argument(
+        "--force", action="store_true",
+        help="With --ingest, re-ingest a sidecar already marked .ingested.",
+    )
+    p.add_argument(
         "--chunk-size", type=int, default=2000,
         help="With --batch, URLs per submitted batch (default: 2000, "
              "sized for the gpt-5-mini 5M enqueued-token tier).",
@@ -555,6 +559,10 @@ def run_batch(args: argparse.Namespace) -> int:
         provider = OpenAIBatchProvider.from_env(**provider_kwargs)
 
         if args.ingest:
+            from common.llm.sidecar import force_unmark_ingested
+            if getattr(args, "force", False):
+                force_unmark_ingested(args.ingest, batches_dir=BATCHES_DIR)
+                log.info("--force: unmarked .ingested for %s", args.ingest)
             counts = ingest_classify_batch(
                 db=db, provider=provider, batch_id=args.ingest,
                 batches_dir=BATCHES_DIR,
