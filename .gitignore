@@ -20,8 +20,6 @@
 
 # Local data — HTML archive and scraper state DB
 data/
-# Local-only staging dumps + sidecars produced by scripts/backup-supabase.sh
-temp/
 
 # Python artifacts
 __pycache__/
