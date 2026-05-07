@@ -29,6 +29,10 @@ import '../components/taxonomy/taxonomy.css';
 // taxonomy canvas to fill the viewport below the header.
 const SITE_HEADER_HEIGHT = 56;
 
+// Padding (px) around the focused neighborhood when zoomToFit-ing.
+// Smaller = tighter zoom on the focused node.
+const FOCUS_FIT_PADDING = 60;
+
 type State =
   | { status: 'loading' }
   | { status: 'error'; message: string }
@@ -58,13 +62,30 @@ export function Taxonomy() {
     return () => { cancelled = true; };
   }, []);
 
-  if (state.status === 'loading') {
-    return <div className="page">Loading taxonomy…</div>;
-  }
-  if (state.status === 'error') {
-    return <div className="page">Error: {state.message}</div>;
-  }
-  return <LoadedView rows={state.rows} />;
+  return (
+    <div className="taxonomy-page">
+      <div className="taxonomy-page__corner taxonomy-page__corner--tl" />
+      <div className="taxonomy-page__corner taxonomy-page__corner--tr" />
+      <div className="taxonomy-page__corner taxonomy-page__corner--bl" />
+      <div className="taxonomy-page__corner taxonomy-page__corner--br" />
+
+      <div className="taxonomy-page__title">
+        <div className="taxonomy-page__title-eyebrow">— A COMPENDIUM OF —</div>
+        <div className="taxonomy-page__title-main">SPIRITS &amp; LIQUEURS</div>
+        <div className="taxonomy-page__title-rule" />
+      </div>
+
+      {state.status === 'error' ? (
+        <div className="taxonomy-page__error">Error: {state.message}</div>
+      ) : state.status === 'loaded' ? (
+        <LoadedView rows={state.rows} />
+      ) : (
+        <div className="taxonomy-page__settling" role="status" aria-label="Loading taxonomy">
+          <div className="taxonomy-page__spinner" aria-hidden="true" />
+        </div>
+      )}
+    </div>
+  );
 }
 
 function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
@@ -81,6 +102,7 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   const [hoveredEdge, setHoveredEdge] = useState<EdgeRef | null>(null);
   const [dagMode, setDagMode] = useState<DagMode | undefined>(undefined);
   const [sizeMode, setSizeMode] = useState<NodeSizeMode>('uniform');
+  const [settled, setSettled] = useState(false);
   const canvasRef = useRef<ForceCanvasHandle>(null);
 
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
@@ -149,7 +171,14 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   // state. Disabling react-hooks/immutability for this block only.
   /* eslint-disable react-hooks/immutability */
   useEffect(() => {
-    type PinNode = TaxonomyNode & { fx?: number | null; fy?: number | null };
+    type PinNode = TaxonomyNode & {
+      x?: number; y?: number;
+      vx?: number; vy?: number;
+      fx?: number | null; fy?: number | null;
+    };
+    // Wait for the d3 engine to settle — until then nodes don't have
+    // stable x/y, so any zoomToFit bbox would be garbage.
+    if (!settled) return;
     if (!focusedNode) {
       for (const n of nodes as PinNode[]) { n.fx = null; n.fy = null; }
       return;
@@ -162,29 +191,29 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
       parents, children,
       Math.min(size.w, size.h) * 0.22,
     );
+    // Snap x/y/vx/vy alongside fx/fy. The simulation is cooled (cooldownTicks=0)
+    // so it won't re-tick the canvas to apply fx/fy on its own; snapping x/y
+    // makes the new positions render immediately and gives zoomToFit a correct
+    // bbox to compute the camera transform from.
     for (const n of nodes as PinNode[]) {
       const p = positions.get(n.id);
-      if (p) { n.fx = p.x; n.fy = p.y; }
-      else if (n.id === focusedNode.id) { n.fx = focusedRuntime.x; n.fy = focusedRuntime.y; }
-      else { n.fx = null; n.fy = null; }
+      if (p) {
+        n.fx = p.x; n.fy = p.y;
+        n.x = p.x; n.y = p.y;
+        n.vx = 0; n.vy = 0;
+      } else if (n.id === focusedNode.id) {
+        n.fx = focusedRuntime.x; n.fy = focusedRuntime.y;
+      } else {
+        n.fx = null; n.fy = null;
+      }
     }
-    canvasRef.current?.centerAt(focusedRuntime.x, focusedRuntime.y, 600);
-  }, [focusedNode, nodes, byId, size, focusedId]);
+    const inFrame = new Set<number>([focusedNode.id, ...positions.keys()]);
+    canvasRef.current?.fitToNodes((n) => inFrame.has(n.id), 600, FOCUS_FIT_PADDING);
+  }, [focusedNode, nodes, byId, size, focusedId, settled]);
   /* eslint-enable react-hooks/immutability */
 
   return (
-    <div className="taxonomy-page">
-      <div className="taxonomy-page__corner taxonomy-page__corner--tl" />
-      <div className="taxonomy-page__corner taxonomy-page__corner--tr" />
-      <div className="taxonomy-page__corner taxonomy-page__corner--bl" />
-      <div className="taxonomy-page__corner taxonomy-page__corner--br" />
-
-      <div className="taxonomy-page__title">
-        <div className="taxonomy-page__title-eyebrow">— A COMPENDIUM OF —</div>
-        <div className="taxonomy-page__title-main">SPIRITS &amp; LIQUEURS</div>
-        <div className="taxonomy-page__title-rule" />
-      </div>
-
+    <>
       <div
         style={{
           position: 'absolute', top: 14, left: 14, zIndex: 3,
@@ -278,7 +307,13 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         onBackgroundClick={() => {
           clearFocus();
         }}
+        onEngineStop={() => setSettled(true)}
       />
+      {!settled && (
+        <div className="taxonomy-page__settling" role="status" aria-label="Settling layout">
+          <div className="taxonomy-page__spinner" aria-hidden="true" />
+        </div>
+      )}
 
       <div
         style={{
@@ -313,6 +348,6 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
           return null;
         })()}
       </div>
-    </div>
+    </>
   );
 }

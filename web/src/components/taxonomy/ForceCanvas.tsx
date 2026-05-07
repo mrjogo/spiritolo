@@ -26,7 +26,13 @@ export type DagMode = 'td' | 'bu' | 'lr' | 'rl' | 'radialout' | 'radialin';
 
 export interface ForceCanvasHandle {
   zoom: (factor: number) => void;
+  setZoom: (level: number, ms?: number) => void;
   fit: () => void;
+  fitToNodes: (
+    filter: (node: TaxonomyNode) => boolean,
+    ms?: number,
+    padding?: number,
+  ) => void;
   centerAt: (x: number, y: number, ms?: number) => void;
 }
 
@@ -51,6 +57,7 @@ interface Props {
   onLinkClick?: (link: RuntimeLink) => void;
   onLinkHover?: (link: RuntimeLink | null) => void;
   onBackgroundClick?: () => void;
+  onEngineStop?: () => void;
 }
 
 function endpointId(end: TaxonomyNode | number): number {
@@ -60,7 +67,7 @@ function endpointId(end: TaxonomyNode | number): number {
 export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCanvas(
   {
     nodes, links, width, height, dimmedIds, dagMode, sizeMode = 'recipes',
-    onNodeClick, onNodeHover, onLinkClick, onLinkHover, onBackgroundClick,
+    onNodeClick, onNodeHover, onLinkClick, onLinkHover, onBackgroundClick, onEngineStop,
   },
   ref,
 ) {
@@ -73,7 +80,10 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
       const cur = g.zoom();
       g.zoom(cur * factor, 250);
     },
+    setZoom: (level, ms = 400) => inner.current?.zoom(level, ms),
     fit: () => inner.current?.zoomToFit(400, 60),
+    fitToNodes: (filter, ms = 400, padding = 60) =>
+      inner.current?.zoomToFit(ms, padding, (n) => filter(n as TaxonomyNode)),
     centerAt: (x, y, ms = 400) => inner.current?.centerAt(x, y, ms),
   }), []);
 
@@ -125,13 +135,15 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
         return dimmedIds?.has(sId) || dimmedIds?.has(tId) ? TX_GOLD_DIM : TX_GOLD;
       }}
       enableNodeDrag={false}
-      cooldownTicks={120}
+      warmupTicks={300}
+      cooldownTicks={0}
       showPointerCursor={(obj) => obj != null}
       onNodeClick={(n) => onNodeClick(n as TaxonomyNode)}
       onNodeHover={(n) => onNodeHover((n as TaxonomyNode | null) ?? null)}
       onLinkClick={(l) => onLinkClick?.(l as RuntimeLink)}
       onLinkHover={(l) => onLinkHover?.((l as RuntimeLink | null) ?? null)}
       onBackgroundClick={onBackgroundClick}
+      onEngineStop={onEngineStop}
       nodeCanvasObject={(node, ctx, globalScale) => {
         const n = node as TaxonomyNode & { x: number; y: number };
         const dimmed = dimmedIds?.has(n.id) ?? false;
