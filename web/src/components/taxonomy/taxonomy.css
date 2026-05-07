@@ -225,3 +225,13 @@
   font-size: 12px;
   color: inherit;
 }
+
+@keyframes tx-pulse {
+  0%   { box-shadow: 0 0 0 0   var(--tx-gold, #d4a857); opacity: 1;   }
+  70%  { box-shadow: 0 0 0 18px rgba(212, 168, 87, 0); opacity: 0.4; }
+  100% { box-shadow: 0 0 0 18px rgba(212, 168, 87, 0); opacity: 0;   }
+}
+.tx-highlight-pulse {
+  border-radius: 50%;
+  animation: tx-pulse 2s ease-out 1 forwards;
+}
