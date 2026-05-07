@@ -56,7 +56,7 @@ describe('<Taxonomy>', () => {
         <Taxonomy />
       </MemoryRouter>,
     );
-    expect(screen.getByText(/loading taxonomy/i)).toBeInTheDocument();
+    expect(screen.getByRole('status', { name: /loading taxonomy/i })).toBeInTheDocument();
   });
 
   it('shows an error state when the fetch fails', async () => {

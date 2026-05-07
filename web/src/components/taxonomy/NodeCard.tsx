@@ -128,8 +128,8 @@ export function NodeCard({ node, mode, onDismiss, onEditField, onEditParents, on
 
       <div
         style={{
-          flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
-          padding: '0 18px 20px',
+          flex: '0 0 auto',
+          padding: '0 18px 0',
           fontSize: 15, lineHeight: 1.5, color: TX_BROWN_MID,
         }}
       >

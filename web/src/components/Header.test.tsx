@@ -59,4 +59,18 @@ describe('Header', () => {
     expect(signOutMock).toHaveBeenCalledTimes(1);
     expect(await screen.findByText('landing-page')).toBeInTheDocument();
   });
+
+  it('shows an admin chip next to Sign out when isAdmin', () => {
+    useAuthMock.mockReturnValue({ user: { id: 'u-1' }, loading: false });
+    useIsAdminMock.mockReturnValue({ isAdmin: true, isLoading: false });
+    renderHeader();
+    expect(screen.getByText(/^admin$/i)).toBeInTheDocument();
+  });
+
+  it('does not show the admin chip for non-admins', () => {
+    useAuthMock.mockReturnValue({ user: { id: 'u-1' }, loading: false });
+    useIsAdminMock.mockReturnValue({ isAdmin: false, isLoading: false });
+    renderHeader();
+    expect(screen.queryByText(/^admin$/i)).toBeNull();
+  });
 });

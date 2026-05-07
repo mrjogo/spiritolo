@@ -3,24 +3,32 @@ import { Link, useParams } from 'react-router-dom';
 import { supabase } from '../supabase';
 import { ErrorPage } from '../components/ErrorPage';
 import { normalizeRecipe } from '../normalizeRecipe';
-import type { InstructionStep, RecipeRow } from '../types';
+import { useIsAdmin } from '../auth/useIsAdmin';
+import { StructuredIngredients } from '../components/recipe/StructuredIngredients';
+import type { InstructionStep, RecipeRow, RecipeIngredientRow } from '../types';
 
-type State =
+type RecipeState =
   | { status: 'loading' }
   | { status: 'notfound' }
   | { status: 'error'; message: string }
   | { status: 'loaded'; row: RecipeRow };
 
+const PARSED_SELECT =
+  'id, position, raw_text, amount, amount_max, unit, name, modifier, ' +
+  'role, parse_status, taxonomy_node_id, ' +
+  'taxonomy_nodes(slug, display_name)';
+
 export function RecipeDetail() {
   const { id } = useParams();
-  const [state, setState] = useState<State>({ status: 'loading' });
+  const { isAdmin } = useIsAdmin();
+  const [state, setState] = useState<RecipeState>({ status: 'loading' });
+  const [parsed, setParsed] = useState<RecipeIngredientRow[] | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    // Reset to loading whenever the route param changes — the previous
-    // recipe's data must not flash while the new fetch is in flight.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setState({ status: 'loading' });
+    setParsed(null);
 
     const numericId = Number(id);
     if (!id || !Number.isFinite(numericId) || !Number.isInteger(numericId)) {
@@ -55,6 +63,28 @@ export function RecipeDetail() {
     };
   }, [id]);
 
+  // Separate effect: fetch parsed ingredients when we know the recipe loaded
+  // and the user is admin. Non-admins skip this entirely.
+  useEffect(() => {
+    if (state.status !== 'loaded' || !isAdmin) return;
+    let cancelled = false;
+    supabase
+      .from('recipe_ingredients')
+      .select(PARSED_SELECT)
+      .eq('recipe_id', state.row.id)
+      .order('position', { ascending: true })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          // Non-fatal: recipe still renders, parsed panel just won't show.
+          setParsed([]);
+          return;
+        }
+        setParsed((data ?? []) as unknown as RecipeIngredientRow[]);
+      });
+    return () => { cancelled = true; };
+  }, [state, isAdmin]);
+
   if (state.status === 'loading') return <div className="page">Loading…</div>;
   if (state.status === 'notfound')
     return <ErrorPage title="Recipe not found" message="No recipe with that ID." />;
@@ -74,11 +104,14 @@ export function RecipeDetail() {
   }
 
   const host = safeHost(state.row.source_url);
+  const parsedByPosition = isAdmin && parsed != null
+    ? new Map(parsed.map((p) => [p.position, p]))
+    : null;
 
   return (
     <div className="page recipe-detail">
       <p>
-        <Link to="/">← Back to recipes</Link>
+        <Link to="/recipes">← Back to recipes</Link>
       </p>
       {normalized.images[0] && (
         <img src={normalized.images[0]} alt="" className="recipe-detail__hero" />
@@ -102,11 +135,10 @@ export function RecipeDetail() {
       {normalized.ingredients.length > 0 && (
         <>
           <h2>Ingredients</h2>
-          <ul>
-            {normalized.ingredients.map((line, i) => (
-              <li key={i}>{line}</li>
-            ))}
-          </ul>
+          <StructuredIngredients
+            rawLines={normalized.ingredients}
+            parsedByPosition={parsedByPosition}
+          />
         </>
       )}
       {normalized.instructions.length > 0 && (

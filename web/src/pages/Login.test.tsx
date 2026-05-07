@@ -33,12 +33,14 @@ describe('Login', () => {
     expect(signInMock).toHaveBeenCalledTimes(1);
     const call = signInMock.mock.calls[0][0] as {
       email: string;
-      options: { emailRedirectTo: string };
+      options: { emailRedirectTo: string; shouldCreateUser: boolean };
     };
     expect(call.email).toBe('me@example.com');
     expect(call.options.emailRedirectTo).toMatch(
       /\/auth\/callback\?next=%2Frecipes%2Fabc$/,
     );
+    // Login-only: do not auto-create users for unknown emails.
+    expect(call.options.shouldCreateUser).toBe(false);
   });
 
   it('shows a confirmation after a successful submit', async () => {
