@@ -32,11 +32,13 @@ interface ToggleProps extends BaseProps {
 const ROW_STYLE: React.CSSProperties = {
   position: 'relative',
   padding: '2px 6px',
-  border: '1px solid transparent',
-  borderRadius: 3,
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'transparent',
+  borderRadius: 'var(--tx-form-radius)',
 };
 const ROW_HOVER_STYLE: React.CSSProperties = {
-  borderColor: '#8b6f3a',
+  borderColor: 'var(--tx-form-border)',
 };
 
 export function EditableField(props: Props) {
@@ -106,7 +108,7 @@ function TextField({ label, value, onSave, onError }: TextProps) {
         onClick={() => setEditing(true)}
         style={{
           position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
-          background: 'transparent', border: 'none', cursor: 'pointer', color: '#8b6f3a',
+          background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--tx-brown-soft)',
           padding: 0, lineHeight: 1, fontSize: 13,
           opacity: hover ? 1 : 0,
         }}
@@ -164,7 +166,7 @@ function DropdownField({ label, value, options, onSave, onError }: DropdownProps
         onClick={() => setEditing(true)}
         style={{
           position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
-          background: 'transparent', border: 'none', cursor: 'pointer', color: '#8b6f3a',
+          background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--tx-brown-soft)',
           padding: 0, lineHeight: 1, fontSize: 13,
           opacity: hover ? 1 : 0,
         }}
@@ -181,6 +183,7 @@ function ToggleField({ label, value, onSave, onError }: ToggleProps) {
     <div style={ROW_STYLE} aria-label={label}>
       <button
         type="button"
+        className="tx-toggle"
         role="switch"
         aria-checked={value}
         disabled={pending}
@@ -194,22 +197,11 @@ function ToggleField({ label, value, onSave, onError }: ToggleProps) {
             setPending(false);
           }
         }}
-        style={{
-          width: 28, height: 14, borderRadius: 7, position: 'relative',
-          background: value ? '#b8924d' : '#d4c8a8',
-          border: 'none', cursor: 'pointer',
-        }}
+        style={{ height: 'auto', padding: 0 }}
       >
-        <span
-          style={{
-            position: 'absolute',
-            left: value ? 14 : 1,
-            top: 1,
-            width: 12, height: 12, borderRadius: '50%',
-            background: 'white',
-            transition: 'left 100ms',
-          }}
-        />
+        <span className="tx-toggle__track">
+          <span className="tx-toggle__thumb" />
+        </span>
       </button>
     </div>
   );

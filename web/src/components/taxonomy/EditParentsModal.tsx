@@ -79,37 +79,39 @@ export function EditParentsModal({ node, currentParentIds, rows, onCancel, onSav
         {(removed.size > 0 || added.length > 0) ? 'UNSAVED' : 'CLEAN'}
       </div>
 
-      <div className="tx-modal__label">CURRENT PARENTS</div>
-      {currentParentIds.map((pid) => {
-        const r = rows.find((row) => row.id === pid);
-        const isRemoved = removed.has(pid);
-        return (
-          <ParentRow
-            key={pid}
-            name={r?.display_name ?? '(unknown)'}
-            idLabel={`#${pid}`}
-            removed={isRemoved}
-            ariaLabel={isRemoved ? `undo remove ${r?.display_name ?? pid}` : `remove ${r?.display_name ?? pid}`}
-            onClick={() => toggleRemove(pid)}
-          />
-        );
-      })}
-      {added.map((id) => {
-        const r = rows.find((row) => row.id === id);
-        return (
-          <ParentRow
-            key={`added-${id}`}
-            name={r?.display_name ?? '(unknown)'}
-            idLabel={`#${id}`}
-            staged
-            ariaLabel={`unstage ${r?.display_name ?? id}`}
-            onClick={() => unstageAdded(id)}
-          />
-        );
-      })}
+      <div className="tx-field__label">Current parents</div>
+      <div style={{ marginBottom: 8 }}>
+        {currentParentIds.map((pid) => {
+          const r = rows.find((row) => row.id === pid);
+          const isRemoved = removed.has(pid);
+          return (
+            <ParentRow
+              key={pid}
+              name={r?.display_name ?? '(unknown)'}
+              idLabel={`#${pid}`}
+              removed={isRemoved}
+              ariaLabel={isRemoved ? `undo remove ${r?.display_name ?? pid}` : `remove ${r?.display_name ?? pid}`}
+              onClick={() => toggleRemove(pid)}
+            />
+          );
+        })}
+        {added.map((id) => {
+          const r = rows.find((row) => row.id === id);
+          return (
+            <ParentRow
+              key={`added-${id}`}
+              name={r?.display_name ?? '(unknown)'}
+              idLabel={`#${id}`}
+              staged
+              ariaLabel={`unstage ${r?.display_name ?? id}`}
+              onClick={() => unstageAdded(id)}
+            />
+          );
+        })}
+      </div>
 
       {blocked.size > 1 && (
-        <div style={{ marginTop: 8, fontSize: 10, color: '#888' }}>
+        <div style={{ marginTop: 8, fontSize: 11, color: 'var(--tx-brown-faint)', fontStyle: 'italic' }}>
           {Array.from(blocked)
             .filter((id) => id !== node.id)
             .map((id) => {
@@ -124,68 +126,87 @@ export function EditParentsModal({ node, currentParentIds, rows, onCancel, onSav
         </div>
       )}
 
-      <div className="tx-modal__label" style={{ marginTop: 12 }}>ADD PARENT</div>
-      <input
-        type="text"
-        value={query}
-        placeholder="search by name or slug..."
-        onChange={(e) => { setQuery(e.target.value); setHighlight(0); }}
-        onKeyDown={(e) => {
-          const eligible = results.filter((r) => !blocked.has(r.id) && !stagedSet.has(r.id));
-          if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            setHighlight((h) => Math.min(h + 1, eligible.length - 1));
-          } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            setHighlight((h) => Math.max(h - 1, 0));
-          } else if (e.key === 'Enter') {
-            e.preventDefault();
-            const target = eligible[highlight];
-            if (target) addParent(target.id);
-          }
-        }}
-      />
-      {results.length > 0 && (
-        <div style={{ background: 'white', border: '1px solid #b8924d', maxHeight: 160, overflow: 'auto', marginTop: 4 }}>
-          {results.map((r, i) => {
-            const cycle = blocked.has(r.id);
-            const already = stagedSet.has(r.id);
-            const eligibleIdx = results
-              .slice(0, i + 1)
-              .filter((x) => !blocked.has(x.id) && !stagedSet.has(x.id))
-              .length - 1;
-            const highlighted = !cycle && !already && eligibleIdx === highlight;
-            return (
-              <div
-                key={r.id}
-                onClick={() => addParent(r.id)}
-                style={{
-                  padding: '4px 8px',
-                  background: highlighted ? '#faf5e6' : 'transparent',
-                  cursor: cycle || already ? 'not-allowed' : 'pointer',
-                  opacity: cycle || already ? 0.5 : 1,
-                  display: 'flex', justifyContent: 'space-between',
-                }}
-              >
-                <span>
-                  {r.display_name}
-                  {cycle && <em style={{ marginLeft: 6, fontSize: 10 }}>would create cycle</em>}
-                  {already && !cycle && <em style={{ marginLeft: 6, fontSize: 10 }}>already added</em>}
-                </span>
-                <span style={{ fontFamily: 'ui-monospace, monospace', opacity: 0.5 }}>#{r.id}</span>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      <div className="tx-field" style={{ marginTop: 12 }}>
+        <label className="tx-field__label">Add parent</label>
+        <input
+          type="text"
+          className="tx-input"
+          value={query}
+          placeholder="search by name or slug…"
+          onChange={(e) => { setQuery(e.target.value); setHighlight(0); }}
+          onKeyDown={(e) => {
+            const eligible = results.filter((r) => !blocked.has(r.id) && !stagedSet.has(r.id));
+            if (e.key === 'ArrowDown') {
+              e.preventDefault();
+              setHighlight((h) => Math.min(h + 1, eligible.length - 1));
+            } else if (e.key === 'ArrowUp') {
+              e.preventDefault();
+              setHighlight((h) => Math.max(h - 1, 0));
+            } else if (e.key === 'Enter') {
+              e.preventDefault();
+              const target = eligible[highlight];
+              if (target) addParent(target.id);
+            }
+          }}
+        />
+        {results.length > 0 && (
+          <div
+            style={{
+              background: 'var(--tx-form-bg)',
+              border: '1px solid var(--tx-form-border)',
+              borderTop: 'none',
+              borderRadius: '0 0 var(--tx-form-radius) var(--tx-form-radius)',
+              maxHeight: 180,
+              overflow: 'auto',
+              marginTop: -1,
+            }}
+          >
+            {results.map((r, i) => {
+              const cycle = blocked.has(r.id);
+              const already = stagedSet.has(r.id);
+              const eligibleIdx = results
+                .slice(0, i + 1)
+                .filter((x) => !blocked.has(x.id) && !stagedSet.has(x.id))
+                .length - 1;
+              const highlighted = !cycle && !already && eligibleIdx === highlight;
+              return (
+                <div
+                  key={r.id}
+                  onClick={() => addParent(r.id)}
+                  style={{
+                    padding: '6px 12px',
+                    background: highlighted ? 'rgba(201, 164, 73, 0.18)' : 'transparent',
+                    cursor: cycle || already ? 'not-allowed' : 'pointer',
+                    opacity: cycle || already ? 0.5 : 1,
+                    display: 'flex', justifyContent: 'space-between',
+                    fontSize: 13,
+                  }}
+                >
+                  <span>
+                    {r.display_name}
+                    {cycle && <em style={{ marginLeft: 6, fontSize: 10 }}>would create cycle</em>}
+                    {already && !cycle && <em style={{ marginLeft: 6, fontSize: 10 }}>already added</em>}
+                  </span>
+                  <span style={{ fontFamily: 'ui-monospace, monospace', opacity: 0.5 }}>#{r.id}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-        <button type="button" onClick={onCancel}>CANCEL</button>
+      <div className="tx-form-actions">
+        <button type="button" className="tx-btn tx-btn--ghost" onClick={onCancel}>
+          Cancel
+        </button>
         <button
           type="button"
+          className="tx-btn tx-btn--primary"
           onClick={() => void save()}
           disabled={submitting || (removed.size === 0 && added.length === 0)}
-        >SAVE</button>
+        >
+          Save
+        </button>
       </div>
     </ModalShell>
   );
@@ -205,23 +226,26 @@ function ParentRow({
     <div
       style={{
         display: 'flex', alignItems: 'center',
-        padding: '6px 8px', marginBottom: 4,
-        background: staged ? '#faf5e6' : 'white',
-        border: staged ? '1px dashed #b8924d' : '1px solid #b8924d',
+        padding: '6px 10px',
+        marginBottom: 4,
+        background: staged ? 'rgba(201, 164, 73, 0.10)' : 'var(--tx-form-bg)',
+        border: '1px solid var(--tx-form-border)',
+        borderStyle: staged ? 'dashed' : 'solid',
+        borderRadius: 'var(--tx-form-radius)',
         textDecoration: removed ? 'line-through' : 'none',
         opacity: removed ? 0.6 : 1,
-        fontSize: 11,
+        fontSize: 13,
       }}
     >
-      <span style={{ flex: 1, display: 'flex', gap: 4 }}>
+      <span style={{ flex: 1, display: 'flex', gap: 6, alignItems: 'baseline' }}>
         <span>{name}</span>
-        <span style={{ fontFamily: 'ui-monospace, monospace', opacity: 0.5 }}>{idLabel}</span>
+        <span style={{ fontFamily: 'ui-monospace, monospace', fontSize: 11, opacity: 0.55 }}>{idLabel}</span>
       </span>
       <button
         type="button"
         aria-label={ariaLabel}
         onClick={onClick}
-        style={{ background: 'transparent', border: 'none', color: removed ? '#2a7a3a' : '#c44', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}
+        className={`tx-icon-btn ${removed ? 'tx-icon-btn--success' : 'tx-icon-btn--danger'}`}
       >{removed ? '↩' : '×'}</button>
     </div>
   );

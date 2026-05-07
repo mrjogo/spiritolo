@@ -27,9 +27,9 @@ export function DeleteNodeModal({ node, fetchBlockers, onCancel, onConfirm }: Pr
     return (
       <ModalShell onBackdropClick={onCancel}>
         <h2 className="tx-modal__title">Delete {node.display_name}?</h2>
-        <div className="tx-modal__error">Failed to read blockers: {err}</div>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12 }}>
-          <button type="button" onClick={onCancel}>CLOSE</button>
+        <div className="tx-field__error">Failed to read blockers: {err}</div>
+        <div className="tx-form-actions">
+          <button type="button" className="tx-btn tx-btn--ghost" onClick={onCancel}>Close</button>
         </div>
       </ModalShell>
     );
@@ -61,8 +61,8 @@ export function DeleteNodeModal({ node, fetchBlockers, onCancel, onConfirm }: Pr
 
       {cascade.length > 0 && (
         <>
-          <div className="tx-modal__label">Will cascade:</div>
-          <ul style={{ margin: '0 0 12px', paddingLeft: 16, fontSize: 11 }}>
+          <div className="tx-field__label">Will cascade</div>
+          <ul style={{ margin: '0 0 12px', paddingLeft: 18, fontSize: 13 }}>
             {cascade.map((c) => <li key={c}>{c}</li>)}
           </ul>
         </>
@@ -70,12 +70,12 @@ export function DeleteNodeModal({ node, fetchBlockers, onCancel, onConfirm }: Pr
 
       {blocked && (
         <>
-          <div className="tx-modal__label" style={{ color: '#b04040' }}>Blockers:</div>
-          <ul style={{ margin: '0 0 12px', paddingLeft: 16, fontSize: 11 }}>
+          <div className="tx-field__label" style={{ color: 'var(--tx-danger)' }}>Blockers</div>
+          <ul style={{ margin: '0 0 12px', paddingLeft: 18, fontSize: 13, color: 'var(--tx-danger)' }}>
             {blockerLines.map((l) => <li key={l}>{l}</li>)}
           </ul>
           {b.child_names.length > 0 && (
-            <div style={{ fontSize: 10, opacity: 0.7, marginBottom: 12 }}>
+            <div style={{ fontSize: 11, opacity: 0.7, marginBottom: 12, fontStyle: 'italic' }}>
               Children: {b.child_names.slice(0, 5).map((c) => `${c.display_name} (#${c.id})`).join(', ')}
               {b.child_names.length > 5 && `, … +${b.child_names.length - 5} more`}
             </div>
@@ -84,12 +84,13 @@ export function DeleteNodeModal({ node, fetchBlockers, onCancel, onConfirm }: Pr
       )}
 
       {!blocked && (
-        <div style={{ marginBottom: 12 }}>
-          <label className="tx-modal__label" htmlFor="confirm-slug">
-            Type slug to confirm:
+        <div className="tx-field">
+          <label className="tx-field__label" htmlFor="confirm-slug">
+            Type slug to confirm
           </label>
           <input
             id="confirm-slug"
+            className="tx-input"
             aria-label="confirm slug"
             type="text"
             value={confirmInput}
@@ -99,17 +100,18 @@ export function DeleteNodeModal({ node, fetchBlockers, onCancel, onConfirm }: Pr
         </div>
       )}
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-        <button type="button" onClick={onCancel}>CANCEL</button>
+      <div className="tx-form-actions">
+        <button type="button" className="tx-btn tx-btn--ghost" onClick={onCancel}>Cancel</button>
         <button
           type="button"
+          className="tx-btn tx-btn--danger"
           disabled={blocked || confirmInput !== node.slug || submitting}
           onClick={async () => {
             setSubmitting(true);
             try { await onConfirm(node.id); }
             finally { setSubmitting(false); }
           }}
-        >DELETE</button>
+        >Delete</button>
       </div>
     </ModalShell>
   );

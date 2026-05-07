@@ -4,32 +4,97 @@ interface Props {
   value: string[];
   onSave: (next: string[]) => Promise<void> | void;
   onError?: (e: unknown) => void;
+  /** Render the chip-input directly, no view-mode/pencil dance.
+   *  Each chip add/remove fires onSave eagerly so a controlled
+   *  parent (e.g. react-hook-form) stays in sync. */
+  alwaysEdit?: boolean;
 }
 
 const ROW_STYLE: React.CSSProperties = {
   position: 'relative',
-  padding: '2px 6px',
-  border: '1px solid transparent',
-  borderRadius: 3,
+  padding: '4px 6px',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'transparent',
+  borderRadius: 'var(--tx-form-radius)',
   display: 'flex',
   flexWrap: 'wrap',
-  gap: 4,
+  gap: 6,
   alignItems: 'center',
+  minHeight: 32,
 };
-const HOVER_STYLE: React.CSSProperties = { borderColor: '#8b6f3a' };
+const HOVER_STYLE: React.CSSProperties = { borderColor: 'var(--tx-form-border)' };
 
-const CHIP_STYLE: React.CSSProperties = {
-  background: '#faf5e6',
-  border: '1px solid #b8924d',
-  borderRadius: 10,
-  padding: '1px 6px',
-  fontSize: 11,
-  display: 'inline-flex',
-  alignItems: 'center',
-  gap: 4,
-};
+export function AliasChipEditor({ value, onSave, onError, alwaysEdit = false }: Props) {
+  if (alwaysEdit) {
+    return <ChipInput value={value} onSave={onSave} onError={onError} />;
+  }
+  return <InlineEditor value={value} onSave={onSave} onError={onError} />;
+}
 
-export function AliasChipEditor({ value, onSave, onError }: Props) {
+/** Always-edit, controlled chip input. Looks like a .tx-input. */
+function ChipInput({ value, onSave, onError }: Omit<Props, 'alwaysEdit'>) {
+  const [input, setInput] = useState('');
+
+  async function commit(next: string[]) {
+    try {
+      await onSave(next);
+    } catch (e) {
+      onError?.(e);
+    }
+  }
+
+  function addCurrent() {
+    const trimmed = input.trim();
+    if (trimmed === '' || value.includes(trimmed)) return;
+    setInput('');
+    void commit([...value, trimmed]);
+  }
+
+  function remove(i: number) {
+    void commit(value.filter((_, idx) => idx !== i));
+  }
+
+  return (
+    <div className="tx-input-chips">
+      {value.map((a, i) => (
+        <span key={`${a}-${i}`} className="tx-chip">
+          {a}
+          <button
+            type="button"
+            aria-label={`remove ${a}`}
+            onClick={() => remove(i)}
+            className="tx-chip__remove"
+          >×</button>
+        </span>
+      ))}
+      <input
+        type="text"
+        className="tx-input-chips__input"
+        value={input}
+        placeholder="add alias"
+        onChange={(e) => setInput(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            addCurrent();
+          } else if (e.key === 'Tab' && input.trim() !== '') {
+            // Commit and stay focused. Empty input → fall through to default
+            // tab navigation so focus moves to the next form field.
+            e.preventDefault();
+            addCurrent();
+          } else if (e.key === 'Backspace' && input === '' && value.length > 0) {
+            e.preventDefault();
+            remove(value.length - 1);
+          }
+        }}
+      />
+    </div>
+  );
+}
+
+/** Original inline view-mode-with-pencil editor used by NodeCard. */
+function InlineEditor({ value, onSave, onError }: Omit<Props, 'alwaysEdit'>) {
   const [hover, setHover] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string[]>(value);
@@ -66,7 +131,6 @@ export function AliasChipEditor({ value, onSave, onError }: Props) {
 
   function remove(i: number) {
     setDraft(draft.filter((_, idx) => idx !== i));
-    // Keep focus inside the editor so the container's onBlur doesn't fire prematurely
     inputRef.current?.focus();
   }
 
@@ -74,22 +138,21 @@ export function AliasChipEditor({ value, onSave, onError }: Props) {
     return (
       <div
         ref={containerRef}
-        style={{ ...ROW_STYLE, ...HOVER_STYLE }}
+        style={{ ...ROW_STYLE, ...HOVER_STYLE, background: 'var(--tx-form-bg)' }}
         onBlur={(e) => {
-          // Only save if focus is leaving the whole editor
           if (containerRef.current && !containerRef.current.contains(e.relatedTarget as Node | null)) {
             void commit();
           }
         }}
       >
         {draft.map((a, i) => (
-          <span key={`${a}-${i}`} style={CHIP_STYLE}>
+          <span key={`${a}-${i}`} className="tx-chip">
             {a}
             <button
               type="button"
               aria-label={`remove ${a}`}
               onClick={() => remove(i)}
-              style={{ background: 'transparent', border: 'none', color: '#c44', cursor: 'pointer', fontSize: 12, padding: 0, lineHeight: 1 }}
+              className="tx-chip__remove"
             >×</button>
           </span>
         ))}
@@ -103,13 +166,25 @@ export function AliasChipEditor({ value, onSave, onError }: Props) {
             if (e.key === 'Enter') {
               e.preventDefault();
               addCurrent();
+            } else if (e.key === 'Tab' && input.trim() !== '') {
+              e.preventDefault();
+              addCurrent();
             } else if (e.key === 'Escape') {
               setDraft(value);
               setInput('');
               setEditing(false);
             }
           }}
-          style={{ font: 'inherit', color: 'inherit', background: 'transparent', border: 'none', flex: '1 1 80px', minWidth: 80 }}
+          style={{
+            font: 'inherit',
+            color: 'inherit',
+            background: 'transparent',
+            border: 'none',
+            outline: 'none',
+            flex: '1 1 80px',
+            minWidth: 80,
+            fontSize: 13,
+          }}
         />
       </div>
     );
@@ -123,15 +198,15 @@ export function AliasChipEditor({ value, onSave, onError }: Props) {
     >
       {value.length === 0
         ? <span style={{ fontStyle: 'italic', opacity: 0.6 }}>—</span>
-        : value.map((a) => <span key={a} style={CHIP_STYLE}>{a}</span>)}
+        : value.map((a) => <span key={a} className="tx-chip">{a}</span>)}
       <button
         type="button"
         aria-label="edit aliases"
         onClick={() => setEditing(true)}
         style={{
-          position: 'absolute', right: 4, top: 2,
+          position: 'absolute', right: 6, top: 6,
           background: 'transparent', border: 'none', cursor: 'pointer',
-          color: '#8b6f3a', padding: 0, lineHeight: 1, fontSize: 13,
+          color: 'var(--tx-brown-soft)', padding: 0, lineHeight: 1, fontSize: 13,
           opacity: hover ? 1 : 0,
         }}
       >✎</button>

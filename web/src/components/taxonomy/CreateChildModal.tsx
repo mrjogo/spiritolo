@@ -47,29 +47,34 @@ export function CreateChildModal({ parent, onCancel, onCreate }: Props) {
       <h2 className="tx-modal__title">New child of {parent.display_name}</h2>
       <div className="tx-modal__subtitle">PARENT · {parent.display_name} (#{parent.id})</div>
       <form onSubmit={form.handleSubmit((v) => onCreate(parent.id, v))}>
-        <Field label="DISPLAY NAME *" error={form.formState.errors.display_name?.message}>
+        <Field label="Display name *" error={form.formState.errors.display_name?.message}>
           <input
             id="dn"
+            className="tx-input"
             aria-label="display name"
+            aria-invalid={!!form.formState.errors.display_name || undefined}
             {...form.register('display_name')}
           />
         </Field>
-        <Field label="SLUG *" error={form.formState.errors.slug?.message}>
+        <Field label="Slug *" error={form.formState.errors.slug?.message}>
           <input
             id="slug"
+            className="tx-input"
             aria-label="slug"
+            aria-invalid={!!form.formState.errors.slug || undefined}
             {...form.register('slug', {
               onChange: () => { slugTouchedRef.current = true; },
             })}
           />
         </Field>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-          <Field label="NODE KIND">
+        <div className="tx-form-row">
+          <Field label="Node kind">
             <Controller
               control={form.control}
               name="node_kind"
               render={({ field }) => (
                 <select
+                  className="tx-select"
                   aria-label="node kind"
                   value={field.value ?? ''}
                   onChange={(e) => field.onChange(e.target.value === '' ? null : e.target.value)}
@@ -82,12 +87,13 @@ export function CreateChildModal({ parent, onCancel, onCreate }: Props) {
               )}
             />
           </Field>
-          <Field label="DEFAULT ROLE">
+          <Field label="Default role">
             <Controller
               control={form.control}
               name="default_role"
               render={({ field }) => (
                 <select
+                  className="tx-select"
                   aria-label="default role"
                   value={field.value ?? ''}
                   onChange={(e) => field.onChange(e.target.value === '' ? null : e.target.value)}
@@ -101,25 +107,38 @@ export function CreateChildModal({ parent, onCancel, onCreate }: Props) {
             />
           </Field>
         </div>
-        <div style={{ display: 'flex', gap: 12, alignItems: 'center', marginTop: 8 }}>
+        <div className="tx-toggle-row">
           <ToggleControl name="is_cluster_node" label="cluster" form={form} />
           <ToggleControl name="is_defining_garnish" label="garnish" form={form} />
         </div>
-        <Field label="ALIASES">
+        <Field label="Aliases">
           <Controller
             control={form.control}
             name="aliases"
             render={({ field }) => (
               <AliasChipEditor
+                alwaysEdit
                 value={field.value}
                 onSave={(v) => { field.onChange(v); }}
               />
             )}
           />
         </Field>
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 16 }}>
-          <button type="button" onClick={onCancel}>CANCEL</button>
-          <button type="submit" disabled={form.formState.isSubmitting}>CREATE</button>
+        <div className="tx-form-actions">
+          <button
+            type="button"
+            className="tx-btn tx-btn--ghost"
+            onClick={onCancel}
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            className="tx-btn tx-btn--primary"
+            disabled={form.formState.isSubmitting}
+          >
+            Create
+          </button>
         </div>
       </form>
     </ModalShell>
@@ -130,10 +149,10 @@ function Field({
   label, error, children,
 }: { label: string; error?: string; children: React.ReactNode }) {
   return (
-    <div style={{ marginBottom: 8 }}>
-      <label className="tx-modal__label">{label}</label>
+    <div className="tx-field">
+      <label className="tx-field__label">{label}</label>
       {children}
-      {error && <div className="tx-modal__error">{error}</div>}
+      {error && <div className="tx-field__error">{error}</div>}
     </div>
   );
 }
@@ -149,25 +168,16 @@ function ToggleControl({
   return (
     <button
       type="button"
+      className="tx-toggle"
       role="switch"
       aria-checked={value}
       aria-label={label}
       onClick={() => form.setValue(name, !value)}
-      style={{
-        display: 'inline-flex', alignItems: 'center', gap: 6,
-        background: 'transparent', border: 'none', cursor: 'pointer',
-      }}
     >
-      <span style={{
-        width: 28, height: 14, borderRadius: 7, position: 'relative',
-        background: value ? '#b8924d' : '#d4c8a8',
-      }}>
-        <span style={{
-          position: 'absolute', left: value ? 14 : 1, top: 1,
-          width: 12, height: 12, borderRadius: '50%', background: 'white',
-        }} />
+      <span className="tx-toggle__track">
+        <span className="tx-toggle__thumb" />
       </span>
-      <span style={{ fontFamily: "'Cinzel', serif", fontSize: 10 }}>{label}</span>
+      <span>{label}</span>
     </button>
   );
 }
