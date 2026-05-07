@@ -1,7 +1,25 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
+
+vi.mock('../../supabase', () => ({
+  supabase: {
+    from: vi.fn().mockReturnValue({
+      select: vi.fn().mockReturnValue({
+        eq: vi.fn().mockReturnValue({
+          order: vi.fn().mockReturnValue({
+            then: vi.fn().mockImplementation((cb: (result: { data: unknown[]; error: null }) => void) => {
+              cb({ data: [], error: null });
+            }),
+          }),
+        }),
+      }),
+    }),
+  },
+}));
+
+import { supabase } from '../../supabase';
 import { NodeCard } from './NodeCard';
 import type { TaxonomyNode } from './shapeData';
 
