@@ -10,7 +10,7 @@ import {
 import { Legend } from '../components/taxonomy/Legend';
 import { SearchBox } from '../components/taxonomy/SearchBox';
 import { FilterChips } from '../components/taxonomy/FilterChips';
-import { NodeCard } from '../components/taxonomy/NodeCard';
+import { NodeCard, type FieldKey } from '../components/taxonomy/NodeCard';
 import { EdgeCard, type EdgeRef } from '../components/taxonomy/EdgeCard';
 import { TX_BROWN_MID, TX_FRAME_EDGE, type NodeSizeMode } from '../components/taxonomy/palette';
 import {
@@ -23,6 +23,8 @@ import {
   type TaxonomyNode,
   type TaxonomyViewRow,
 } from '../components/taxonomy/shapeData';
+import { updateTaxonomyNode } from '../components/taxonomy/rpcs';
+import { Toast } from '../components/taxonomy/Toast';
 import '../components/taxonomy/taxonomy.css';
 
 // Mirrors --site-header-height in styles.css. Used to size the
@@ -105,6 +107,9 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
   const [sizeMode, setSizeMode] = useState<NodeSizeMode>('uniform');
   const [settled, setSettled] = useState(false);
   const canvasRef = useRef<ForceCanvasHandle>(null);
+  const [toast, setToast] = useState<{ message: string; kind?: 'info' | 'error' } | null>(null);
+  const [editingParentsFor, setEditingParentsFor] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
 
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const focusedNode = focusedId ? (byId.get(focusedId) ?? null) : null;
@@ -132,6 +137,19 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
     if (!focusedEdge) return null;
     return new Set([focusedEdge.source.id, focusedEdge.target.id]);
   }, [focusedEdge]);
+
+  const parentLookup = useMemo(
+    () => new Map(rows.map((r) => [r.id, { id: r.id, display_name: r.display_name }])),
+    [rows],
+  );
+
+  async function handleEditField(id: number, key: FieldKey, next: unknown) {
+    const patch: Record<string, unknown> = { [key]: next };
+    await updateTaxonomyNode(id, patch);
+    setRows((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, [key]: next as never } : r)),
+    );
+  }
 
   const dimmedIds = useMemo(() => {
     const dim = new Set<number>();
@@ -338,7 +356,17 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
             );
           }
           if (focusedNode) {
-            return <NodeCard node={focusedNode} mode="pinned" onDismiss={() => setFocusedId(null)} />;
+            return (
+              <NodeCard
+                node={focusedNode}
+                mode="pinned"
+                onDismiss={() => setFocusedId(null)}
+                onEditField={handleEditField}
+                onEditParents={(id) => setEditingParentsFor(id)}
+                onDelete={(id) => setDeletingId(id)}
+                parentLookup={parentLookup}
+              />
+            );
           }
           if (hoveredEdge && !focusedNode) {
             return <EdgeCard edge={hoveredEdge} mode="hover" onDismiss={() => {}} />;
