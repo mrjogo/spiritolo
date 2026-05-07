@@ -17,6 +17,7 @@ import {
   TX_LINK_DIM,
   TX_BROWN_FAINT,
   nodeRadius,
+  OUTER_RING_PAD,
   type NodeSizeMode,
 } from './palette';
 
@@ -184,7 +185,7 @@ function drawNode(
   const role = effectiveKind(node);
   const fill = ROLE_FILL[role];
   const radius = nodeRadius(node, sizeMode);
-  const outerR = radius + 2.5;
+  const outerR = radius + OUTER_RING_PAD;
 
   // Outer dark cap
   ctx.beginPath();

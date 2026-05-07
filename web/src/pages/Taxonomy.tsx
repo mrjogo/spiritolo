@@ -30,7 +30,7 @@ import { Toast } from '../components/taxonomy/Toast';
 import { PlusButton } from '../components/taxonomy/PlusButton';
 import { CreateChildModal } from '../components/taxonomy/CreateChildModal';
 import { HighlightPulse } from '../components/taxonomy/HighlightPulse';
-import { nodeRadius } from '../components/taxonomy/palette';
+import { outerRingRadius } from '../components/taxonomy/palette';
 import '../components/taxonomy/taxonomy.css';
 
 // Mirrors --site-header-height in styles.css. Used to size the
@@ -170,10 +170,11 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
     const tick = () => {
       const c = canvasRef.current?.getNodeScreenCoords(hovered.id);
       if (c) {
-        // nodeRadius() returns simulation-space units; multiply by current
-        // zoom to get on-screen pixels so the overlay tracks visual size.
+        // outerRingRadius() is in simulation-space units; multiply by current
+        // zoom to get on-screen pixels so the overlay tracks the visible
+        // outer edge (the gold ring), not the inner role-fill disc.
         const zoom = canvasRef.current?.getZoom() ?? 1;
-        const r = nodeRadius(hovered as TaxonomyNode, sizeMode) * zoom;
+        const r = outerRingRadius(hovered as TaxonomyNode, sizeMode) * zoom;
         setPlusCoords({ x: c.x, y: c.y, r });
       }
       frame = requestAnimationFrame(tick);
@@ -196,7 +197,7 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
       const node = rows.find((r) => r.id === pulseFor);
       if (!node) return;
       const zoom = canvasRef.current?.getZoom() ?? 1;
-      setPulseCoords({ x: c.x, y: c.y, r: nodeRadius(node as TaxonomyNode, sizeMode) * zoom });
+      setPulseCoords({ x: c.x, y: c.y, r: outerRingRadius(node as TaxonomyNode, sizeMode) * zoom });
       if (c.x < 0 || c.y < 0 || c.x > size.w || c.y > size.h) {
         const runtime = (rows.find((r) => r.id === pulseFor) as { x?: number; y?: number } | undefined);
         if (runtime?.x != null && runtime.y != null) {

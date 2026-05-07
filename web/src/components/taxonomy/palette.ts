@@ -38,3 +38,15 @@ export function nodeRadius(
   if (mode === 'uniform') return UNIFORM_RADIUS;
   return Math.max(3, Math.sqrt(node.recipe_count + 1) * 2.2);
 }
+
+// drawNode() paints the outer dark cap + gold/rust ring at radius + this.
+// Overlays (PlusButton, HighlightPulse) anchor to the outer ring's edge,
+// so they add this constant to nodeRadius() before computing offsets.
+export const OUTER_RING_PAD = 2.5;
+
+export function outerRingRadius(
+  node: { recipe_count: number },
+  mode: NodeSizeMode = 'recipes',
+): number {
+  return nodeRadius(node, mode) + OUTER_RING_PAD;
+}
