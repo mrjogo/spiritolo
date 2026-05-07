@@ -88,7 +88,8 @@ export function Taxonomy() {
   );
 }
 
-function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
+function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
+  const [rows, setRows] = useState<TaxonomyViewRow[]>(initialRows);
   const { nodes, links } = useMemo(() => viewRowsToGraph(rows), [rows]);
   const [size, setSize] = useState({
     w: window.innerWidth,
