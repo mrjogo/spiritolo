@@ -29,20 +29,20 @@ function renderIt(props: React.ComponentProps<typeof StructuredIngredients>) {
 }
 
 describe('<StructuredIngredients>', () => {
-  it('renders raw lines as a single-column table for non-admins', () => {
+  it('renders raw lines as a plain list for non-admins', () => {
     renderIt({
       rawLines: ['2 oz gin', '1 oz lime juice'],
       parsedByPosition: null,
     });
-    const rows = screen.getAllByRole('row');
-    expect(rows).toHaveLength(2);
-    expect(within(rows[0]).getByText('2 oz gin')).toBeInTheDocument();
-    expect(within(rows[1]).getByText('1 oz lime juice')).toBeInTheDocument();
-    const cells0 = within(rows[0]).getAllByRole('cell');
-    expect(cells0).toHaveLength(1);
+    const items = screen.getAllByRole('listitem');
+    expect(items).toHaveLength(2);
+    expect(within(items[0]).getByText('2 oz gin')).toBeInTheDocument();
+    expect(within(items[1]).getByText('1 oz lime juice')).toBeInTheDocument();
+    // No parsed cards rendered for non-admins.
+    expect(screen.queryByText(/^#/)).toBeNull();
   });
 
-  it('renders aligned cells for admin happy path', () => {
+  it('renders raw line + parsed squircle aligned per row for admins', () => {
     const rows = [
       row({ position: 0, raw_text: '2 oz gin', amount: 2, unit: 'oz', name: 'gin', taxonomy_node_id: 5, taxonomy_nodes: { slug: 'gin', display_name: 'Gin' }, role: 'base_spirit', id: 17 }),
       row({ position: 1, raw_text: '1 oz fresh lime juice', amount: 1, unit: 'oz', name: 'lime juice', modifier: 'fresh', taxonomy_node_id: 9, taxonomy_nodes: { slug: 'lime_juice', display_name: 'Lime Juice' }, role: 'citrus', id: 18 }),
@@ -51,21 +51,23 @@ describe('<StructuredIngredients>', () => {
       rawLines: ['2 oz gin', '1 oz fresh lime juice'],
       parsedByPosition: asMap(rows),
     });
-    const tableRows = screen.getAllByRole('row');
-    expect(tableRows).toHaveLength(3); // 1 header + 2 data
-    const r0 = within(tableRows[1]);
-    expect(r0.getByText('2 oz gin')).toBeInTheDocument();
-    expect(r0.getByText('2 oz')).toBeInTheDocument();
-    expect(r0.getByRole('link', { name: /gin/i })).toHaveAttribute('href', '/taxonomy?node=gin');
-    expect(r0.getByText('base_spirit')).toBeInTheDocument();
-    expect(r0.getByText('17')).toBeInTheDocument();
+    const items = screen.getAllByRole('listitem');
+    expect(items).toHaveLength(2);
 
-    const r1 = within(tableRows[2]);
-    expect(r1.getByText('1 oz')).toBeInTheDocument();
-    expect(r1.getByText('fresh')).toBeInTheDocument();
-    expect(r1.getByText('citrus')).toBeInTheDocument();
-    expect(r1.getByRole('link', { name: /lime juice/i })).toHaveAttribute('href', '/taxonomy?node=lime_juice');
-    expect(r1.getByText('18')).toBeInTheDocument();
+    const first = within(items[0]);
+    expect(first.getByText('2 oz gin')).toBeInTheDocument();
+    expect(first.getByText('#17')).toBeInTheDocument();
+    expect(first.getByText('2 oz')).toBeInTheDocument();
+    expect(first.getByRole('link', { name: /gin/i })).toHaveAttribute('href', '/taxonomy?node=gin');
+    expect(first.getByText('base_spirit')).toBeInTheDocument();
+
+    const second = within(items[1]);
+    expect(second.getByText('1 oz fresh lime juice')).toBeInTheDocument();
+    expect(second.getByText('#18')).toBeInTheDocument();
+    expect(second.getByText('1 oz')).toBeInTheDocument();
+    expect(second.getByText('fresh')).toBeInTheDocument();
+    expect(second.getByText('citrus')).toBeInTheDocument();
+    expect(second.getByRole('link', { name: /lime juice/i })).toHaveAttribute('href', '/taxonomy?node=lime_juice');
   });
 
   it('renders amount ranges as "min–max unit"', () => {
@@ -80,7 +82,7 @@ describe('<StructuredIngredients>', () => {
     expect(screen.getByText('3')).toBeInTheDocument();
   });
 
-  it('renders an unparseable row with collapsed right-side cell', () => {
+  it('renders an unparseable row inside a tinted squircle', () => {
     const r = row({
       position: 0, parse_status: 'unparseable',
       amount: null, unit: null, name: null,
@@ -102,7 +104,7 @@ describe('<StructuredIngredients>', () => {
     expect(screen.getByText('garnish')).toBeInTheDocument();
   });
 
-  it('renders "not parsed" for raw lines with no parsed row', () => {
+  it('renders "not parsed" squircle for raw lines with no parsed row', () => {
     renderIt({
       rawLines: ['2 oz gin', '1 oz lime'],
       parsedByPosition: asMap([row({ position: 0, raw_text: '2 oz gin' })]),

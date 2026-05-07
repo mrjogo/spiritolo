@@ -258,89 +258,82 @@ a {
   background: rgba(245, 233, 200, 0.6);
 }
 
-/* Two-zone layout: left zone (recipe lines) reads as prose; right zone
- * (parsed fields) reads as a tight data table. A vertical divider on
- * the recipe column's right edge separates the two zones. */
+/* Recipe ingredients: a normal <ul> visually. In admin mode each <li>
+ * becomes a 2-column grid where the left holds the raw line (looks
+ * like a list item) and the right holds a dotted-border "squircle"
+ * with the parsed fields. Both children share the row's intrinsic
+ * height, so they auto-align even when the raw line wraps. */
 
-.recipe-detail__structured {
-  width: 100%;
-  border-collapse: collapse;
+.recipe-detail__ingredients {
   margin: 0 0 1.5em;
 }
 
-.recipe-detail__structured th,
-.recipe-detail__structured td {
-  vertical-align: top;
-  padding: 0;
+.recipe-detail__ingredients--admin {
+  list-style-position: outside;
 }
 
-/* Header row: only the parsed columns get a header. The recipe column's
- * header cell is empty (the page's <h2>Ingredients</h2> already names it). */
-
-.recipe-detail__structured-h-raw {
-  border: none;
-  padding: 0;
+.recipe-detail__ingredients--admin > li {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  column-gap: 24px;
+  align-items: start;
+  margin-bottom: 8px;
 }
 
-.recipe-detail__structured-h-parsed {
-  font-family: ui-monospace, monospace;
-  font-size: 10px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  text-align: left;
-  font-weight: 500;
-  color: var(--color-fg-muted, #6a4a1a);
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--color-border, #8a6a35);
-}
-
-/* Recipe column: list-feel — generous padding, no row separators, larger
- * font. The right border is the zone divider. */
-.recipe-detail__structured-raw {
-  width: 60%;
-  padding: 10px 24px 10px 0;
+.recipe-detail__ingredients-raw {
   font-size: 16px;
   line-height: 1.5;
-  border-right: 2px solid var(--color-border, #8a6a35);
 }
 
-/* Parsed cells: tight data-table feel. Row separator on top. */
-.recipe-detail__structured-cell {
-  padding: 8px 10px;
-  border-top: 1px solid rgba(138, 106, 53, 0.18);
+/* The squircle. Dotted border, generously rounded, padded inline content
+ * with reasonable wrap behavior. */
+.recipe-detail__parsed-card {
+  border: 1.5px dotted var(--color-border, #8a6a35);
+  border-radius: 14px;
+  padding: 6px 14px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 14px;
   font-size: 14px;
+  line-height: 1.4;
 }
 
-/* First parsed cell needs extra left padding to clear the divider. */
-.recipe-detail__structured-cell--first {
-  padding-left: 16px;
+.recipe-detail__parsed-card--missing {
+  border-color: #b0b0b0;
+  color: #888;
+  font-style: italic;
 }
 
-/* ID column: monospace, standard size (no longer "inconspicuous"). */
-.recipe-detail__structured-id {
+.recipe-detail__parsed-card--unparseable {
+  border-color: #c89a3a;
+  color: #8a5a14;
+  font-style: italic;
+}
+
+.recipe-detail__parsed-id {
   font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--color-fg-muted, #6a4a1a);
   white-space: nowrap;
 }
 
-/* Failure-tint cells span the parsed zone (colSpan=5). The amber/grey
- * left border keeps these visually loud for curator scanning. */
-.recipe-detail__structured-unparseable {
-  padding: 8px 10px 8px 16px;
-  border-top: 1px solid rgba(138, 106, 53, 0.18);
-  border-left: 3px solid #c89a3a;
-  font-style: italic;
-  color: #8a5a14;
+.recipe-detail__parsed-amount {
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
-.recipe-detail__structured-missing {
-  padding: 8px 10px 8px 16px;
-  border-top: 1px solid rgba(138, 106, 53, 0.18);
-  border-left: 3px solid #b0b0b0;
-  font-style: italic;
-  color: #888;
+.recipe-detail__parsed-name {
+  font-weight: 500;
 }
 
-.recipe-detail__structured-role {
+.recipe-detail__parsed-modifier {
+  font-style: italic;
+  color: var(--color-fg-muted, #6a4a1a);
+}
+
+.recipe-detail__parsed-role {
   display: inline-block;
   font-family: ui-monospace, monospace;
   font-size: 10px;

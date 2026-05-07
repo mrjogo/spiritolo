@@ -10,53 +10,37 @@ export function StructuredIngredients({ rawLines, parsedByPosition }: Props) {
   const isAdmin = parsedByPosition !== null;
 
   return (
-    <table className="recipe-detail__structured">
-      {isAdmin && (
-        <thead>
-          <tr>
-            <th aria-label="Recipe" className="recipe-detail__structured-h-raw" />
-            <th className="recipe-detail__structured-h-parsed">ID</th>
-            <th className="recipe-detail__structured-h-parsed">Amount</th>
-            <th className="recipe-detail__structured-h-parsed">Name</th>
-            <th className="recipe-detail__structured-h-parsed">Modifier</th>
-            <th className="recipe-detail__structured-h-parsed">Role</th>
-          </tr>
-        </thead>
-      )}
-      <tbody>
-        {rawLines.map((raw, i) => (
-          <tr key={i}>
-            <td className="recipe-detail__structured-raw">{raw}</td>
-            {isAdmin && <ParsedCells row={parsedByPosition!.get(i) ?? null} />}
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <ul className={isAdmin ? 'recipe-detail__ingredients recipe-detail__ingredients--admin' : 'recipe-detail__ingredients'}>
+      {rawLines.map((raw, i) => (
+        <li key={i}>
+          <span className="recipe-detail__ingredients-raw">{raw}</span>
+          {isAdmin && <ParsedCard row={parsedByPosition!.get(i) ?? null} />}
+        </li>
+      ))}
+    </ul>
   );
 }
 
-function ParsedCells({ row }: { row: RecipeIngredientRow | null }) {
+function ParsedCard({ row }: { row: RecipeIngredientRow | null }) {
   if (row === null) {
     return (
-      <td className="recipe-detail__structured-missing" colSpan={5}>
+      <div className="recipe-detail__parsed-card recipe-detail__parsed-card--missing">
         <em>not parsed</em>
-      </td>
+      </div>
     );
   }
   if (row.parse_status === 'unparseable') {
     return (
-      <td className="recipe-detail__structured-unparseable" colSpan={5}>
+      <div className="recipe-detail__parsed-card recipe-detail__parsed-card--unparseable">
         <em>unparseable</em>
-      </td>
+      </div>
     );
   }
   return (
-    <>
-      <td className="recipe-detail__structured-cell recipe-detail__structured-cell--first recipe-detail__structured-id">
-        {row.id}
-      </td>
-      <td className="recipe-detail__structured-cell">{formatAmount(row)}</td>
-      <td className="recipe-detail__structured-cell">
+    <div className="recipe-detail__parsed-card">
+      <span className="recipe-detail__parsed-id">#{row.id}</span>
+      <span className="recipe-detail__parsed-amount">{formatAmount(row)}</span>
+      <span className="recipe-detail__parsed-name">
         {row.taxonomy_nodes != null ? (
           <Link to={`/taxonomy?node=${row.taxonomy_nodes.slug}`}>
             {row.taxonomy_nodes.display_name}
@@ -64,16 +48,16 @@ function ParsedCells({ row }: { row: RecipeIngredientRow | null }) {
         ) : (
           row.name ?? ''
         )}
-      </td>
-      <td className="recipe-detail__structured-cell">{row.modifier ?? ''}</td>
-      <td className="recipe-detail__structured-cell">
-        {row.role && (
-          <span className={`recipe-detail__structured-role recipe-detail__structured-role--${row.role}`}>
-            {row.role}
-          </span>
-        )}
-      </td>
-    </>
+      </span>
+      {row.modifier && (
+        <span className="recipe-detail__parsed-modifier">{row.modifier}</span>
+      )}
+      {row.role && (
+        <span className={`recipe-detail__parsed-role recipe-detail__parsed-role--${row.role}`}>
+          {row.role}
+        </span>
+      )}
+    </div>
   );
 }
 

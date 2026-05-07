@@ -209,6 +209,6 @@ describe('<RecipeDetail>', () => {
       'href', '/taxonomy?node=gin',
     );
     expect(screen.getByText('2 oz')).toBeInTheDocument();
-    expect(screen.getByText('17')).toBeInTheDocument();
+    expect(screen.getByText('#17')).toBeInTheDocument();
   });
 });
