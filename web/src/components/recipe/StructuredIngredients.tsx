@@ -13,8 +13,14 @@ export function StructuredIngredients({ rawLines, parsedByPosition }: Props) {
     <ul className={isAdmin ? 'recipe-detail__ingredients recipe-detail__ingredients--admin' : 'recipe-detail__ingredients'}>
       {rawLines.map((raw, i) => (
         <li key={i}>
-          <span className="recipe-detail__ingredients-raw">{raw}</span>
-          {isAdmin && <ParsedCard row={parsedByPosition!.get(i) ?? null} />}
+          {isAdmin ? (
+            <div className="recipe-detail__ingredients-row">
+              <span className="recipe-detail__ingredients-raw">{raw}</span>
+              <ParsedCard row={parsedByPosition!.get(i) ?? null} />
+            </div>
+          ) : (
+            raw
+          )}
         </li>
       ))}
     </ul>

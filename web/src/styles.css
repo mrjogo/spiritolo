@@ -258,26 +258,25 @@ a {
   background: rgba(245, 233, 200, 0.6);
 }
 
-/* Recipe ingredients: a normal <ul> visually. In admin mode each <li>
- * becomes a 2-column grid where the left holds the raw line (looks
- * like a list item) and the right holds a dotted-border "squircle"
- * with the parsed fields. Both children share the row's intrinsic
- * height, so they auto-align even when the raw line wraps. */
+/* Recipe ingredients: a normal <ul> with bullets. In admin mode the
+ * <li> wraps an inner grid (raw line | parsed squircle); the grid lives
+ * on the wrapper, NOT on <li>, so the marker still renders. Both grid
+ * children share the row's intrinsic height, so the squircle grows when
+ * the raw line wraps. */
 
 .recipe-detail__ingredients {
   margin: 0 0 1.5em;
 }
 
-.recipe-detail__ingredients--admin {
-  list-style-position: outside;
+.recipe-detail__ingredients--admin > li {
+  margin-bottom: 8px;
 }
 
-.recipe-detail__ingredients--admin > li {
+.recipe-detail__ingredients-row {
   display: grid;
-  grid-template-columns: 3fr 2fr;
-  column-gap: 24px;
+  grid-template-columns: 1fr 1fr;
+  column-gap: 12px;
   align-items: start;
-  margin-bottom: 8px;
 }
 
 .recipe-detail__ingredients-raw {
@@ -285,8 +284,9 @@ a {
   line-height: 1.5;
 }
 
-/* The squircle. Dotted border, generously rounded, padded inline content
- * with reasonable wrap behavior. */
+/* The squircle. Single font-size + body color throughout; ID and amount
+ * stay monospace as a data-convention but match everything else's size
+ * and color. */
 .recipe-detail__parsed-card {
   border: 1.5px dotted var(--color-border, #8a6a35);
   border-radius: 14px;
@@ -294,9 +294,10 @@ a {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 14px;
+  gap: 4px 12px;
   font-size: 14px;
-  line-height: 1.4;
+  line-height: 1.5;
+  color: #222;
 }
 
 .recipe-detail__parsed-card--missing {
@@ -311,38 +312,25 @@ a {
   font-style: italic;
 }
 
-.recipe-detail__parsed-id {
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-  color: var(--color-fg-muted, #6a4a1a);
-  white-space: nowrap;
-}
-
+.recipe-detail__parsed-id,
 .recipe-detail__parsed-amount {
   font-family: ui-monospace, monospace;
-  font-size: 13px;
   white-space: nowrap;
-}
-
-.recipe-detail__parsed-name {
-  font-weight: 500;
 }
 
 .recipe-detail__parsed-modifier {
   font-style: italic;
-  color: var(--color-fg-muted, #6a4a1a);
 }
 
 .recipe-detail__parsed-role {
   display: inline-block;
   font-family: ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 11px;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 1px 6px;
   border-radius: 4px;
   background: rgba(138, 106, 53, 0.12);
-  color: var(--color-fg, #3a2a14);
 }
 
 .tx-card__recipes {
