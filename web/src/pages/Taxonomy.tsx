@@ -170,7 +170,10 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
     const tick = () => {
       const c = canvasRef.current?.getNodeScreenCoords(hovered.id);
       if (c) {
-        const r = nodeRadius(hovered as TaxonomyNode, sizeMode);
+        // nodeRadius() returns simulation-space units; multiply by current
+        // zoom to get on-screen pixels so the overlay tracks visual size.
+        const zoom = canvasRef.current?.getZoom() ?? 1;
+        const r = nodeRadius(hovered as TaxonomyNode, sizeMode) * zoom;
         setPlusCoords({ x: c.x, y: c.y, r });
       }
       frame = requestAnimationFrame(tick);
@@ -192,7 +195,8 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
       if (!c) return;
       const node = rows.find((r) => r.id === pulseFor);
       if (!node) return;
-      setPulseCoords({ x: c.x, y: c.y, r: nodeRadius(node as TaxonomyNode, sizeMode) });
+      const zoom = canvasRef.current?.getZoom() ?? 1;
+      setPulseCoords({ x: c.x, y: c.y, r: nodeRadius(node as TaxonomyNode, sizeMode) * zoom });
       if (c.x < 0 || c.y < 0 || c.x > size.w || c.y > size.h) {
         const runtime = (rows.find((r) => r.id === pulseFor) as { x?: number; y?: number } | undefined);
         if (runtime?.x != null && runtime.y != null) {
