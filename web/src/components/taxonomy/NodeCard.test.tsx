@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router-dom';
 import { NodeCard } from './NodeCard';
 import type { TaxonomyNode } from './shapeData';
 
@@ -57,4 +58,93 @@ describe('<NodeCard>', () => {
     expect(onDismiss).not.toHaveBeenCalled();
   });
 
+});
+
+function makeNode(over: Partial<TaxonomyNode> = {}): TaxonomyNode {
+  return {
+    id: 42, slug: 'campari', display_name: 'Campari',
+    node_kind: 'brand', default_role: 'modifier',
+    is_cluster_node: true, is_defining_garnish: false,
+    parent_ids: [17, 84], child_ids: [], aliases: ['campari aperitivo'],
+    recipe_count: 0,
+    labelW: 60, labelH: 11,
+    ...over,
+  };
+}
+
+describe('NodeCard — pinned mode editing', () => {
+  it('renders PARENTS section with each parent name #id', () => {
+    render(
+      <MemoryRouter>
+        <NodeCard
+          node={makeNode()}
+          mode="pinned"
+          onDismiss={vi.fn()}
+          onEditField={vi.fn()}
+          onEditParents={vi.fn()}
+          onDelete={vi.fn()}
+          parentLookup={new Map([
+            [17, { id: 17, display_name: 'Amari' }],
+            [84, { id: 84, display_name: 'Bitter Aperitif' }],
+          ])}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(/PARENTS · 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Amari/)).toBeInTheDocument();
+    expect(screen.getByText('#17')).toBeInTheDocument();
+  });
+
+  it('clicking pencil on PARENTS section calls onEditParents', async () => {
+    const onEditParents = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <NodeCard
+          node={makeNode()}
+          mode="pinned"
+          onDismiss={vi.fn()}
+          onEditField={vi.fn()}
+          onEditParents={onEditParents}
+          onDelete={vi.fn()}
+          parentLookup={new Map([[17, { id: 17, display_name: 'Amari' }], [84, { id: 84, display_name: 'Bitter Aperitif' }]])}
+        />
+      </MemoryRouter>,
+    );
+    await user.hover(screen.getByText(/PARENTS · 2/));
+    await user.click(screen.getByRole('button', { name: /edit parents/i }));
+    expect(onEditParents).toHaveBeenCalledWith(42);
+  });
+
+  it('hover mode hides Delete link and edit affordances', () => {
+    render(
+      <MemoryRouter>
+        <NodeCard
+          node={makeNode()}
+          mode="hover"
+          onDismiss={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+  });
+
+  it('clicking Delete in pinned mode calls onDelete with node id', async () => {
+    const onDelete = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <NodeCard
+          node={makeNode()}
+          mode="pinned"
+          onDismiss={vi.fn()}
+          onEditField={vi.fn()}
+          onEditParents={vi.fn()}
+          onDelete={onDelete}
+        />
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByRole('button', { name: /delete node/i }));
+    expect(onDelete).toHaveBeenCalledWith(42);
+  });
 });
