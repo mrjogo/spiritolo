@@ -23,8 +23,12 @@ import {
   type TaxonomyNode,
   type TaxonomyViewRow,
 } from '../components/taxonomy/shapeData';
-import { updateTaxonomyNode } from '../components/taxonomy/rpcs';
+import { updateTaxonomyNode, createTaxonomyNode } from '../components/taxonomy/rpcs';
 import { Toast } from '../components/taxonomy/Toast';
+import { PlusButton } from '../components/taxonomy/PlusButton';
+import { CreateChildModal } from '../components/taxonomy/CreateChildModal';
+import { HighlightPulse } from '../components/taxonomy/HighlightPulse';
+import { nodeRadius } from '../components/taxonomy/palette';
 import '../components/taxonomy/taxonomy.css';
 
 // Mirrors --site-header-height in styles.css. Used to size the
@@ -110,6 +114,10 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
   const [toast, setToast] = useState<{ message: string; kind?: 'info' | 'error' } | null>(null);
   const [editingParentsFor, setEditingParentsFor] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [creatingFor, setCreatingFor] = useState<TaxonomyViewRow | null>(null);
+  const [plusCoords, setPlusCoords] = useState<{ x: number; y: number; r: number } | null>(null);
+  const [pulseFor, setPulseFor] = useState<number | null>(null);
+  const [pulseCoords, setPulseCoords] = useState<{ x: number; y: number; r: number } | null>(null);
 
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const focusedNode = focusedId ? (byId.get(focusedId) ?? null) : null;
@@ -150,6 +158,45 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
       prev.map((r) => (r.id === id ? { ...r, [key]: next as never } : r)),
     );
   }
+
+  useEffect(() => {
+    if (!hovered) { setPlusCoords(null); return; }
+    let frame = 0;
+    const tick = () => {
+      const c = canvasRef.current?.getNodeScreenCoords(hovered.id);
+      if (c) {
+        const r = nodeRadius(hovered as TaxonomyNode, sizeMode);
+        setPlusCoords({ x: c.x, y: c.y, r });
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [hovered, sizeMode]);
+
+  useEffect(() => {
+    if (pulseFor === null) return;
+    const t = setTimeout(() => setPulseFor(null), 2000);
+    return () => clearTimeout(t);
+  }, [pulseFor]);
+
+  useEffect(() => {
+    if (pulseFor === null) { setPulseCoords(null); return; }
+    const id = requestAnimationFrame(() => {
+      const c = canvasRef.current?.getNodeScreenCoords(pulseFor);
+      if (!c) return;
+      const node = rows.find((r) => r.id === pulseFor);
+      if (!node) return;
+      setPulseCoords({ x: c.x, y: c.y, r: nodeRadius(node as TaxonomyNode, sizeMode) });
+      if (c.x < 0 || c.y < 0 || c.x > size.w || c.y > size.h) {
+        const runtime = (rows.find((r) => r.id === pulseFor) as { x?: number; y?: number } | undefined);
+        if (runtime?.x != null && runtime.y != null) {
+          canvasRef.current?.centerAt(runtime.x, runtime.y, 600);
+        }
+      }
+    });
+    return () => cancelAnimationFrame(id);
+  }, [pulseFor, rows, sizeMode, size]);
 
   const dimmedIds = useMemo(() => {
     const dim = new Set<number>();
@@ -377,6 +424,44 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
           return null;
         })()}
       </div>
+      {hovered && plusCoords && (
+        <PlusButton
+          x={plusCoords.x}
+          y={plusCoords.y}
+          radius={plusCoords.r}
+          ariaLabel={`Add child of ${hovered.display_name}`}
+          onClick={() => setCreatingFor(hovered)}
+        />
+      )}
+      {creatingFor && (
+        <CreateChildModal
+          parent={{ id: creatingFor.id, display_name: creatingFor.display_name }}
+          onCancel={() => setCreatingFor(null)}
+          onCreate={async (parentId, input) => {
+            try {
+              const newId = await createTaxonomyNode(parentId, input);
+              setRows((prev) => [
+                ...prev,
+                {
+                  id: newId, slug: input.slug, display_name: input.display_name,
+                  node_kind: input.node_kind, default_role: input.default_role,
+                  is_cluster_node: input.is_cluster_node,
+                  is_defining_garnish: input.is_defining_garnish,
+                  parent_ids: [parentId], child_ids: [],
+                  aliases: input.aliases, recipe_count: 0,
+                },
+              ].map((r) => r.id === parentId ? { ...r, child_ids: [...r.child_ids, newId] } : r));
+              setCreatingFor(null);
+              setFocusedId(newId);
+              setPulseFor(newId);
+              setToast({ message: `Created ${input.display_name} (#${newId})` });
+            } catch (e) {
+              setToast({ message: `Create failed: ${String(e)}`, kind: 'error' });
+            }
+          }}
+        />
+      )}
+      {pulseCoords && <HighlightPulse {...pulseCoords} />}
     </>
   );
 }
