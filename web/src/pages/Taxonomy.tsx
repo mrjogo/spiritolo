@@ -23,7 +23,9 @@ import {
   type TaxonomyNode,
   type TaxonomyViewRow,
 } from '../components/taxonomy/shapeData';
-import { updateTaxonomyNode, createTaxonomyNode } from '../components/taxonomy/rpcs';
+import { updateTaxonomyNode, createTaxonomyNode, setNodeParents, deleteTaxonomyNode, getTaxonomyNodeBlockers } from '../components/taxonomy/rpcs';
+import { EditParentsModal } from '../components/taxonomy/EditParentsModal';
+import { DeleteNodeModal } from '../components/taxonomy/DeleteNodeModal';
 import { Toast } from '../components/taxonomy/Toast';
 import { PlusButton } from '../components/taxonomy/PlusButton';
 import { CreateChildModal } from '../components/taxonomy/CreateChildModal';
@@ -150,6 +152,9 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
     () => new Map(rows.map((r) => [r.id, { id: r.id, display_name: r.display_name }])),
     [rows],
   );
+
+  const editingParentsNode = editingParentsFor != null ? rows.find((r) => r.id === editingParentsFor) ?? null : null;
+  const deletingNode = deletingId != null ? rows.find((r) => r.id === deletingId) ?? null : null;
 
   async function handleEditField(id: number, key: FieldKey, next: unknown) {
     const patch: Record<string, unknown> = { [key]: next };
@@ -462,6 +467,61 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
         />
       )}
       {pulseCoords && <HighlightPulse {...pulseCoords} />}
+      {editingParentsNode && (
+        <EditParentsModal
+          node={editingParentsNode}
+          currentParentIds={editingParentsNode.parent_ids}
+          rows={rows}
+          onCancel={() => setEditingParentsFor(null)}
+          onSave={async (id, parentIds) => {
+            try {
+              await setNodeParents(id, parentIds);
+              setRows((prev) => {
+                const next = prev.map((r) => {
+                  if (r.id === id) return { ...r, parent_ids: parentIds };
+                  const wasParent = r.child_ids.includes(id);
+                  const isParent = parentIds.includes(r.id);
+                  if (wasParent && !isParent) return { ...r, child_ids: r.child_ids.filter((c) => c !== id) };
+                  if (!wasParent && isParent) return { ...r, child_ids: [...r.child_ids, id] };
+                  return r;
+                });
+                return next;
+              });
+              setEditingParentsFor(null);
+              setPulseFor(id);
+              setToast({ message: `Updated parents of ${editingParentsNode.display_name}` });
+            } catch (e) {
+              setToast({ message: `Save failed: ${String(e)}`, kind: 'error' });
+            }
+          }}
+        />
+      )}
+      {deletingNode && (
+        <DeleteNodeModal
+          node={{ id: deletingNode.id, slug: deletingNode.slug, display_name: deletingNode.display_name }}
+          fetchBlockers={getTaxonomyNodeBlockers}
+          onCancel={() => setDeletingId(null)}
+          onConfirm={async (id) => {
+            try {
+              await deleteTaxonomyNode(id);
+              setRows((prev) => prev
+                .filter((r) => r.id !== id)
+                .map((r) => ({
+                  ...r,
+                  parent_ids: r.parent_ids.filter((p) => p !== id),
+                  child_ids: r.child_ids.filter((c) => c !== id),
+                })),
+              );
+              setDeletingId(null);
+              if (focusedId === id) setFocusedId(null);
+              setToast({ message: `Deleted ${deletingNode.display_name} (#${id})` });
+            } catch (e) {
+              setToast({ message: `Delete failed: ${String(e)}`, kind: 'error' });
+            }
+          }}
+        />
+      )}
+      {toast && <Toast {...toast} onDismiss={() => setToast(null)} />}
     </>
   );
 }
