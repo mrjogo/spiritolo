@@ -239,3 +239,21 @@ a {
   text-shadow: 0 2px 16px rgba(0, 0, 0, 0.7);
   white-space: nowrap;
 }
+
+.site-header__user {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.site-header__admin-chip {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border, #8a6a35);
+  border-radius: 999px;
+  color: var(--color-fg-muted, #6a4a1a);
+  background: rgba(245, 233, 200, 0.6);
+}
