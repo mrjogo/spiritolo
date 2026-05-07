@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTaxonomyUrlState } from '../components/taxonomy/useTaxonomyUrlState';
 import { supabase } from '../supabase';
 import {
   ForceCanvas,
@@ -75,9 +76,9 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   const [hovered, setHovered] = useState<TaxonomyNode | null>(null);
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<Set<FilterKey>>(new Set());
-  const [focusedId, setFocusedId] = useState<number | null>(null);
+  const { focusedId, focusedEdge, setFocusedId, setFocusedEdge, clearFocus } =
+    useTaxonomyUrlState({ nodes });
   const [hoveredEdge, setHoveredEdge] = useState<EdgeRef | null>(null);
-  const [focusedEdge, setFocusedEdge] = useState<EdgeRef | null>(null);
   const [dagMode, setDagMode] = useState<DagMode | undefined>(undefined);
   const [sizeMode, setSizeMode] = useState<NodeSizeMode>('uniform');
   const canvasRef = useRef<ForceCanvasHandle>(null);
@@ -265,20 +266,17 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         dagMode={dagMode}
         sizeMode={sizeMode}
         onNodeClick={(n) => {
-          setFocusedEdge(null);
           setFocusedId(n.id);
         }}
         onNodeHover={setHovered}
         onLinkClick={(l) => {
           const e = resolveLink(l);
           if (!e) return;
-          setFocusedId(null);
           setFocusedEdge(e);
         }}
         onLinkHover={(l) => setHoveredEdge(l ? resolveLink(l) : null)}
         onBackgroundClick={() => {
-          setFocusedId(null);
-          setFocusedEdge(null);
+          clearFocus();
         }}
       />
 
@@ -298,7 +296,6 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
                 mode="pinned"
                 onDismiss={() => setFocusedEdge(null)}
                 onFocusNode={(id) => {
-                  setFocusedEdge(null);
                   setFocusedId(id);
                 }}
               />
