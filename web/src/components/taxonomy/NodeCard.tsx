@@ -112,8 +112,8 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
 
       <div
         style={{
-          flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
-          padding: '0 18px 20px',
+          flex: '0 0 auto',
+          padding: '0 18px 0',
           fontSize: 15, lineHeight: 1.5, color: TX_BROWN_MID,
         }}
       >
@@ -148,7 +148,15 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
         {node.recipe_count > 0 && recipes === null && recipesError === null && (
           <div style={{ fontStyle: 'italic' }}>Loading…</div>
         )}
-        {node.recipe_count > 0 && recipes !== null && (
+      </div>
+      {node.recipe_count > 0 && recipes !== null && (
+        <div
+          style={{
+            flex: '1 1 auto', minHeight: 0, overflowY: 'auto',
+            padding: '0 18px 20px',
+            fontSize: 15, lineHeight: 1.5, color: TX_BROWN_MID,
+          }}
+        >
           <ul className="tx-card__recipes">
             {recipes.map((r) => (
               <li key={r.id}>
@@ -157,8 +165,8 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
               </li>
             ))}
           </ul>
-        )}
-      </div>
+        </div>
+      )}
     </aside>
   );
 }
