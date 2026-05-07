@@ -7,6 +7,7 @@
 -- state per docs/superpowers/specs/2026-05-06-curator-cross-links-design.md.
 
 drop policy if exists recipe_ingredients_temp_authed_read on recipe_ingredients;
+drop policy if exists recipe_ingredients_admin_read       on recipe_ingredients;
 
 create policy recipe_ingredients_admin_read on recipe_ingredients
   for select to authenticated
