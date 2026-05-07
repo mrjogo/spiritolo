@@ -1,6 +1,8 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import type { TaxonomyNode } from './shapeData';
 import { TX_BROWN_INK, TX_BROWN_MID, TX_FRAME_EDGE } from './palette';
+import { supabase } from '../../supabase';
 
 export type NodeCardMode = 'hover' | 'pinned';
 
@@ -15,6 +17,10 @@ const yesNo = (b: boolean) => (b ? 'yes' : 'no');
 // proportional serif at the same px size; bump down so values visually match.
 const monoStyle: React.CSSProperties = { fontFamily: 'ui-monospace, monospace', fontSize: 13 };
 
+type RecipeLink = { id: number; name: string | null; site: string };
+
+const RECIPES_SELECT = 'recipe_id, recipes(id, name, site)';
+
 export function NodeCard({ node, mode, onDismiss }: Props) {
   useEffect(() => {
     if (mode !== 'pinned') return;
@@ -22,6 +28,44 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, [mode, onDismiss]);
+
+  const [recipes, setRecipes] = useState<RecipeLink[] | null>(null);
+  const [recipesError, setRecipesError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (mode !== 'pinned') return;
+    if (node.recipe_count === 0) return;
+    let cancelled = false;
+    setRecipes(null);
+    setRecipesError(null);
+    supabase
+      .from('recipe_ingredients')
+      .select(RECIPES_SELECT)
+      .eq('taxonomy_node_id', node.id)
+      .order('recipe_id', { ascending: true })
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) {
+          setRecipesError(error.message);
+          return;
+        }
+        const seen = new Set<number>();
+        const out: RecipeLink[] = [];
+        for (const row of (data ?? []) as Array<{ recipe_id: number; recipes: { id: number; name: string | null; site: string } | null }>) {
+          if (!row.recipes) continue;
+          if (seen.has(row.recipes.id)) continue;
+          seen.add(row.recipes.id);
+          out.push(row.recipes);
+        }
+        out.sort((a, b) => {
+          const sa = a.site.localeCompare(b.site);
+          if (sa !== 0) return sa;
+          return (a.name ?? '').localeCompare(b.name ?? '');
+        });
+        setRecipes(out);
+      });
+    return () => { cancelled = true; };
+  }, [mode, node.id, node.recipe_count]);
 
   return (
     <aside
@@ -97,6 +141,22 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
           RECIPES <span style={{ fontStyle: 'italic', color: TX_FRAME_EDGE }}>({node.recipe_count})</span>
         </div>
         {node.recipe_count === 0 && <div>—</div>}
+        {node.recipe_count > 0 && recipesError !== null && (
+          <div style={{ fontStyle: 'italic' }}>Couldn't load recipes</div>
+        )}
+        {node.recipe_count > 0 && recipes === null && recipesError === null && (
+          <div style={{ fontStyle: 'italic' }}>Loading…</div>
+        )}
+        {node.recipe_count > 0 && recipes !== null && (
+          <ul className="tx-card__recipes">
+            {recipes.map((r) => (
+              <li key={r.id}>
+                <Link to={`/recipes/${r.id}`}>{r.name ?? `recipe ${r.id}`}</Link>
+                <span className="tx-card__recipes-site">{r.site}</span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </aside>
   );
