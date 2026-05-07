@@ -14,12 +14,12 @@ export function StructuredIngredients({ rawLines, parsedByPosition }: Props) {
       {isAdmin && (
         <thead>
           <tr>
-            <th>Recipe</th>
-            <th>Amount</th>
-            <th>Name</th>
-            <th>Modifier</th>
-            <th>Role</th>
-            <th aria-label="ID" />
+            <th aria-label="Recipe" className="recipe-detail__structured-h-raw" />
+            <th className="recipe-detail__structured-h-parsed">ID</th>
+            <th className="recipe-detail__structured-h-parsed">Amount</th>
+            <th className="recipe-detail__structured-h-parsed">Name</th>
+            <th className="recipe-detail__structured-h-parsed">Modifier</th>
+            <th className="recipe-detail__structured-h-parsed">Role</th>
           </tr>
         </thead>
       )}
@@ -52,28 +52,27 @@ function ParsedCells({ row }: { row: RecipeIngredientRow | null }) {
   }
   return (
     <>
-      <td>{formatAmount(row)}</td>
-      <td>
+      <td className="recipe-detail__structured-cell recipe-detail__structured-cell--first recipe-detail__structured-id">
+        {row.id}
+      </td>
+      <td className="recipe-detail__structured-cell">{formatAmount(row)}</td>
+      <td className="recipe-detail__structured-cell">
         {row.taxonomy_nodes != null ? (
           <Link to={`/taxonomy?node=${row.taxonomy_nodes.slug}`}>
             {row.taxonomy_nodes.display_name}
           </Link>
         ) : (
-          <>
-            {row.name ?? ''}
-            <span className="recipe-detail__structured-chip-unmapped">unmapped</span>
-          </>
+          row.name ?? ''
         )}
       </td>
-      <td>{row.modifier ?? ''}</td>
-      <td>
+      <td className="recipe-detail__structured-cell">{row.modifier ?? ''}</td>
+      <td className="recipe-detail__structured-cell">
         {row.role && (
           <span className={`recipe-detail__structured-role recipe-detail__structured-role--${row.role}`}>
             {row.role}
           </span>
         )}
       </td>
-      <td className="recipe-detail__structured-id">{row.id}</td>
     </>
   );
 }

@@ -258,13 +258,31 @@ a {
   background: rgba(245, 233, 200, 0.6);
 }
 
+/* Two-zone layout: left zone (recipe lines) reads as prose; right zone
+ * (parsed fields) reads as a tight data table. A vertical divider on
+ * the recipe column's right edge separates the two zones. */
+
 .recipe-detail__structured {
   width: 100%;
   border-collapse: collapse;
   margin: 0 0 1.5em;
 }
 
-.recipe-detail__structured th {
+.recipe-detail__structured th,
+.recipe-detail__structured td {
+  vertical-align: top;
+  padding: 0;
+}
+
+/* Header row: only the parsed columns get a header. The recipe column's
+ * header cell is empty (the page's <h2>Ingredients</h2> already names it). */
+
+.recipe-detail__structured-h-raw {
+  border: none;
+  padding: 0;
+}
+
+.recipe-detail__structured-h-parsed {
   font-family: ui-monospace, monospace;
   font-size: 10px;
   letter-spacing: 0.12em;
@@ -276,46 +294,50 @@ a {
   border-bottom: 1px solid var(--color-border, #8a6a35);
 }
 
-.recipe-detail__structured td {
-  padding: 6px 10px;
-  vertical-align: top;
-  border-top: 1px solid rgba(138, 106, 53, 0.18);
-}
-
+/* Recipe column: list-feel — generous padding, no row separators, larger
+ * font. The right border is the zone divider. */
 .recipe-detail__structured-raw {
-  width: 40%;
+  width: 60%;
+  padding: 10px 24px 10px 0;
+  font-size: 16px;
+  line-height: 1.5;
+  border-right: 2px solid var(--color-border, #8a6a35);
 }
 
+/* Parsed cells: tight data-table feel. Row separator on top. */
+.recipe-detail__structured-cell {
+  padding: 8px 10px;
+  border-top: 1px solid rgba(138, 106, 53, 0.18);
+  font-size: 14px;
+}
+
+/* First parsed cell needs extra left padding to clear the divider. */
+.recipe-detail__structured-cell--first {
+  padding-left: 16px;
+}
+
+/* ID column: monospace, standard size (no longer "inconspicuous"). */
 .recipe-detail__structured-id {
   font-family: ui-monospace, monospace;
-  font-size: 10px;
-  color: var(--color-fg-muted, #8a6a35);
-  text-align: right;
   white-space: nowrap;
 }
 
+/* Failure-tint cells span the parsed zone (colSpan=5). The amber/grey
+ * left border keeps these visually loud for curator scanning. */
 .recipe-detail__structured-unparseable {
+  padding: 8px 10px 8px 16px;
+  border-top: 1px solid rgba(138, 106, 53, 0.18);
   border-left: 3px solid #c89a3a;
   font-style: italic;
   color: #8a5a14;
 }
 
 .recipe-detail__structured-missing {
+  padding: 8px 10px 8px 16px;
+  border-top: 1px solid rgba(138, 106, 53, 0.18);
   border-left: 3px solid #b0b0b0;
   font-style: italic;
   color: #888;
-}
-
-.recipe-detail__structured-chip-unmapped {
-  display: inline-block;
-  margin-left: 8px;
-  font-family: ui-monospace, monospace;
-  font-size: 10px;
-  letter-spacing: 0.06em;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: rgba(200, 154, 58, 0.18);
-  color: #8a5a14;
 }
 
 .recipe-detail__structured-role {

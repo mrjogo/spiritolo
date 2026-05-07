@@ -91,7 +91,7 @@ describe('<StructuredIngredients>', () => {
     expect(screen.getByText('Sweet vermouth (your favorite)')).toBeInTheDocument();
   });
 
-  it('renders unmapped row with name as plain text and an unmapped chip', () => {
+  it('renders unmapped row with name as plain text and no link', () => {
     const r = row({
       position: 0, name: 'lemon',
       taxonomy_node_id: null, taxonomy_nodes: null, role: 'garnish',
@@ -99,7 +99,6 @@ describe('<StructuredIngredients>', () => {
     renderIt({ rawLines: ['Garnish: lemon twist'], parsedByPosition: asMap([r]) });
     expect(screen.queryByRole('link', { name: /lemon/i })).toBeNull();
     expect(screen.getByText('lemon')).toBeInTheDocument();
-    expect(screen.getByText(/unmapped/i)).toBeInTheDocument();
     expect(screen.getByText('garnish')).toBeInTheDocument();
   });
 
