@@ -34,6 +34,8 @@ export interface ForceCanvasHandle {
     padding?: number,
   ) => void;
   centerAt: (x: number, y: number, ms?: number) => void;
+  /** Convert a node's simulation coords to viewport (CSS) pixel coords. Returns null if not yet positioned. */
+  getNodeScreenCoords: (id: number) => { x: number; y: number } | null;
 }
 
 // react-force-graph mutates `source`/`target` from id-numbers to the
@@ -85,7 +87,15 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
     fitToNodes: (filter, ms = 400, padding = 60) =>
       inner.current?.zoomToFit(ms, padding, (n) => filter(n as TaxonomyNode)),
     centerAt: (x, y, ms = 400) => inner.current?.centerAt(x, y, ms),
-  }), []);
+    getNodeScreenCoords: (id) => {
+      const g = inner.current;
+      if (!g) return null;
+      const node = nodes.find((n) => n.id === id) as { x?: number; y?: number } | undefined;
+      if (node?.x == null || node.y == null) return null;
+      const { x, y } = g.graph2ScreenCoords(node.x, node.y);
+      return { x, y };
+    },
+  }), [nodes]);
 
   useEffect(() => {
     const fg = inner.current;
