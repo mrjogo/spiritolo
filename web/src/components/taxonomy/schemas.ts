@@ -22,7 +22,7 @@ const slugSchema = z
   .regex(/^[a-z0-9_]+$/, 'slug must be lowercase letters, digits, underscores');
 
 const displayNameSchema = z.string().min(1, 'display name required');
-const aliasArraySchema = z.array(z.string().min(1)).default([]);
+const aliasArraySchema = z.array(z.string().min(1));
 
 export const createChildSchema = z.object({
   display_name: displayNameSchema,

@@ -12,8 +12,10 @@ export type TaxonomyBlockers = {
 };
 
 export class RpcError extends Error {
-  constructor(message: string, public readonly cause: unknown) {
+  readonly cause: unknown;
+  constructor(message: string, cause: unknown) {
     super(message);
+    this.cause = cause;
     this.name = 'RpcError';
   }
 }
