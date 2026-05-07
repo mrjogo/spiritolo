@@ -39,14 +39,17 @@ export function nodeRadius(
   return Math.max(3, Math.sqrt(node.recipe_count + 1) * 2.2);
 }
 
-// drawNode() paints the outer dark cap + gold/rust ring at radius + this.
-// Overlays (PlusButton, HighlightPulse) anchor to the outer ring's edge,
-// so they add this constant to nodeRadius() before computing offsets.
+// drawNode() paints the outer dark cap + gold/rust ring centered on
+// nodeRadius + OUTER_RING_PAD. The ring itself is stroked at OUTER_RING_STROKE
+// canvas units wide, so its visible outer edge is half a stroke past the
+// centerline. Both constants are in pre-zoom canvas units; overlays scale
+// the result by the current zoom factor to get on-screen pixels.
 export const OUTER_RING_PAD = 2.5;
+export const OUTER_RING_STROKE = 1.0;
 
 export function outerRingRadius(
   node: { recipe_count: number },
   mode: NodeSizeMode = 'recipes',
 ): number {
-  return nodeRadius(node, mode) + OUTER_RING_PAD;
+  return nodeRadius(node, mode) + OUTER_RING_PAD + OUTER_RING_STROKE / 2;
 }

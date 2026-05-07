@@ -18,6 +18,7 @@ import {
   TX_BROWN_FAINT,
   nodeRadius,
   OUTER_RING_PAD,
+  OUTER_RING_STROKE,
   type NodeSizeMode,
 } from './palette';
 
@@ -197,7 +198,7 @@ function drawNode(
   ctx.beginPath();
   ctx.arc(node.x, node.y, outerR, 0, 2 * Math.PI);
   ctx.strokeStyle = node.is_cluster_node ? TX_CLUSTER_RING : TX_GOLD;
-  ctx.lineWidth = 1.0;
+  ctx.lineWidth = OUTER_RING_STROKE;
   ctx.stroke();
 
   // Inner role-colored dot
