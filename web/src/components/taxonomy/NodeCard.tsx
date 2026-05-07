@@ -36,6 +36,7 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
     if (mode !== 'pinned') return;
     if (node.recipe_count === 0) return;
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setRecipes(null);
     setRecipesError(null);
     supabase
@@ -51,7 +52,7 @@ export function NodeCard({ node, mode, onDismiss }: Props) {
         }
         const seen = new Set<number>();
         const out: RecipeLink[] = [];
-        for (const row of (data ?? []) as Array<{ recipe_id: number; recipes: { id: number; name: string | null; site: string } | null }>) {
+        for (const row of (data ?? []) as unknown as Array<{ recipe_id: number; recipes: { id: number; name: string | null; site: string } | null }>) {
           if (!row.recipes) continue;
           if (seen.has(row.recipes.id)) continue;
           seen.add(row.recipes.id);
