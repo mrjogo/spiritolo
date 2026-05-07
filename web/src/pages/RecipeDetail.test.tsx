@@ -4,6 +4,10 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 vi.mock('../supabase', () => ({ supabase: { from: vi.fn() } }));
 import { supabase } from '../supabase';
+
+const useIsAdminMock = vi.fn();
+vi.mock('../auth/useIsAdmin', () => ({ useIsAdmin: () => useIsAdminMock() }));
+
 import { RecipeDetail } from './RecipeDetail';
 
 function mockSingleResponse(data: unknown, error: unknown = null) {
@@ -27,6 +31,7 @@ function renderAt(id: string) {
 describe('<RecipeDetail>', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    useIsAdminMock.mockReturnValue({ isAdmin: false, isLoading: false });
   });
 
   it('shows loading initially', () => {
@@ -148,5 +153,62 @@ describe('<RecipeDetail>', () => {
       await screen.findByRole('heading', { name: /recipe not found/i }),
     ).toBeInTheDocument();
     expect(select).not.toHaveBeenCalled();
+  });
+
+  it('renders raw ingredient lines for a non-admin (no fetch of recipe_ingredients)', async () => {
+    useIsAdminMock.mockReturnValue({ isAdmin: false, isLoading: false });
+    mockSingleResponse({
+      id: 1, source_url: 'https://x.test/r', site: 'x.test', name: 'Test',
+      author: null, image_url: null,
+      jsonld: {
+        name: 'Test', recipeIngredient: ['2 oz gin', '1 oz lime'],
+      },
+    });
+    renderAt('1');
+    expect(await screen.findByText('2 oz gin')).toBeInTheDocument();
+    expect(screen.getByText('1 oz lime')).toBeInTheDocument();
+    // recipe_ingredients should not be fetched in non-admin mode.
+    expect(supabase.from).toHaveBeenCalledTimes(1);
+    expect(supabase.from).toHaveBeenCalledWith('recipes_public');
+  });
+
+  it('fetches and renders parsed ingredients for an admin', async () => {
+    useIsAdminMock.mockReturnValue({ isAdmin: true, isLoading: false });
+    mockSingleResponse({
+      id: 1, source_url: 'https://x.test/r', site: 'x.test', name: 'Test',
+      author: null, image_url: null,
+      jsonld: { name: 'Test', recipeIngredient: ['2 oz gin'] },
+    });
+    // Second call: recipe_ingredients fetch
+    const order = vi.fn().mockResolvedValue({
+      data: [{
+        id: 17, position: 0, raw_text: '2 oz gin',
+        amount: 2, amount_max: null, unit: 'oz',
+        name: 'gin', modifier: null,
+        role: 'base_spirit', parse_status: 'parsed',
+        taxonomy_node_id: 5,
+        taxonomy_nodes: { slug: 'gin', display_name: 'Gin' },
+      }],
+      error: null,
+    });
+    const eq = vi.fn(() => ({ order }));
+    const select = vi.fn(() => ({ eq }));
+    (supabase.from as unknown as ReturnType<typeof vi.fn>)
+      .mockImplementationOnce(() => ({ select: vi.fn(() => ({ eq: vi.fn(() => ({ single: vi.fn().mockResolvedValue({
+        data: {
+          id: 1, source_url: 'https://x.test/r', site: 'x.test', name: 'Test',
+          author: null, image_url: null,
+          jsonld: { name: 'Test', recipeIngredient: ['2 oz gin'] },
+        },
+        error: null,
+      }) })) })) }))
+      .mockImplementationOnce(() => ({ select }));
+
+    renderAt('1');
+    expect(await screen.findByRole('link', { name: /gin/i })).toHaveAttribute(
+      'href', '/taxonomy?node=gin',
+    );
+    expect(screen.getByText('2 oz')).toBeInTheDocument();
+    expect(screen.getByText('17')).toBeInTheDocument();
   });
 });
