@@ -9,16 +9,13 @@ interface Props {
 }
 
 // Hairline gold ring with thin "+" cross at 45° upper-right of the node.
-// Both the ring size and the edge-to-edge gap scale with the on-screen
-// node radius so the composition stays in proportion at every zoom level,
-// clamped to a usable [min, max] range so it stays clickable when tiny
-// and stays a UI affordance instead of wallpaper when huge.
+// Both the ring size and the edge-to-edge gap scale freely with the
+// on-screen node radius so the composition stays in proportion across
+// the full zoom range — bigger node, bigger "+". The parent (Taxonomy)
+// is responsible for hiding the button at faraway zoom levels where it
+// would shrink to nothing; here we trust the radius we're given.
 const RING_RATIO = 0.4;     // plus ring radius / node outer radius
 const GAP_RATIO  = 0.2;     // gap / node outer radius
-const MIN_RING = 5;
-const MAX_RING = 20;
-const MIN_GAP = 4;
-const MAX_GAP = 12;
 const HALF_INV_SQRT2 = 1 / Math.SQRT2; // ≈ 0.7071
 
 function clamp(v: number, lo: number, hi: number) {
@@ -26,17 +23,22 @@ function clamp(v: number, lo: number, hi: number) {
 }
 
 export function PlusButton({ x, y, radius, onClick, ariaLabel }: Props) {
-  const ringR = clamp(radius * RING_RATIO, MIN_RING, MAX_RING);
-  const gap = clamp(radius * GAP_RATIO, MIN_GAP, MAX_GAP);
+  const ringR = radius * RING_RATIO;
+  const gap = radius * GAP_RATIO;
   const centerToCenter = radius + gap + ringR;
   const offset = centerToCenter * HALF_INV_SQRT2;
   const cx = x + offset;
   const cy = y - offset;
   const size = ringR * 2;
-  // Stroke widths scale gently — keep the design "hairline" everywhere
-  // by deriving stroke from the ring size, with a floor so it doesn't
-  // disappear at min ring.
-  const stroke = Math.max(0.7, ringR * 0.11);
+  // Stroke targets ~1 screen pixel regardless of ring size: strokeWidth is
+  // in viewBox units and 1 viewBox unit = (size / 14) screen pixels, so
+  // 14 / size lands at ~1 screen px. Clamp prevents the stroke from
+  // hitting zero (invisible) at huge ring sizes or blowing out the
+  // viewBox at very small ring sizes.
+  const stroke = clamp(14 / size, 0.6, 1.4);
+  // Inner radius shrunk from 6.5 → 6 so the stroke (centered on r) has
+  // room to extend outward without falling outside the 0..14 viewBox.
+  const ringSvgR = 6;
 
   return (
     <button
@@ -56,9 +58,9 @@ export function PlusButton({ x, y, radius, onClick, ariaLabel }: Props) {
       }}
     >
       <svg width={size} height={size} viewBox="0 0 14 14" aria-hidden>
-        <circle cx="7" cy="7" r="6.5" fill={TX_NODE_BG} stroke={TX_GOLD} strokeWidth={stroke} />
-        <line x1="3.5" y1="7" x2="10.5" y2="7" stroke={TX_GOLD} strokeWidth={stroke} />
-        <line x1="7" y1="3.5" x2="7" y2="10.5" stroke={TX_GOLD} strokeWidth={stroke} />
+        <circle cx="7" cy="7" r={ringSvgR} fill={TX_NODE_BG} stroke={TX_GOLD} strokeWidth={stroke} />
+        <line x1="4" y1="7" x2="10" y2="7" stroke={TX_GOLD} strokeWidth={stroke} />
+        <line x1="7" y1="4" x2="7" y2="10" stroke={TX_GOLD} strokeWidth={stroke} />
       </svg>
     </button>
   );

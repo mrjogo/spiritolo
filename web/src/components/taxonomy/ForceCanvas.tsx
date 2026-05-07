@@ -19,10 +19,9 @@ import {
   nodeRadius,
   OUTER_RING_PAD,
   OUTER_RING_STROKE,
+  SHOW_LABEL_AT,
   type NodeSizeMode,
 } from './palette';
-
-const SHOW_LABEL_AT = 1.2;
 
 export type DagMode = 'td' | 'bu' | 'lr' | 'rl' | 'radialout' | 'radialin';
 

@@ -30,7 +30,7 @@ import { Toast } from '../components/taxonomy/Toast';
 import { PlusButton } from '../components/taxonomy/PlusButton';
 import { CreateChildModal } from '../components/taxonomy/CreateChildModal';
 import { HighlightPulse } from '../components/taxonomy/HighlightPulse';
-import { outerRingRadius } from '../components/taxonomy/palette';
+import { outerRingRadius, SHOW_LABEL_AT } from '../components/taxonomy/palette';
 import '../components/taxonomy/taxonomy.css';
 
 // Mirrors --site-header-height in styles.css. Used to size the
@@ -119,7 +119,7 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
   const [creatingFor, setCreatingFor] = useState<TaxonomyViewRow | null>(null);
   const [plusCoords, setPlusCoords] = useState<{ x: number; y: number; r: number } | null>(null);
   const [pulseFor, setPulseFor] = useState<number | null>(null);
-  const [pulseCoords, setPulseCoords] = useState<{ x: number; y: number; r: number } | null>(null);
+  const [pulseCoords, setPulseCoords] = useState<{ x: number; y: number; radius: number } | null>(null);
 
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const focusedNode = focusedId ? (byId.get(focusedId) ?? null) : null;
@@ -168,12 +168,19 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
     if (!hovered) { setPlusCoords(null); return; }
     let frame = 0;
     const tick = () => {
+      const zoom = canvasRef.current?.getZoom() ?? 1;
+      // Same zoom threshold as canvas labels: at faraway zoom the graph
+      // reads as topology, not as something to edit.
+      if (zoom <= SHOW_LABEL_AT) {
+        setPlusCoords(null);
+        frame = requestAnimationFrame(tick);
+        return;
+      }
       const c = canvasRef.current?.getNodeScreenCoords(hovered.id);
       if (c) {
         // outerRingRadius() is in simulation-space units; multiply by current
         // zoom to get on-screen pixels so the overlay tracks the visible
         // outer edge (the gold ring), not the inner role-fill disc.
-        const zoom = canvasRef.current?.getZoom() ?? 1;
         const r = outerRingRadius(hovered as TaxonomyNode, sizeMode) * zoom;
         setPlusCoords({ x: c.x, y: c.y, r });
       }
@@ -197,7 +204,7 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
       const node = rows.find((r) => r.id === pulseFor);
       if (!node) return;
       const zoom = canvasRef.current?.getZoom() ?? 1;
-      setPulseCoords({ x: c.x, y: c.y, r: outerRingRadius(node as TaxonomyNode, sizeMode) * zoom });
+      setPulseCoords({ x: c.x, y: c.y, radius: outerRingRadius(node as TaxonomyNode, sizeMode) * zoom });
       if (c.x < 0 || c.y < 0 || c.x > size.w || c.y > size.h) {
         const runtime = (rows.find((r) => r.id === pulseFor) as { x?: number; y?: number } | undefined);
         if (runtime?.x != null && runtime.y != null) {

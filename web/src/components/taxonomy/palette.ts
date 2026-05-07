@@ -47,6 +47,12 @@ export function nodeRadius(
 export const OUTER_RING_PAD = 2.5;
 export const OUTER_RING_STROKE = 1.0;
 
+// Zoom threshold above which canvas-drawn node labels are visible. The
+// PlusButton overlay piggy-backs on the same threshold so the "+" only
+// appears at the same time the node names do — at faraway zoom the graph
+// reads as topology, not as something to edit.
+export const SHOW_LABEL_AT = 1.2;
+
 export function outerRingRadius(
   node: { recipe_count: number },
   mode: NodeSizeMode = 'recipes',
