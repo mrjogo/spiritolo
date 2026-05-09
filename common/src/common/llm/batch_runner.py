@@ -129,7 +129,11 @@ def ingest_batch(
             counts["writer_error"] += 1
             progress(seen)
             continue
-        counts["error" if r.error or r.raw_text is None else "ok"] += 1
+        # Treat empty raw_text as error too: providers occasionally return a
+        # 200 with no body (guardrails, refusal) and r.error is None for those.
+        # Without this, the row is logged as a parse failure inside on_result
+        # but counted as "ok" in the summary, which is misleading.
+        counts["error" if r.error or not r.raw_text else "ok"] += 1
         progress(seen)
     mark_ingested(sidecar_path)
     return dict(counts)

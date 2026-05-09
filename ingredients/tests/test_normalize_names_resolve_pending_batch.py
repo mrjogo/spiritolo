@@ -78,3 +78,46 @@ def test_ingest_dispatches_chose_and_propose(tmp_path, monkeypatch):
     assert ("Negroni Sbagliato", "Negroni Sbagliato") in writes_norm
     assert any(a == "negroni sbagliato" for a, _ in writes_alias)
     assert counts["ok"] == 2
+
+
+def test_ingest_rolls_back_on_writer_error(tmp_path, monkeypatch):
+    """A failing per-row writer must call conn.rollback() so the next
+    on_result starts on a clean Postgres transaction. Without rollback,
+    a single bad row poisons every subsequent row in the chunk with
+    InFailedSqlTransaction."""
+    from common.llm.batch_runner import submit_batch
+    submit_batch(
+        provider=_stub_batch_provider(),
+        rows=[("Pegu Club", "s", "u0"), ("Negroni Sbagliato", "s", "u1"), ("Last Word", "s", "u2")],
+        to_request=lambda i, r: BatchRequest(custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2]),
+        row_to_id=lambda r: r[0],
+        flow="dedup.normalize_names.resolve_pending",
+        version_constant=NORMALIZER_VERSION,
+        batches_dir=tmp_path,
+    )
+
+    provider = MagicMock()
+    provider.status.return_value = BatchStatus(
+        batch_id="batch_xyz", state="completed", completed=3, total=3,
+    )
+    provider.fetch_results.return_value = iter([
+        BatchResult(custom_id="r0", raw_text='{"action": "chose", "canonical_name": "Pegu Club"}', error=None),
+        BatchResult(custom_id="r1", raw_text='{"action": "chose", "canonical_name": "Negroni Sbagliato"}', error=None),
+        BatchResult(custom_id="r2", raw_text='{"action": "chose", "canonical_name": "Last Word"}', error=None),
+    ])
+
+    def _write_normalization(conn, raw_name, normalized, canonical_name, source, normalizer_version):
+        if raw_name == "Negroni Sbagliato":
+            raise RuntimeError("simulated FK violation")
+    monkeypatch.setattr(
+        "ingredients.dedup.normalizer_llm.write_normalization", _write_normalization,
+    )
+
+    conn = MagicMock()
+    counts = ingest_normalize_names_batch(
+        conn=conn, provider=provider, batch_id="batch_xyz",
+        batches_dir=tmp_path,
+    )
+    assert counts["ok"] == 2
+    assert counts["writer_error"] == 1
+    assert conn.rollback.call_count == 1

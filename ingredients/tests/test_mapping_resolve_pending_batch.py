@@ -93,6 +93,163 @@ def test_ingest_phase2_batch_dispatches_writes_per_action(tmp_path, monkeypatch)
     assert counts["ok"] == 2
 
 
+def test_ingest_phase2_batch_abstains_when_chose_node_id_does_not_exist(tmp_path, monkeypatch):
+    """LLM hallucinations of the form `chose: {node_id: 1001}` where 1001
+    isn't a real taxonomy node would FK-violate on the UPDATE, abort the
+    transaction, and (without the cascade fix) poison the rest of the chunk.
+    Defense in depth: validate node_id existence at on_result time and
+    abstain on miss, so the FK violation never reaches Postgres."""
+    from common.llm.batch_runner import submit_batch
+    from common.llm.batch_provider import BatchRequest
+
+    submit_batch(
+        provider=_stub_batch_provider(),
+        rows=[("vodka", "s", "u0"), ("ghost_ingredient", "s", "u1")],
+        to_request=lambda i, r: BatchRequest(custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2]),
+        row_to_id=lambda r: r[0],
+        flow="mapping.resolve_pending",
+        version_constant=__import__("ingredients.mapping.mapper", fromlist=["MAPPER_VERSION"]).MAPPER_VERSION,
+        batches_dir=tmp_path,
+    )
+
+    provider = MagicMock()
+    provider.status.return_value = BatchStatus(
+        batch_id="batch_abc", state="completed", completed=2, total=2,
+    )
+    provider.fetch_results.return_value = iter([
+        BatchResult(custom_id="r0", raw_text='{"action": "chose", "node_id": 7}', error=None),
+        BatchResult(custom_id="r1", raw_text='{"action": "chose", "node_id": 1001}', error=None),
+    ])
+
+    # Stub the existence check: node 7 exists, node 1001 does not.
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver._node_exists",
+        lambda conn, node_id: node_id == 7,
+    )
+
+    chose_writes: list[tuple[str, int]] = []
+    abstain_writes: list[str] = []
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.write_resolution",
+        lambda conn, normalized_name, taxonomy_node_id, source, mapper_version: chose_writes.append((normalized_name, taxonomy_node_id)),
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.write_abstain",
+        lambda conn, normalized_name, mapper_version: abstain_writes.append(normalized_name),
+    )
+
+    counts = ingest_phase2_batch(
+        conn=MagicMock(), provider=provider, batch_id="batch_abc",
+        batches_dir=tmp_path,
+    )
+    # Real chose hit write_resolution; hallucinated chose was diverted to abstain.
+    assert chose_writes == [("vodka", 7)]
+    assert abstain_writes == ["ghost_ingredient"]
+    # Both rows count as "ok" (no exception raised, no FK violation).
+    assert counts["ok"] == 2
+    assert counts.get("writer_error", 0) == 0
+
+
+def test_ingest_phase2_batch_abstains_when_propose_brand_has_invalid_node_kind(tmp_path, monkeypatch):
+    """taxonomy_nodes.node_kind is CHECK-constrained to ('brand','expression').
+    An LLM that proposes `node_kind: 'liqueur'` would CHECK-violate on the
+    INSERT, abort the txn, and lose the rest of the chunk. We catch it
+    pre-INSERT and abstain instead."""
+    from common.llm.batch_runner import submit_batch
+    from common.llm.batch_provider import BatchRequest
+
+    submit_batch(
+        provider=_stub_batch_provider(),
+        rows=[("weirdo", "s", "u0")],
+        to_request=lambda i, r: BatchRequest(custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2]),
+        row_to_id=lambda r: r[0],
+        flow="mapping.resolve_pending",
+        version_constant=__import__("ingredients.mapping.mapper", fromlist=["MAPPER_VERSION"]).MAPPER_VERSION,
+        batches_dir=tmp_path,
+    )
+
+    provider = MagicMock()
+    provider.status.return_value = BatchStatus(
+        batch_id="batch_abc", state="completed", completed=1, total=1,
+    )
+    provider.fetch_results.return_value = iter([
+        BatchResult(
+            custom_id="r0",
+            raw_text='{"action": "propose_brand", "slug": "weirdo", "display_name": "Weirdo", "parent_slug": "vodka", "node_kind": "liqueur"}',
+            error=None,
+        ),
+    ])
+
+    abstain_writes: list[str] = []
+    create_calls: list[str] = []
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.write_abstain",
+        lambda conn, normalized_name, mapper_version: abstain_writes.append(normalized_name),
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver._create_brand_node",
+        lambda **kwargs: create_calls.append(kwargs["slug"]) or 999,
+    )
+
+    counts = ingest_phase2_batch(
+        conn=MagicMock(), provider=provider, batch_id="batch_abc",
+        batches_dir=tmp_path,
+    )
+    # Bad node_kind diverted to abstain; _create_brand_node never invoked.
+    assert abstain_writes == ["weirdo"]
+    assert create_calls == []
+    assert counts["ok"] == 1
+    assert counts.get("writer_error", 0) == 0
+
+
+def test_ingest_phase2_batch_rolls_back_on_writer_error(tmp_path, monkeypatch):
+    """A failing per-row writer (e.g. FK violation) must call conn.rollback()
+    so the next on_result starts on a clean transaction. Otherwise psycopg
+    raises InFailedSqlTransaction for every subsequent row in the chunk."""
+    from common.llm.batch_runner import submit_batch
+    from common.llm.batch_provider import BatchRequest
+
+    submit_batch(
+        provider=_stub_batch_provider(),
+        rows=[("vodka", "s", "u0"), ("rye", "s", "u1"), ("gin", "s", "u2")],
+        to_request=lambda i, r: BatchRequest(custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2]),
+        row_to_id=lambda r: r[0],
+        flow="mapping.resolve_pending",
+        version_constant=__import__("ingredients.mapping.mapper", fromlist=["MAPPER_VERSION"]).MAPPER_VERSION,
+        batches_dir=tmp_path,
+    )
+
+    provider = MagicMock()
+    provider.status.return_value = BatchStatus(
+        batch_id="batch_abc", state="completed", completed=3, total=3,
+    )
+    provider.fetch_results.return_value = iter([
+        BatchResult(custom_id="r0", raw_text='{"action": "chose", "node_id": 1}', error=None),
+        BatchResult(custom_id="r1", raw_text='{"action": "chose", "node_id": 2}', error=None),
+        BatchResult(custom_id="r2", raw_text='{"action": "chose", "node_id": 3}', error=None),
+    ])
+
+    def _write_resolution(conn, normalized_name, taxonomy_node_id, source, mapper_version):
+        if normalized_name == "rye":
+            raise RuntimeError("simulated FK violation")
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.write_resolution", _write_resolution,
+    )
+
+    conn = MagicMock()
+    counts = ingest_phase2_batch(
+        conn=conn, provider=provider, batch_id="batch_abc",
+        batches_dir=tmp_path,
+    )
+    # The middle row failed; the outer loop continued past it and the third
+    # row was processed cleanly because rollback() ran in between.
+    assert counts["ok"] == 2
+    assert counts["writer_error"] == 1
+    # The writer that raised must have triggered exactly one rollback so the
+    # next on_result didn't inherit an aborted Postgres transaction.
+    assert conn.rollback.call_count == 1
+
+
 def _make_drain_args(chunk_size: int = 2, limit=None) -> argparse.Namespace:
     return argparse.Namespace(
         provider="openai", limit=limit, yes=True, batch=True,
