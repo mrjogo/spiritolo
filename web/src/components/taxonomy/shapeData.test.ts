@@ -7,7 +7,7 @@ import {
   neighborsOf,
   radialPositions,
 } from './shapeData';
-import type { FilterKey, TaxonomyViewRow } from './shapeData';
+import type { FilterKey, TaxonomyNode, TaxonomyViewRow } from './shapeData';
 
 const baseRow: TaxonomyViewRow = {
   id: 1,
@@ -63,6 +63,56 @@ describe('viewRowsToGraph', () => {
     const { nodes } = viewRowsToGraph(rows);
     expect(nodes[0].labelW).toBeGreaterThan(0);
     expect(nodes[0].labelH).toBeGreaterThan(0);
+  });
+
+  it('carries x/y/vx/vy from prior nodes for matching ids', () => {
+    const rows: TaxonomyViewRow[] = [
+      { ...baseRow, id: 1, slug: 'whiskey', child_ids: [] },
+    ];
+    const first = viewRowsToGraph(rows).nodes;
+    // react-force-graph mutates these at runtime; mimic via assertion.
+    type Runtime = { x?: number; y?: number; vx?: number; vy?: number };
+    (first[0] as Runtime).x = 12;
+    (first[0] as Runtime).y = -34;
+    (first[0] as Runtime).vx = 1;
+    (first[0] as Runtime).vy = -1;
+
+    const second = viewRowsToGraph(rows, first).nodes;
+    const r = second[0] as Runtime;
+    expect(r.x).toBe(12);
+    expect(r.y).toBe(-34);
+    expect(r.vx).toBe(1);
+    expect(r.vy).toBe(-1);
+  });
+
+  it('seeds a brand-new node from a parent\'s prior position', () => {
+    const seed: TaxonomyViewRow[] = [
+      { ...baseRow, id: 1, slug: 'whiskey', child_ids: [] },
+    ];
+    const prev = viewRowsToGraph(seed).nodes;
+    type Runtime = { x?: number; y?: number };
+    (prev[0] as Runtime).x = 100;
+    (prev[0] as Runtime).y = 200;
+
+    const next: TaxonomyViewRow[] = [
+      { ...baseRow, id: 1, slug: 'whiskey', child_ids: [2] },
+      { ...baseRow, id: 2, slug: 'rye_whiskey', parent_ids: [1], child_ids: [] },
+    ];
+    const { nodes } = viewRowsToGraph(next, prev);
+    const child = nodes.find((n) => n.id === 2)! as TaxonomyNode & Runtime;
+    expect(child.x).toBe(100);
+    expect(child.y).toBe(200);
+  });
+
+  it('does not seed a new node when no parent has prior coords', () => {
+    const next: TaxonomyViewRow[] = [
+      { ...baseRow, id: 1, slug: 'whiskey', child_ids: [2] },
+      { ...baseRow, id: 2, slug: 'rye_whiskey', parent_ids: [1], child_ids: [] },
+    ];
+    const { nodes } = viewRowsToGraph(next, []);
+    const r = nodes[1] as { x?: number; y?: number };
+    expect(r.x).toBeUndefined();
+    expect(r.y).toBeUndefined();
   });
 });
 

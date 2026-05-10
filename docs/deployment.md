@@ -38,7 +38,10 @@ The frontend reads `recipes_public` from Supabase via the publishable key
 
 This Supabase project is the source of truth for pipeline data
 (`recipes`, `recipe_ingredients`, `recipe_clusters`, taxonomy growth, etc.).
-Pipelines that mutate it should be pointed at staging via `SUPABASE_DB_URL`.
+Bulk pipeline runs that mutate this data go through the
+local-restore-then-upload flow in [upload.md](upload.md) rather than
+hitting staging directly; one-off SQL hand-edits and the curation UI
+hit staging directly.
 
 ### Migrations
 

@@ -20,7 +20,7 @@ from ingredients.units import (
     UNIT_ALIASES,
 )
 
-PARSER_VERSION = "v8"
+PARSER_VERSION = "v9"
 
 # Pattern used to detect concatenated multi-ingredient rows in the candidate
 # name produced by _try_qty_unit. If the name contains an embedded quantity
@@ -89,16 +89,88 @@ _UNICODE_FRACTIONS = {
 _TRIM_PUNCT = ",.;:"
 
 # Common units that recipe writers may glue to a qty with a hyphen
-# (`1/2-ounce`, `1-pound`). Conservative whitelist: real volume/weight
-# units, not annotation-only ones like `inch`/`cm` (which describe a
-# different attribute, e.g. wheel thickness, not the row's quantity).
+# (`1/2-ounce`, `1-pound`, also `1- ounce` — the trailing `\s*` covers
+# corpus typos with a stray space after the dash). Conservative whitelist:
+# real volume/weight units, not annotation-only ones like `inch`/`cm`
+# (which describe a different attribute, e.g. wheel thickness, not the
+# row's quantity) — those are handled by `_LEADING_SIZE_ANNOTATION_RE`.
 _HYPHEN_QTY_UNIT_RE = re.compile(
-    r"^(\d+(?:\.\d+)?(?:/\d+)?(?:\s+\d+/\d+)?)-"
+    r"^(\d+(?:\.\d+)?(?:/\d+)?(?:\s+\d+/\d+)?)-\s*"
     r"(?=(?:ounces?|oz|milliliters?|ml|cl|liters?|litres?|"
     r"teaspoons?|tsp|tablespoons?|tbsp|cups?|"
     r"pints?|quarts?|gallons?|pounds?|lbs?|grams?|kilograms?|kg|g)\b)",
     re.IGNORECASE,
 )
+
+_NUM_FOR_PRECLEAN = r"\d+(?:\.\d+)?(?:/[1-9]\d*)?(?:\s+\d+/[1-9]\d*)?"
+
+# Hanging-hyphen range: `1/4- to 1/2-inch X`, `2- to 3-quart Y`. The dash
+# clings to each side of the range so neither is recognised as a qty-unit
+# pair. Normalising to `1/4 to 1/2 inch X` lets the qty regex pick up the
+# range and the size-annotation strip handles the `inch`.
+_HANGING_HYPHEN_RANGE_RE = re.compile(
+    rf"^(?P<a>{_NUM_FOR_PRECLEAN})-\s+(?P<sep>to|or)\s+(?P<b>{_NUM_FOR_PRECLEAN})-",
+    re.IGNORECASE,
+)
+
+# Leading size annotation: `<NUM>[-]inch[-thick] X`, `<NUM>[-]cm X`, …. These
+# describe the *physical size* of an item, not the row's quantity. Strip the
+# size word but keep the leading qty so downstream rules still see structure
+# (`3-inch cinnamon stick` → `3 cinnamon stick` → unit=stick, name="cinnamon").
+# `quart`/`gallon`/`oz` are NOT here — those are handled by `_HYPHEN_QTY_UNIT_RE`
+# and treated as real qty units.
+_LEADING_SIZE_ANNOTATION_RE = re.compile(
+    rf"^(?P<qty>{_NUM_FOR_PRECLEAN}(?:\s*(?:to|or|-)\s*{_NUM_FOR_PRECLEAN})?)"
+    r"\s*-?\s*"
+    r"(?:inch(?:es)?|cm|millimeters?|centimeters?|mm|foot|feet|ft)"
+    r"(?:\s*-\s*(?:thick|wide|long|tall|deep))?"
+    r"\s+",
+    re.IGNORECASE,
+)
+
+# Doubled unit: `1/2 ounce ounce X`, `2 oz oz Y`. Recipe-writer typo. The
+# parser's qty_unit rule consumes the first one and leaves the second at the
+# head of `name`. Strip the duplicate when both canonicalise to the same unit.
+_DOUBLED_UNIT_RE = re.compile(
+    rf"^(?P<qty>{_NUM_FOR_PRECLEAN}(?:\s*(?:to|or|-)\s*{_NUM_FOR_PRECLEAN})?)"
+    r"\s+(?P<ua>[a-zA-Z]+\.?)\s+(?P<ub>[a-zA-Z]+\.?)\b",
+    re.IGNORECASE,
+)
+
+# Range with repeated unit: `3/4 cup to 1 cup X`, `1/4 ounce to 1/2 ounce Y`.
+# Collapse to `3/4 to 1 cup X` when both unit aliases share a canonical.
+# Multi-word units (`fluid ounce`, `fl oz`) handled via explicit alternation.
+_RANGE_REPEATED_UNIT_RE = re.compile(
+    rf"^(?P<a>{_NUM_FOR_PRECLEAN})"
+    r"\s+(?P<ua>fl\.?\s+oz\.?|fluid\s+ounces?|[a-zA-Z]+\.?)"
+    r"\s+to\s+"
+    rf"(?P<b>{_NUM_FOR_PRECLEAN})"
+    r"\s+(?P<ub>fl\.?\s+oz\.?|fluid\s+ounces?|[a-zA-Z]+\.?)"
+    r"\b",
+    re.IGNORECASE,
+)
+
+
+def _drop_doubled_unit(s: str) -> str:
+    m = _DOUBLED_UNIT_RE.match(s)
+    if not m:
+        return s
+    canon_a = canonicalize_unit(m.group("ua").lower())
+    canon_b = canonicalize_unit(m.group("ub").lower())
+    if canon_a is None or canon_a != canon_b:
+        return s
+    return f"{m.group('qty')} {m.group('ua')}{s[m.end():]}"
+
+
+def _collapse_repeated_unit_range(s: str) -> str:
+    m = _RANGE_REPEATED_UNIT_RE.match(s)
+    if not m:
+        return s
+    canon_a = canonicalize_unit(m.group("ua").lower())
+    canon_b = canonicalize_unit(m.group("ub").lower())
+    if canon_a is None or canon_a != canon_b:
+        return s
+    return f"{m.group('a')} to {m.group('b')} {m.group('ua')}{s[m.end():]}"
 
 
 def pre_clean(s: str) -> str:
@@ -124,11 +196,24 @@ def pre_clean(s: str) -> str:
     s = s.replace("⁄", "/")
     # Collapse all whitespace runs to single space; strip outer.
     s = re.sub(r"\s+", " ", s).strip()
-    # Normalize hyphen-attached qty+unit (`1/2-ounce gin` → `1/2 ounce gin`).
-    # Only fires when the string starts with `<numeric>-<unit-alias>` — so
-    # `1 750-ml bottle …` is left alone (the leading qty is `1`, then a
-    # space, not a dash).
+    # Hanging-hyphen range (`1/4- to 1/2-inch X`) — drop both dashes so the
+    # qty range and any size annotation become first-class for downstream rules.
+    s = _HANGING_HYPHEN_RANGE_RE.sub(r"\g<a> \g<sep> \g<b> ", s)
+    # Normalize hyphen-attached qty+unit (`1/2-ounce gin` → `1/2 ounce gin`,
+    # `1- ounce gin` → `1 ounce gin`). Only fires when the string starts with
+    # `<numeric>-[ ]<unit-alias>` — so `1 750-ml bottle …` is left alone (the
+    # leading qty is `1`, then a space, not a dash).
     s = _HYPHEN_QTY_UNIT_RE.sub(r"\1 ", s)
+    # Strip a leading physical-size annotation (`3-inch cinnamon stick`,
+    # `1-inch knob fresh ginger`, `1/4 to 1/2 inch piece`). The leading
+    # number IS the size in inches/cm/mm — not a count of items — so we
+    # drop it along with the size word. Downstream rules then treat the
+    # row as no-qty (lexical_qty / no_qty_known_noun anchor on the noun).
+    s = _LEADING_SIZE_ANNOTATION_RE.sub("", s)
+    # Doubled unit (`1/2 ounce ounce X` corpus typo).
+    s = _drop_doubled_unit(s)
+    # Range with repeated unit (`3/4 cup to 1 cup X` → `3/4 to 1 cup X`).
+    s = _collapse_repeated_unit_range(s)
     # Strip trailing junk punctuation.
     while s and s[-1] in _TRIM_PUNCT:
         s = s[:-1].rstrip()

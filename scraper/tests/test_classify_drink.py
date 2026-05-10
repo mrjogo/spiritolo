@@ -6,7 +6,7 @@ classify_drink() level; individual rules are tested via score_recipe() so
 failures attribute cleanly to a single rule.
 """
 
-from scraper.src.classify_drink import (
+from scraper.classify_drink import (
     classify_drink,
     run_review,
     score_recipe,

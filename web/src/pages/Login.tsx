@@ -21,7 +21,7 @@ export function Login() {
     )}`;
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo },
+      options: { emailRedirectTo, shouldCreateUser: false },
     });
     if (error) {
       setStatus({ kind: 'error', message: error.message });

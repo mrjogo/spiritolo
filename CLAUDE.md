@@ -36,13 +36,13 @@ Use `migration up` when you want to add new migrations without losing local proc
 
 (If you ever need to invoke the `supabase` CLI from inside the devcontainer — uncommon — its Go resolver picks an IPv6 form of `host.docker.internal` that isn't routable, and it defaults to TLS which the local Postgres rejects. Both surface as `tls error (server refused TLS connection)`. Workaround: pass `--db-url` with your container's gateway IPv4 plus `?sslmode=disable`. The literal varies by environment — `getent hosts host.docker.internal` and `ip route` show what's reachable from your container.)
 
-**Test DB.** DB-integration tests (in `ingredients/tests/test_db.py`, et al) run against `TEST_DB_URL` — a *separate* Postgres database from `SUPABASE_DB_URL` — so `pytest` can `TRUNCATE … CASCADE` freely without nuking the dev data. Add this to `.env`:
+**Test DB.** DB-integration tests (`ingredients/tests/test_db.py`, the upload smoke tests in `scripts/tests/`, et al) run against `TEST_DB_URL` — a *separate* Postgres database from `SUPABASE_DB_URL` — so `pytest` can `TRUNCATE … CASCADE` freely without nuking the dev data. Add this to `.env`:
 
 ```
 TEST_DB_URL=postgresql://postgres:postgres@host.docker.internal:54322/spiritolo_test
 ```
 
-The `ingredients` conftest auto-creates the database if missing and applies any new `supabase/migrations/*.sql` files on session start (tracked in a `_test_db_migrations` table). With `TEST_DB_URL` unset, DB tests skip cleanly. The conftest refuses to run if `TEST_DB_URL` equals `SUPABASE_DB_URL` or points at the default `postgres` database.
+The `ingredients` conftest auto-creates `spiritolo_test` if missing and applies any new `supabase/migrations/*.sql` files on session start (tracked in a `_test_db_migrations` table). It refuses to run if `TEST_DB_URL` equals `SUPABASE_DB_URL` or points at the default `postgres` database. The `scripts` conftest (for the upload smoke tests) derives two ephemeral DBs from `TEST_DB_URL` (`<base>_upload_local`, `<base>_upload_staging`), drops+recreates them per session, and re-applies all migrations fresh — its names don't collide with the dev DB by construction. With `TEST_DB_URL` unset, DB tests in either suite skip cleanly.
 
 URL classifier needs ollama: `ollama pull qwen3:14b`.
 
@@ -63,17 +63,32 @@ Stage CLIs (`fetch`, `classify`, `validate`, `extract`) share `--site` / `--limi
 
 | Stage | Constant | File |
 |---|---|---|
-| URL classification | `PROMPT_VERSION` | [classify_prompt.py](scraper/src/classify_prompt.py) |
-| HTML validation | `VALIDATOR_VERSION` | [validation.py](scraper/src/validation.py) |
-| Drink scoring | `SCORER_VERSION` | [classify_drink.py](scraper/src/classify_drink.py) |
-| JSON-LD extraction | `EXTRACTOR_VERSION` | [extract.py](scraper/src/extract.py) |
+| URL classification | `PROMPT_VERSION` | [classify_prompt.py](scraper/src/scraper/classify_prompt.py) |
+| HTML validation | `VALIDATOR_VERSION` | [validation.py](scraper/src/scraper/validation.py) |
+| Drink scoring | `SCORER_VERSION` | [classify_drink.py](scraper/src/scraper/classify_drink.py) |
+| JSON-LD extraction | `EXTRACTOR_VERSION` | [extract.py](scraper/src/scraper/extract.py) |
 | Ingredient → taxonomy mapping | `MAPPER_VERSION` | [mapping/mapper.py](ingredients/src/ingredients/mapping/mapper.py) |
 
 ## Pipeline stages
 
-- **`classify.py`** — local ollama on `content_type IS NULL` rows. Iterate prompts via `--review` against the checked-in eval set; use `--sample` for spot-checks. Bump `PROMPT_VERSION` after edits.
+- **`classify.py`** — classifies `content_type IS NULL` rows via LLM. Provider: `--provider ollama` (local qwen3:14b, default), `--provider claude`, or `--provider openai`. Iterate prompts via `--review` against the checked-in eval set; use `--sample` for spot-checks. Bump `PROMPT_VERSION` after edits.
+
+  **Batch mode (OpenAI only):** 50% off real-time, ~24h SLA. Submit once, ingest later.
+
+  ```bash
+  # Submit and exit (prints batch_id + sidecar path).
+  cd scraper && uv run python -m scraper.classify --provider openai --batch --yes
+
+  # Ingest results after the batch completes.
+  cd scraper && uv run python -m scraper.classify --provider openai --batch --ingest <batch_id>
+
+  # One-shot: submit + poll + ingest inline (blocks until done).
+  cd scraper && uv run python -m scraper.classify --provider openai --batch --wait --yes
+  ```
+
+  Sidecar at `data/batches/<batch_id>.json` (gitignored). Lose it and you must re-derive from the OpenAI dashboard or re-submit.
 - **`validate.py`** — fetch runs validation + drink scoring inline, so this CLI exists only to re-evaluate cached HTML after a version bump.
-- **`extract.py`** — parses Schema.org Recipe JSON-LD into Supabase `recipes`. UPSERTs on `source_url`; re-runs are idempotent. To re-extract: clear `extract_runs` rows.
+- **`extract.py`** — parses Schema.org Recipe JSON-LD into Supabase `recipes` at whatever `SUPABASE_DB_URL` points at. UPSERTs on `source_url`; re-runs are idempotent. To re-extract: clear `extract_runs` rows. Bulk runs follow the local-restore-then-upload flow — see [docs/upload.md](docs/upload.md).
 
 ## Spirits Taxonomy
 
@@ -113,6 +128,8 @@ cd ingredients && uv run python -m ingredients.cli --reset --except-version v1 -
 
 The eval set is `ingredients/src/ingredients/eval_set.py`. Add a new should-parse-as-X case whenever you teach the parser a new pattern; add a should-abstain case whenever you find an over-match.
 
+Writes go to whatever `SUPABASE_DB_URL` points at. Bulk runs use the local-restore-then-upload flow — see [docs/upload.md](docs/upload.md).
+
 **Common, scraper, ingredients packages.** `common/` holds shared utilities (`supabase_client`, `progress`, `summary`, `cli_common`); both `scraper/` (Zone 1) and `ingredients/` (Zone 2) depend on it via the root-level uv workspace.
 
 ## Ingredient → Taxonomy Mapper
@@ -120,7 +137,7 @@ The eval set is `ingredients/src/ingredients/eval_set.py`. Add a new should-pars
 The mapper resolves `recipe_ingredients.name` strings to `taxonomy_nodes.id` references in two phases:
 
 - **Phase 1** (alias + lexical) runs eagerly with no external deps. Misses are marked `mapper_source='pending_llm'`.
-- **Phase 2** (LLM) is operator-triggered. Provider chosen at invocation: `--provider claude` (Anthropic, modest cost) or `--provider ollama` (local qwen3:14b, free). The CLI prints residual count + top-N before any external call.
+- **Phase 2** (LLM) is operator-triggered. Provider chosen at invocation: `--provider claude` (Anthropic, modest cost), `--provider ollama` (local qwen3:14b, free), or `--provider openai` (default gpt-5-mini). The CLI prints residual count + top-N before any external call.
 
 **Versioning:** `MAPPER_VERSION` in [mapping/mapper.py](ingredients/src/ingredients/mapping/mapper.py). Stored on every mapped row.
 
@@ -142,19 +159,34 @@ cd ingredients && uv run python -m ingredients.cli map --review
 # Phase 2 — drain the pending_llm queue with a provider. Confirms before any cost.
 cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider claude
 cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider ollama --limit 100
+cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider openai
+
+# Batch mode (OpenAI only): 50% off real-time, ~24h SLA.
+cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider openai --batch --yes
+cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider openai --batch --ingest <batch_id>
+cd ingredients && uv run python -m ingredients.cli map resolve-pending --provider openai --batch --wait --yes
 
 # Walk the form-proposal review queue.
 cd ingredients && uv run python -m ingredients.cli map review-proposals
 
 # After bumping MAPPER_VERSION, re-map everything left at the old version.
 cd ingredients && uv run python -m ingredients.cli map --reset --except-version v1 --yes
+
+# Unpark names that previous runs parked at 'pending_llm_tried' (e.g.
+# after approving a form proposal or editing the taxonomy). Then re-run
+# `map resolve-pending --provider …` to re-submit.
+cd ingredients && uv run python -m ingredients.cli map retry-failures
 ```
+
+The chunked Batch drain (`--batch`) parks any name that didn't get a clearing action ('chose' or 'abstain') from a chunk's ingest — most commonly `propose_form`, but also parse failures and transient provider errors — by flipping `mapper_source` to `pending_llm_tried`. Parked names are excluded from `fetch_pending_llm_names`, so subsequent chunks and subsequent runs don't re-submit them. Run `map retry-failures` to unpark after the blocker is resolved.
 
 Brand/expression nodes auto-create silently when the LLM proposes one with an existing parent; provenance is recorded in `taxonomy_provenance`. Form nodes (lemon_zest, lime_oil, ...) queue in `taxonomy_proposals` for human review via `map review-proposals`. Auto-created nodes default to `is_cluster_node = false` (the column added by `[E]`); the antichain stays curator-controlled.
 
 The eval set is `ingredients/src/ingredients/mapping/eval_set.py`, run against the fixture taxonomy in `ingredients/src/ingredients/mapping/eval_fixture.py` so eval results don't drift with seed changes.
 
-`ANTHROPIC_API_KEY` is required for `--provider claude`; `OLLAMA_BASE_URL` defaults to `http://localhost:11434` for `--provider ollama`.
+`ANTHROPIC_API_KEY` is required for `--provider claude`; `OLLAMA_BASE_URL` defaults to `http://localhost:11434` for `--provider ollama`; `OPENAI_API_KEY` is required for `--provider openai` (defaults to model `gpt-5-mini`, override with `--model <id>`).
+
+Writes go to whatever `SUPABASE_DB_URL` points at — including the LLM-resolved nodes Phase 2 auto-creates. Bulk runs (especially Phase 2, which costs money) use the local-restore-then-upload flow — see [docs/upload.md](docs/upload.md).
 
 ## Recipe Dedup
 
@@ -176,6 +208,12 @@ cd ingredients && uv run python -m ingredients.cli normalize-names list-pending 
 # Phase 2: drain the pending_llm queue with a chosen provider.
 cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider ollama
 cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider claude
+cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider openai
+
+# Batch mode (OpenAI only): 50% off real-time, ~24h SLA.
+cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider openai --batch --yes
+cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider openai --batch --ingest <batch_id>
+cd ingredients && uv run python -m ingredients.cli normalize-names resolve-pending --provider openai --batch --wait --yes
 
 # Cluster compute. Tags roles, computes cluster + variant keys,
 # writes recipe_clusters / recipes.cluster_id / recipes.variant_key.
@@ -199,20 +237,53 @@ cd ingredients && uv run python -m ingredients.cli cluster --review
 # After bumping a version constant, re-run leftovers.
 cd ingredients && uv run python -m ingredients.cli normalize-names --reset --except-version v1 --yes
 cd ingredients && uv run python -m ingredients.cli cluster --reset --except-version v1 --yes
+
+# Unpark names that previous runs parked at 'pending_llm_tried'.
+cd ingredients && uv run python -m ingredients.cli normalize-names retry-failures
 ```
+
+The chunked Batch drain parks names whose chunk didn't produce a clearing action by flipping `canonical_name_source` to `pending_llm_tried`. Run `normalize-names retry-failures` to unpark.
 
 The canonical-name pool grows bottom-up on staging: ~20 well-known cocktails are bootstrapped as `cocktail_aliases`, and LLM resolutions add to it. Restore a staging backup to get the current pool locally.
 
 The eval set is [dedup/eval_set.py](ingredients/src/ingredients/dedup/eval_set.py), run against the fixture taxonomy in [dedup/eval_fixture.py](ingredients/src/ingredients/dedup/eval_fixture.py) so eval results don't drift with seed changes.
 
+Writes go to whatever `SUPABASE_DB_URL` points at. Bulk runs use the local-restore-then-upload flow — see [docs/upload.md](docs/upload.md).
+
 ## Data flow
 
-Schema is the only thing that flows local → staging (via the migrations CI workflow on push to the `staging` branch). **Pipeline data lives on staging** — it is the source of truth for `recipes`, `recipe_ingredients`, `recipe_clusters`, taxonomy growth, etc. Pipelines that mutate this data (the parser, mapper LLM phase, normalize-names LLM phase, cluster compute) should be pointed at staging via `SUPABASE_DB_URL` rather than producing local-only state that has to be sync'd back.
+Schema flows local → staging via the migrations CI workflow on push to the `staging` branch. **Pipeline data lives on staging** — staging is the source of truth for `recipes`, `recipe_ingredients`, `recipe_clusters`, taxonomy growth, etc. Bulk pipeline runs (the parser, mapper Phase 1+2, normalize-names Phase 1+2, cluster compute, promote-substances) happen against a local restore of staging and are pushed back through the uploader; see "Local-edit / staging-upload workflow" below. One-off SQL hand-edits and the curation UI hit staging directly.
 
 **Local dev** has two viable shapes:
 
 - **Schema-only:** `supabase db reset` is enough. You get the migrated schema, empty tables, and a pre-seeded `admin@local.test` magic-link user (see [supabase/seeds/dev_admin_user.local-only.sql](supabase/seeds/dev_admin_user.local-only.sql) — the only seed file). Fine for UI work and migration writing.
 - **Schema + a snapshot of staging data:** restore a `scripts/backup-supabase.sh` dump into the local DB. This is the only way to get current reference data (taxonomy, cocktail aliases) and any pipeline output locally. The dev admin seed survives the restore (`profiles` and `auth.users` are excluded from the dump). See [docs/backups.md](docs/backups.md).
+
+## Local-edit / staging-upload workflow
+
+For any pipeline run that would write to Supabase, prefer this flow over
+hitting staging directly:
+
+1. `scripts/backup-supabase.sh` — produces `<file>.dump` plus
+   `<file>.dump.meta.json` (sidecar).
+2. `pg_restore` the dump into local Supabase
+   (see [docs/backups.md](docs/backups.md)).
+3. Run pipelines pointed at local (`SUPABASE_DB_URL` already points
+   there in the devcontainer .env).
+4. Push the diff back:
+
+   ```bash
+   uv run --package spiritolo-scripts python -m upload_to_staging \
+     --dump path/to/<file>.dump            # dry-run
+   uv run --package spiritolo-scripts python -m upload_to_staging \
+     --dump path/to/<file>.dump --apply    # actually push
+   ```
+
+The uploader refuses to run if the sidecar is missing, if the dump
+doesn't match the staging URL it was taken from, if a migration landed
+during the work session, or if staging was written to during the work
+session. Full flow + checks + failure modes documented in
+[docs/upload.md](docs/upload.md).
 
 ## Hosting
 

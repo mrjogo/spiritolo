@@ -33,3 +33,23 @@ export type NormalizedRecipe = {
 export type InstructionStep =
   | { kind: 'step'; text: string }
   | { kind: 'section'; heading: string; steps: string[] };
+
+// One parsed ingredient line from recipe_ingredients, joined to taxonomy_nodes
+// via PostgREST embed. taxonomy node fields are null when taxonomy_node_id is null.
+export type RecipeIngredientRow = {
+  id: number;
+  position: number;
+  raw_text: string;
+  amount: number | null;
+  amount_max: number | null;
+  unit: string | null;
+  name: string | null;
+  modifier: string | null;
+  role:
+    | 'base_spirit' | 'modifier' | 'citrus' | 'sweetener'
+    | 'bitters' | 'dilution' | 'ice' | 'garnish' | 'wash' | 'other'
+    | null;
+  parse_status: 'parsed' | 'unparseable';
+  taxonomy_node_id: number | null;
+  taxonomy_nodes: { slug: string; display_name: string } | null;
+};

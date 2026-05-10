@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import psycopg
 
-from ingredients.mapping.llm_provider import ProviderResult
+from common.llm.provider import ProviderResult
 from ingredients.mapping.llm_resolver import run_phase2
 from ingredients.mapping.mapper import run_phase1
 

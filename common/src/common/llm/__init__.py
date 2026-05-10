@@ -1,0 +1,23 @@
+"""Shared LLM provider Protocol + implementations."""
+
+from .batch_provider import (
+    BatchProvider, BatchRequest, BatchResult, BatchStatus, BatchSubmission,
+)
+from .batch_runner import BatchSubmitOutcome, ingest_batch, submit_batch
+from .claude import ClaudeProvider
+from .ollama import OllamaProvider
+from .openai import OpenAIProvider
+from .openai_batch import OpenAIBatchProvider
+from .provider import LLMProvider, ProviderResult
+from .retry import resolve_with_retry
+from .sidecar import Sidecar, SidecarMismatch, load_sidecar, mark_ingested, write_sidecar
+
+__all__ = [
+    "BatchProvider", "BatchRequest", "BatchResult", "BatchStatus",
+    "BatchSubmission", "BatchSubmitOutcome",
+    "ClaudeProvider", "LLMProvider", "OllamaProvider", "OpenAIProvider",
+    "OpenAIBatchProvider",
+    "ProviderResult", "resolve_with_retry",
+    "Sidecar", "SidecarMismatch", "load_sidecar", "mark_ingested", "write_sidecar",
+    "ingest_batch", "submit_batch",
+]

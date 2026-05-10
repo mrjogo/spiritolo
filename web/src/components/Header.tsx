@@ -24,9 +24,14 @@ export function Header() {
         {!adminLoading && isAdmin && <Link to="/taxonomy">Taxonomy</Link>}
       </nav>
       {user && (
-        <button type="button" onClick={onSignOut} className="site-header__signout">
-          Sign out
-        </button>
+        <div className="site-header__user">
+          {!adminLoading && isAdmin && (
+            <span className="site-header__admin-chip">admin</span>
+          )}
+          <button type="button" onClick={onSignOut} className="site-header__signout">
+            Sign out
+          </button>
+        </div>
       )}
     </header>
   );

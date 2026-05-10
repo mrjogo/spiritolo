@@ -84,6 +84,15 @@ NAME="spiritolo-staging-${TS}"
 [[ -n "$LABEL" ]] && NAME="${NAME}-${LABEL}"
 OUT="${DEST}/${NAME}.dump"
 
+cleanup_partial() {
+  local rc=$?
+  if (( rc != 0 )) && [[ -f "$OUT" && ! -f "$META" ]]; then
+    rm -f "$OUT"
+    echo "Removed partial dump $OUT (sidecar write failed)" >&2
+  fi
+}
+trap cleanup_partial EXIT
+
 echo "Backing up staging public schema → $OUT"
 pg_dump \
   --dbname="$URL" \
@@ -95,4 +104,41 @@ pg_dump \
   --compress=9 \
   --file="$OUT"
 
-ls -lh "$OUT"
+META="${OUT}.meta.json"
+
+# Snapshot reference time T — captured AFTER pg_dump so any row updated
+# during the snapshot window has updated_at <= T.
+TAKEN_AT=$(psql "$URL" -tAX -c "select to_char(now() at time zone 'utc', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')")
+
+# Migration list at backup time. Used by the uploader's schema-version
+# check.
+MIGRATIONS_JSON=$(psql "$URL" -tAX -c "
+  select json_agg(version order by version)
+  from supabase_migrations.schema_migrations
+")
+[[ "$MIGRATIONS_JSON" == "" ]] && MIGRATIONS_JSON="[]"
+
+# Fingerprint = sha256 of "host:dbname". No password, no port.
+DBNAME="${URL##*/}"; DBNAME="${DBNAME%%\?*}"
+FINGERPRINT=$(printf "%s:%s" "$HOST" "$DBNAME" | sha256sum | awk '{print $1}')
+
+DUMP_SHA=$(sha256sum "$OUT" | awk '{print $1}')
+SCHEMA_SHA=$(pg_restore --schema-only --no-owner --no-privileges -f - "$OUT" \
+             | grep -v "^\\\\restrict\|^\\\\unrestrict" \
+             | sha256sum | awk '{print $1}')
+
+cat > "$META" <<EOF_META
+{
+  "taken_at": "$TAKEN_AT",
+  "staging_fingerprint": "$FINGERPRINT",
+  "applied_migrations": $MIGRATIONS_JSON,
+  "dump_basename": "$(basename "$OUT")",
+  "dump_sha256": "$DUMP_SHA",
+  "dump_schema_sha256": "$SCHEMA_SHA",
+  "backup_script_version": 1
+}
+EOF_META
+
+chmod 444 "$OUT" "$META"
+
+ls -lh "$OUT" "$META"

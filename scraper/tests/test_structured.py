@@ -8,7 +8,7 @@ def load(name: str) -> str:
 
 
 def test_standard_recipe():
-    from scraper.src.structured import find_recipe
+    from scraper.structured import find_recipe
     r = find_recipe(load("standard.html"))
     assert r["@type"] == "Recipe"
     assert r["name"] == "Negroni"
@@ -16,36 +16,36 @@ def test_standard_recipe():
 
 
 def test_graph_wrapper():
-    from scraper.src.structured import find_recipe
+    from scraper.structured import find_recipe
     r = find_recipe(load("graph_wrapper.html"))
     assert r["name"] == "Old Fashioned"
 
 
 def test_multiple_scripts_picks_recipe():
-    from scraper.src.structured import find_recipe
+    from scraper.structured import find_recipe
     r = find_recipe(load("multiple_scripts.html"))
     assert r["name"] == "Martini"
 
 
 def test_type_as_array():
-    from scraper.src.structured import find_recipe
+    from scraper.structured import find_recipe
     r = find_recipe(load("type_as_array.html"))
     assert r["name"] == "Daiquiri"
 
 
 def test_top_level_array():
-    from scraper.src.structured import find_recipe
+    from scraper.structured import find_recipe
     r = find_recipe(load("top_level_array.html"))
     assert r["name"] == "Manhattan"
 
 
 def test_no_structured_returns_none():
-    from scraper.src.structured import find_recipe
+    from scraper.structured import find_recipe
     assert find_recipe(load("no_jsonld.html")) is None
 
 
 def test_malformed_then_valid():
-    from scraper.src.structured import find_recipe
+    from scraper.structured import find_recipe
     r = find_recipe(load("malformed_then_valid.html"))
     assert r["name"] == "Sidecar"
 
@@ -54,8 +54,8 @@ def test_microdata_recipe_normalized_to_jsonld_shape():
     """Punchdrink-style pages expose Recipe via HTML microdata. After normalization
     the dict looks like JSON-LD: bare @type string, single-valued props unwrapped
     from lists, nested Person item reshaped into a flat dict with @type."""
-    from scraper.src.structured import find_recipe
-    from scraper.src.extract import derive_author, derive_image_url, derive_name
+    from scraper.structured import find_recipe
+    from scraper.extract import derive_author, derive_image_url, derive_name
     r = find_recipe(load("microdata.html"))
     assert r is not None
     assert r["@type"] == "Recipe"
@@ -71,8 +71,8 @@ def test_microdata_recipe_normalized_to_jsonld_shape():
 
 def test_promoted_field_derivation_author():
     """Derivation is extract's job — the parser returns the raw dict."""
-    from scraper.src.structured import find_recipe
-    from scraper.src.extract import derive_author
+    from scraper.structured import find_recipe
+    from scraper.extract import derive_author
     r = find_recipe(load("standard.html"))
     assert derive_author(r) == "Count Negroni"
     r2 = find_recipe(load("author_bare_string.html"))
@@ -80,8 +80,8 @@ def test_promoted_field_derivation_author():
 
 
 def test_promoted_field_derivation_image_url():
-    from scraper.src.structured import find_recipe
-    from scraper.src.extract import derive_image_url
+    from scraper.structured import find_recipe
+    from scraper.extract import derive_image_url
     r_str = find_recipe(load("standard.html"))
     assert derive_image_url(r_str) == "https://example.com/negroni.jpg"
     r_obj = find_recipe(load("image_as_object.html"))
@@ -91,26 +91,26 @@ def test_promoted_field_derivation_image_url():
 
 
 def test_promoted_field_derivation_image_array_of_objects():
-    from scraper.src.structured import find_recipe
-    from scraper.src.extract import derive_image_url
+    from scraper.structured import find_recipe
+    from scraper.extract import derive_image_url
     r = find_recipe(load("image_array_of_objects.html"))
     assert derive_image_url(r) == "https://example.com/vesper-1.jpg"
 
 
 def test_promoted_field_derivation_image_missing():
-    from scraper.src.extract import derive_image_url
+    from scraper.extract import derive_image_url
     assert derive_image_url({"name": "No image"}) is None
 
 
 def test_promoted_field_derivation_author_missing():
-    from scraper.src.extract import derive_author
+    from scraper.extract import derive_author
     assert derive_author({"name": "No author"}) is None
 
 
 def test_type_names_handles_missing_and_url_prefix():
     """type_names yields bare names from @type as string, list, or URL;
     objects without @type yield nothing."""
-    from scraper.src.structured import type_names
+    from scraper.structured import type_names
     assert list(type_names({})) == []
     assert list(type_names({"@type": None})) == []
     assert list(type_names({"@type": "Recipe"})) == ["Recipe"]

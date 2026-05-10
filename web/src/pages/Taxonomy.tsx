@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTaxonomyUrlState } from '../components/taxonomy/useTaxonomyUrlState';
 import { supabase } from '../supabase';
 import {
   ForceCanvas,
@@ -9,7 +10,7 @@ import {
 import { Legend } from '../components/taxonomy/Legend';
 import { SearchBox } from '../components/taxonomy/SearchBox';
 import { FilterChips } from '../components/taxonomy/FilterChips';
-import { NodeCard } from '../components/taxonomy/NodeCard';
+import { NodeCard, type FieldKey } from '../components/taxonomy/NodeCard';
 import { EdgeCard, type EdgeRef } from '../components/taxonomy/EdgeCard';
 import { TX_BROWN_MID, TX_FRAME_EDGE, type NodeSizeMode } from '../components/taxonomy/palette';
 import {
@@ -22,11 +23,28 @@ import {
   type TaxonomyNode,
   type TaxonomyViewRow,
 } from '../components/taxonomy/shapeData';
+import { updateTaxonomyNode, createTaxonomyNode, setNodeParents, deleteTaxonomyNode, getTaxonomyNodeBlockers } from '../components/taxonomy/rpcs';
+import { EditParentsModal } from '../components/taxonomy/EditParentsModal';
+import { DeleteNodeModal } from '../components/taxonomy/DeleteNodeModal';
+import { Toast } from '../components/taxonomy/Toast';
+import { PlusButton } from '../components/taxonomy/PlusButton';
+import { CreateChildModal } from '../components/taxonomy/CreateChildModal';
+import { HighlightPulse } from '../components/taxonomy/HighlightPulse';
+import { outerRingRadius, SHOW_LABEL_AT } from '../components/taxonomy/palette';
 import '../components/taxonomy/taxonomy.css';
 
 // Mirrors --site-header-height in styles.css. Used to size the
 // taxonomy canvas to fill the viewport below the header.
 const SITE_HEADER_HEIGHT = 56;
+
+// Padding (px) around the focused neighborhood when zoomToFit-ing.
+// Smaller = tighter zoom on the focused node.
+const FOCUS_FIT_PADDING = 60;
+
+// The page title sits over the top of the canvas. After a focus zoom we
+// bias the camera so the focused subgraph clears it — the topmost (parent)
+// row would otherwise hide behind the title bar.
+const TITLE_CLEAR_PX = 70;
 
 type State =
   | { status: 'loading' }
@@ -57,17 +75,45 @@ export function Taxonomy() {
     return () => { cancelled = true; };
   }, []);
 
-  if (state.status === 'loading') {
-    return <div className="page">Loading taxonomy…</div>;
-  }
-  if (state.status === 'error') {
-    return <div className="page">Error: {state.message}</div>;
-  }
-  return <LoadedView rows={state.rows} />;
+  return (
+    <div className="taxonomy-page">
+      <div className="taxonomy-page__corner taxonomy-page__corner--tl" />
+      <div className="taxonomy-page__corner taxonomy-page__corner--tr" />
+      <div className="taxonomy-page__corner taxonomy-page__corner--bl" />
+      <div className="taxonomy-page__corner taxonomy-page__corner--br" />
+
+      <div className="taxonomy-page__title">
+        <div className="taxonomy-page__title-eyebrow">— A COMPENDIUM OF —</div>
+        <div className="taxonomy-page__title-main">SPIRITS &amp; LIQUEURS</div>
+        <div className="taxonomy-page__title-rule" />
+      </div>
+
+      {state.status === 'error' ? (
+        <div className="taxonomy-page__error">Error: {state.message}</div>
+      ) : state.status === 'loaded' ? (
+        <LoadedView rows={state.rows} />
+      ) : (
+        <div className="taxonomy-page__settling" role="status" aria-label="Loading taxonomy">
+          <div className="taxonomy-page__spinner" aria-hidden="true" />
+        </div>
+      )}
+    </div>
+  );
 }
 
-function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
-  const { nodes, links } = useMemo(() => viewRowsToGraph(rows), [rows]);
+function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
+  const [rows, setRows] = useState<TaxonomyViewRow[]>(initialRows);
+  // Carry simulation state (x/y/vx/vy/fx/fy on each node) across rows updates.
+  // Without this, adding a node hands ForceGraph2D a fresh array of fresh
+  // objects and the canvas re-cold-starts (warmupTicks runs against
+  // random positions, so the graph visibly resets every time).
+  const prevNodesRef = useRef<TaxonomyNode[]>([]);
+  const { nodes, links } = useMemo(
+    // eslint-disable-next-line react-hooks/refs -- intentional carry-across-rebuilds cache
+    () => viewRowsToGraph(rows, prevNodesRef.current),
+    [rows],
+  );
+  useEffect(() => { prevNodesRef.current = nodes; }, [nodes]);
   const [size, setSize] = useState({
     w: window.innerWidth,
     h: window.innerHeight - SITE_HEADER_HEIGHT,
@@ -75,12 +121,25 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   const [hovered, setHovered] = useState<TaxonomyNode | null>(null);
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<Set<FilterKey>>(new Set());
-  const [focusedId, setFocusedId] = useState<number | null>(null);
+  const { focusedId, focusedEdge, setFocusedId, setFocusedSlug, setFocusedEdge, clearFocus } =
+    useTaxonomyUrlState({ nodes });
   const [hoveredEdge, setHoveredEdge] = useState<EdgeRef | null>(null);
-  const [focusedEdge, setFocusedEdge] = useState<EdgeRef | null>(null);
   const [dagMode, setDagMode] = useState<DagMode | undefined>(undefined);
   const [sizeMode, setSizeMode] = useState<NodeSizeMode>('uniform');
+  const [settled, setSettled] = useState(false);
   const canvasRef = useRef<ForceCanvasHandle>(null);
+  const [toast, setToast] = useState<{ message: string; kind?: 'info' | 'error' } | null>(null);
+  const [editingParentsFor, setEditingParentsFor] = useState<number | null>(null);
+  const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [creatingFor, setCreatingFor] = useState<TaxonomyViewRow | null>(null);
+  // Tracks an in-flight create from "Submit" until the new node appears on
+  // the graph. While set, a persistent "Creating …" toast is shown; when
+  // pulseCoords first resolves for the new node, this clears and a normal
+  // "Created" toast takes over.
+  const [creating, setCreating] = useState<{ displayName: string; id: number | null } | null>(null);
+  const [plusCoords, setPlusCoords] = useState<{ x: number; y: number; r: number } | null>(null);
+  const [pulseFor, setPulseFor] = useState<number | null>(null);
+  const [pulseCoords, setPulseCoords] = useState<{ x: number; y: number; radius: number } | null>(null);
 
   const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
   const focusedNode = focusedId ? (byId.get(focusedId) ?? null) : null;
@@ -108,6 +167,96 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
     if (!focusedEdge) return null;
     return new Set([focusedEdge.source.id, focusedEdge.target.id]);
   }, [focusedEdge]);
+
+  const parentLookup = useMemo(
+    () => new Map(rows.map((r) => [r.id, { id: r.id, display_name: r.display_name }])),
+    [rows],
+  );
+
+  const editingParentsNode = editingParentsFor != null ? rows.find((r) => r.id === editingParentsFor) ?? null : null;
+  const deletingNode = deletingId != null ? rows.find((r) => r.id === deletingId) ?? null : null;
+
+  async function handleEditField(id: number, key: FieldKey, next: unknown) {
+    const patch: Record<string, unknown> = { [key]: next };
+    await updateTaxonomyNode(id, patch);
+    setRows((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, [key]: next as never } : r)),
+    );
+  }
+
+  useEffect(() => {
+    if (!hovered) { setPlusCoords(null); return; }
+    let frame = 0;
+    const tick = () => {
+      const zoom = canvasRef.current?.getZoom() ?? 1;
+      // Same zoom threshold as canvas labels: at faraway zoom the graph
+      // reads as topology, not as something to edit.
+      if (zoom <= SHOW_LABEL_AT) {
+        setPlusCoords(null);
+        frame = requestAnimationFrame(tick);
+        return;
+      }
+      const c = canvasRef.current?.getNodeScreenCoords(hovered.id);
+      if (c) {
+        // outerRingRadius() is in simulation-space units; multiply by current
+        // zoom to get on-screen pixels so the overlay tracks the visible
+        // outer edge (the gold ring), not the inner role-fill disc.
+        const r = outerRingRadius(hovered as TaxonomyNode, sizeMode) * zoom;
+        setPlusCoords({ x: c.x, y: c.y, r });
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [hovered, sizeMode]);
+
+  useEffect(() => {
+    if (pulseFor === null) return;
+    const t = setTimeout(() => setPulseFor(null), 2000);
+    return () => clearTimeout(t);
+  }, [pulseFor]);
+
+  // Bridge: once the new node has been positioned and the pulse can render
+  // (signaled by pulseCoords being non-null AFTER a creating-with-id was
+  // recorded), retire the persistent "Creating …" indicator and surface the
+  // standard "Created" toast.
+  useEffect(() => {
+    if (creating?.id == null) return;
+    if (pulseCoords == null) return;
+    const c = creating;
+    setCreating(null);
+    setToast({ message: `Created ${c.displayName} (#${c.id})` });
+  }, [creating, pulseCoords]);
+
+  useEffect(() => {
+    if (pulseFor === null) { setPulseCoords(null); return; }
+    // Retry until the canvas can resolve the node's screen coords. A
+    // freshly-created node may not have a valid x/y on the very first
+    // frame after setRows; bail-and-forget would silently miss the pulse.
+    let frame = 0;
+    let cancelled = false;
+    const startedAt = performance.now();
+    const tick = () => {
+      if (cancelled) return;
+      const c = canvasRef.current?.getNodeScreenCoords(pulseFor);
+      const node = rows.find((r) => r.id === pulseFor);
+      if (c && node) {
+        const zoom = canvasRef.current?.getZoom() ?? 1;
+        setPulseCoords({ x: c.x, y: c.y, radius: outerRingRadius(node as TaxonomyNode, sizeMode) * zoom });
+        if (c.x < 0 || c.y < 0 || c.x > size.w || c.y > size.h) {
+          const runtime = (rows.find((r) => r.id === pulseFor) as { x?: number; y?: number } | undefined);
+          if (runtime?.x != null && runtime.y != null) {
+            canvasRef.current?.centerAt(runtime.x, runtime.y, 600);
+          }
+        }
+        return;
+      }
+      if (performance.now() - startedAt > 2000) return;
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => { cancelled = true; cancelAnimationFrame(frame); };
+  }, [pulseFor, rows, sizeMode, size]);
 
   const dimmedIds = useMemo(() => {
     const dim = new Set<number>();
@@ -148,7 +297,14 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
   // state. Disabling react-hooks/immutability for this block only.
   /* eslint-disable react-hooks/immutability */
   useEffect(() => {
-    type PinNode = TaxonomyNode & { fx?: number | null; fy?: number | null };
+    type PinNode = TaxonomyNode & {
+      x?: number; y?: number;
+      vx?: number; vy?: number;
+      fx?: number | null; fy?: number | null;
+    };
+    // Wait for the d3 engine to settle — until then nodes don't have
+    // stable x/y, so any zoomToFit bbox would be garbage.
+    if (!settled) return;
     if (!focusedNode) {
       for (const n of nodes as PinNode[]) { n.fx = null; n.fy = null; }
       return;
@@ -161,29 +317,37 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
       parents, children,
       Math.min(size.w, size.h) * 0.22,
     );
+    // Snap x/y/vx/vy alongside fx/fy. The simulation is cooled (cooldownTicks=0)
+    // so it won't re-tick the canvas to apply fx/fy on its own; snapping x/y
+    // makes the new positions render immediately and gives zoomToFit a correct
+    // bbox to compute the camera transform from.
     for (const n of nodes as PinNode[]) {
       const p = positions.get(n.id);
-      if (p) { n.fx = p.x; n.fy = p.y; }
-      else if (n.id === focusedNode.id) { n.fx = focusedRuntime.x; n.fy = focusedRuntime.y; }
-      else { n.fx = null; n.fy = null; }
+      if (p) {
+        n.fx = p.x; n.fy = p.y;
+        n.x = p.x; n.y = p.y;
+        n.vx = 0; n.vy = 0;
+      } else if (n.id === focusedNode.id) {
+        n.fx = focusedRuntime.x; n.fy = focusedRuntime.y;
+      } else {
+        n.fx = null; n.fy = null;
+      }
     }
-    canvasRef.current?.centerAt(focusedRuntime.x, focusedRuntime.y, 600);
-  }, [focusedNode, nodes, byId, size, focusedId]);
+    const inFrame = new Set<number>([focusedNode.id, ...positions.keys()]);
+    // Single-shot fit that reserves room at the top for the page title.
+    // Avoids the prior fit + delayed centerAt sequence, which scrolled the
+    // view a moment after it had already landed.
+    canvasRef.current?.fitToNodesWithTopGuard(
+      (n) => inFrame.has(n.id),
+      TITLE_CLEAR_PX,
+      600,
+      FOCUS_FIT_PADDING,
+    );
+  }, [focusedNode, nodes, byId, size, focusedId, settled]);
   /* eslint-enable react-hooks/immutability */
 
   return (
-    <div className="taxonomy-page">
-      <div className="taxonomy-page__corner taxonomy-page__corner--tl" />
-      <div className="taxonomy-page__corner taxonomy-page__corner--tr" />
-      <div className="taxonomy-page__corner taxonomy-page__corner--bl" />
-      <div className="taxonomy-page__corner taxonomy-page__corner--br" />
-
-      <div className="taxonomy-page__title">
-        <div className="taxonomy-page__title-eyebrow">— A COMPENDIUM OF —</div>
-        <div className="taxonomy-page__title-main">SPIRITS &amp; LIQUEURS</div>
-        <div className="taxonomy-page__title-rule" />
-      </div>
-
+    <>
       <div
         style={{
           position: 'absolute', top: 14, left: 14, zIndex: 3,
@@ -262,25 +426,29 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
         width={size.w}
         height={size.h}
         dimmedIds={dimmedIds}
+        focusedId={focusedId}
         dagMode={dagMode}
         sizeMode={sizeMode}
         onNodeClick={(n) => {
-          setFocusedEdge(null);
           setFocusedId(n.id);
         }}
         onNodeHover={setHovered}
         onLinkClick={(l) => {
           const e = resolveLink(l);
           if (!e) return;
-          setFocusedId(null);
           setFocusedEdge(e);
         }}
         onLinkHover={(l) => setHoveredEdge(l ? resolveLink(l) : null)}
         onBackgroundClick={() => {
-          setFocusedId(null);
-          setFocusedEdge(null);
+          clearFocus();
         }}
+        onEngineStop={() => setSettled(true)}
       />
+      {!settled && (
+        <div className="taxonomy-page__settling" role="status" aria-label="Settling layout">
+          <div className="taxonomy-page__spinner" aria-hidden="true" />
+        </div>
+      )}
 
       <div
         style={{
@@ -298,14 +466,24 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
                 mode="pinned"
                 onDismiss={() => setFocusedEdge(null)}
                 onFocusNode={(id) => {
-                  setFocusedEdge(null);
                   setFocusedId(id);
                 }}
               />
             );
           }
           if (focusedNode) {
-            return <NodeCard node={focusedNode} mode="pinned" onDismiss={() => setFocusedId(null)} />;
+            return (
+              <NodeCard
+                node={focusedNode}
+                mode="pinned"
+                onDismiss={() => setFocusedId(null)}
+                onEditField={handleEditField}
+                onEditParents={(id) => setEditingParentsFor(id)}
+                onDelete={(id) => setDeletingId(id)}
+                onFocusNode={(id) => setFocusedId(id)}
+                parentLookup={parentLookup}
+              />
+            );
           }
           if (hoveredEdge && !focusedNode) {
             return <EdgeCard edge={hoveredEdge} mode="hover" onDismiss={() => {}} />;
@@ -316,6 +494,116 @@ function LoadedView({ rows }: { rows: TaxonomyViewRow[] }) {
           return null;
         })()}
       </div>
-    </div>
+      {hovered && plusCoords && (
+        <PlusButton
+          x={plusCoords.x}
+          y={plusCoords.y}
+          radius={plusCoords.r}
+          ariaLabel={`Add child of ${hovered.display_name}`}
+          onClick={() => setCreatingFor(hovered)}
+        />
+      )}
+      {creatingFor && (
+        <CreateChildModal
+          parent={{ id: creatingFor.id, display_name: creatingFor.display_name }}
+          onCancel={() => setCreatingFor(null)}
+          onCreate={async (parentId, input) => {
+            // Show a persistent "Creating …" indicator from click until the
+            // graph actually shows the new node. The success toast fires from
+            // the pulseCoords-watching effect below.
+            setCreating({ displayName: input.display_name, id: null });
+            try {
+              const newId = await createTaxonomyNode(parentId, input);
+              setRows((prev) => [
+                ...prev,
+                {
+                  id: newId, slug: input.slug, display_name: input.display_name,
+                  node_kind: input.node_kind, default_role: input.default_role,
+                  is_cluster_node: input.is_cluster_node,
+                  is_defining_garnish: input.is_defining_garnish,
+                  parent_ids: [parentId], child_ids: [],
+                  aliases: input.aliases, recipe_count: 0,
+                },
+              ].map((r) => r.id === parentId ? { ...r, child_ids: [...r.child_ids, newId] } : r));
+              setCreatingFor(null);
+              // Focus by slug, not id: the id-based setter would close over
+              // the pre-create byId map (the new node isn't in `nodes` yet
+              // in this render's closure) and silently delete ?node= instead
+              // of selecting the new node.
+              setFocusedSlug(input.slug);
+              setPulseFor(newId);
+              setCreating({ displayName: input.display_name, id: newId });
+            } catch (e) {
+              setCreating(null);
+              setToast({ message: `Create failed: ${String(e)}`, kind: 'error' });
+            }
+          }}
+        />
+      )}
+      {pulseCoords && <HighlightPulse {...pulseCoords} />}
+      {editingParentsNode && (
+        <EditParentsModal
+          node={editingParentsNode}
+          currentParentIds={editingParentsNode.parent_ids}
+          rows={rows}
+          onCancel={() => setEditingParentsFor(null)}
+          onSave={async (id, parentIds) => {
+            try {
+              await setNodeParents(id, parentIds);
+              setRows((prev) => {
+                const next = prev.map((r) => {
+                  if (r.id === id) return { ...r, parent_ids: parentIds };
+                  const wasParent = r.child_ids.includes(id);
+                  const isParent = parentIds.includes(r.id);
+                  if (wasParent && !isParent) return { ...r, child_ids: r.child_ids.filter((c) => c !== id) };
+                  if (!wasParent && isParent) return { ...r, child_ids: [...r.child_ids, id] };
+                  return r;
+                });
+                return next;
+              });
+              setEditingParentsFor(null);
+              setPulseFor(id);
+              setToast({ message: `Updated parents of ${editingParentsNode.display_name}` });
+            } catch (e) {
+              setToast({ message: `Save failed: ${String(e)}`, kind: 'error' });
+            }
+          }}
+        />
+      )}
+      {deletingNode && (
+        <DeleteNodeModal
+          node={{ id: deletingNode.id, slug: deletingNode.slug, display_name: deletingNode.display_name }}
+          fetchBlockers={getTaxonomyNodeBlockers}
+          onCancel={() => setDeletingId(null)}
+          onConfirm={async (id) => {
+            try {
+              await deleteTaxonomyNode(id);
+              setRows((prev) => prev
+                .filter((r) => r.id !== id)
+                .map((r) => ({
+                  ...r,
+                  parent_ids: r.parent_ids.filter((p) => p !== id),
+                  child_ids: r.child_ids.filter((c) => c !== id),
+                })),
+              );
+              setDeletingId(null);
+              if (focusedId === id) setFocusedId(null);
+              setToast({ message: `Deleted ${deletingNode.display_name} (#${id})` });
+            } catch (e) {
+              setToast({ message: `Delete failed: ${String(e)}`, kind: 'error' });
+            }
+          }}
+        />
+      )}
+      {creating && (
+        <Toast
+          kind="progress"
+          persist
+          message={`Creating ${creating.displayName}…`}
+          onDismiss={() => {}}
+        />
+      )}
+      {toast && !creating && <Toast {...toast} onDismiss={() => setToast(null)} />}
+    </>
   );
 }
