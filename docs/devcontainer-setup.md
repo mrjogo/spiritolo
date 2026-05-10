@@ -109,5 +109,5 @@ In devcontainers, the `CLAUDE_NOTIFY_HOST` env var is set to `host.docker.intern
 
 - **No conversation history:** check `HOST_PROJECT_DIR` is set inside the container (`echo $HOST_PROJECT_DIR`); it should equal the host-side absolute path of the workspace folder
 - **"exists as a real directory" error:** remove the directory manually as the error suggests, rebuild
-- **`gh` fails:** run `gh auth login` on host before starting container
+- **`gh` fails:** ensure `GH_TOKEN` is exported on the host (e.g., via `.zshrc` or `launchctl setenv`); the container reads it via `${localEnv:GH_TOKEN}` in `containerEnv`
 - **Claude Code not found:** check `~/.local/bin` is on PATH

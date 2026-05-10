@@ -18,6 +18,7 @@
     "CLAUDE_CONFIG_DIR": "/home/vscode/.claude",
     "HOST_HOME": "${localEnv:HOME}",
     "HOST_PROJECT_DIR": "${localWorkspaceFolder}",
+    "GH_TOKEN": "${localEnv:GH_TOKEN}",
     "SSH_AUTH_SOCK": "/tmp/ssh-agent.sock",
     "CLAUDE_NOTIFY_HOST": "host.docker.internal"
     // [/repo-mixin:devcontainer-claude]
