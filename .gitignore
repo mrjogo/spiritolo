@@ -37,6 +37,9 @@ htmlcov/
 # Brainstorm visual companion mockups
 .superpowers/
 
+# DevPod build scratch (regenerated per `devpod up`)
+.devcontainer/.devpod-internal/
+
 # Playwright MCP screenshot/snapshot scratch (kept local, never committed)
 .playwright-mcp/
 /*.png
