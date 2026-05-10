@@ -93,12 +93,278 @@ def test_ingest_phase2_batch_dispatches_writes_per_action(tmp_path, monkeypatch)
     assert counts["ok"] == 2
 
 
+def test_ingest_phase2_batch_abstains_when_chose_node_id_does_not_exist(tmp_path, monkeypatch):
+    """LLM hallucinations of the form `chose: {node_id: 1001}` where 1001
+    isn't a real taxonomy node would FK-violate on the UPDATE, abort the
+    transaction, and (without the cascade fix) poison the rest of the chunk.
+    Defense in depth: validate node_id existence at on_result time and
+    abstain on miss, so the FK violation never reaches Postgres."""
+    from common.llm.batch_runner import submit_batch
+    from common.llm.batch_provider import BatchRequest
+
+    submit_batch(
+        provider=_stub_batch_provider(),
+        rows=[("vodka", "s", "u0"), ("ghost_ingredient", "s", "u1")],
+        to_request=lambda i, r: BatchRequest(custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2]),
+        row_to_id=lambda r: r[0],
+        flow="mapping.resolve_pending",
+        version_constant=__import__("ingredients.mapping.mapper", fromlist=["MAPPER_VERSION"]).MAPPER_VERSION,
+        batches_dir=tmp_path,
+    )
+
+    provider = MagicMock()
+    provider.status.return_value = BatchStatus(
+        batch_id="batch_abc", state="completed", completed=2, total=2,
+    )
+    provider.fetch_results.return_value = iter([
+        BatchResult(custom_id="r0", raw_text='{"action": "chose", "node_id": 7}', error=None),
+        BatchResult(custom_id="r1", raw_text='{"action": "chose", "node_id": 1001}', error=None),
+    ])
+
+    # Stub the existence check: node 7 exists, node 1001 does not.
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver._node_exists",
+        lambda conn, node_id: node_id == 7,
+    )
+
+    chose_writes: list[tuple[str, int]] = []
+    abstain_writes: list[str] = []
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.write_resolution",
+        lambda conn, normalized_name, taxonomy_node_id, source, mapper_version: chose_writes.append((normalized_name, taxonomy_node_id)),
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.write_abstain",
+        lambda conn, normalized_name, mapper_version: abstain_writes.append(normalized_name),
+    )
+
+    counts = ingest_phase2_batch(
+        conn=MagicMock(), provider=provider, batch_id="batch_abc",
+        batches_dir=tmp_path,
+    )
+    # Real chose hit write_resolution; hallucinated chose was diverted to abstain.
+    assert chose_writes == [("vodka", 7)]
+    assert abstain_writes == ["ghost_ingredient"]
+    # Both rows count as "ok" (no exception raised, no FK violation).
+    assert counts["ok"] == 2
+    assert counts.get("writer_error", 0) == 0
+
+
+def test_ingest_phase2_batch_abstains_when_propose_brand_has_invalid_node_kind(tmp_path, monkeypatch):
+    """taxonomy_nodes.node_kind is CHECK-constrained to ('brand','expression').
+    An LLM that proposes `node_kind: 'liqueur'` would CHECK-violate on the
+    INSERT, abort the txn, and lose the rest of the chunk. We catch it
+    pre-INSERT and abstain instead."""
+    from common.llm.batch_runner import submit_batch
+    from common.llm.batch_provider import BatchRequest
+
+    submit_batch(
+        provider=_stub_batch_provider(),
+        rows=[("weirdo", "s", "u0")],
+        to_request=lambda i, r: BatchRequest(custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2]),
+        row_to_id=lambda r: r[0],
+        flow="mapping.resolve_pending",
+        version_constant=__import__("ingredients.mapping.mapper", fromlist=["MAPPER_VERSION"]).MAPPER_VERSION,
+        batches_dir=tmp_path,
+    )
+
+    provider = MagicMock()
+    provider.status.return_value = BatchStatus(
+        batch_id="batch_abc", state="completed", completed=1, total=1,
+    )
+    provider.fetch_results.return_value = iter([
+        BatchResult(
+            custom_id="r0",
+            raw_text='{"action": "propose_brand", "slug": "weirdo", "display_name": "Weirdo", "parent_slug": "vodka", "node_kind": "liqueur"}',
+            error=None,
+        ),
+    ])
+
+    abstain_writes: list[str] = []
+    create_calls: list[str] = []
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.write_abstain",
+        lambda conn, normalized_name, mapper_version: abstain_writes.append(normalized_name),
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver._create_brand_node",
+        lambda **kwargs: create_calls.append(kwargs["slug"]) or 999,
+    )
+
+    counts = ingest_phase2_batch(
+        conn=MagicMock(), provider=provider, batch_id="batch_abc",
+        batches_dir=tmp_path,
+    )
+    # Bad node_kind diverted to abstain; _create_brand_node never invoked.
+    assert abstain_writes == ["weirdo"]
+    assert create_calls == []
+    assert counts["ok"] == 1
+    assert counts.get("writer_error", 0) == 0
+
+
+def test_ingest_phase2_batch_rolls_back_on_writer_error(tmp_path, monkeypatch):
+    """A failing per-row writer (e.g. FK violation) must call conn.rollback()
+    so the next on_result starts on a clean transaction. Otherwise psycopg
+    raises InFailedSqlTransaction for every subsequent row in the chunk."""
+    from common.llm.batch_runner import submit_batch
+    from common.llm.batch_provider import BatchRequest
+
+    submit_batch(
+        provider=_stub_batch_provider(),
+        rows=[("vodka", "s", "u0"), ("rye", "s", "u1"), ("gin", "s", "u2")],
+        to_request=lambda i, r: BatchRequest(custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2]),
+        row_to_id=lambda r: r[0],
+        flow="mapping.resolve_pending",
+        version_constant=__import__("ingredients.mapping.mapper", fromlist=["MAPPER_VERSION"]).MAPPER_VERSION,
+        batches_dir=tmp_path,
+    )
+
+    provider = MagicMock()
+    provider.status.return_value = BatchStatus(
+        batch_id="batch_abc", state="completed", completed=3, total=3,
+    )
+    provider.fetch_results.return_value = iter([
+        BatchResult(custom_id="r0", raw_text='{"action": "chose", "node_id": 1}', error=None),
+        BatchResult(custom_id="r1", raw_text='{"action": "chose", "node_id": 2}', error=None),
+        BatchResult(custom_id="r2", raw_text='{"action": "chose", "node_id": 3}', error=None),
+    ])
+
+    def _write_resolution(conn, normalized_name, taxonomy_node_id, source, mapper_version):
+        if normalized_name == "rye":
+            raise RuntimeError("simulated FK violation")
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.write_resolution", _write_resolution,
+    )
+
+    conn = MagicMock()
+    counts = ingest_phase2_batch(
+        conn=conn, provider=provider, batch_id="batch_abc",
+        batches_dir=tmp_path,
+    )
+    # The middle row failed; the outer loop continued past it and the third
+    # row was processed cleanly because rollback() ran in between.
+    assert counts["ok"] == 2
+    assert counts["writer_error"] == 1
+    # The writer that raised must have triggered exactly one rollback so the
+    # next on_result didn't inherit an aborted Postgres transaction.
+    assert conn.rollback.call_count == 1
+
+
 def _make_drain_args(chunk_size: int = 2, limit=None) -> argparse.Namespace:
     return argparse.Namespace(
         provider="openai", limit=limit, yes=True, batch=True,
         ingest=None, chunk_size=chunk_size,
         poll_interval=0, model=None,
     )
+
+
+def test_drain_parks_stuck_names(tmp_path, monkeypatch):
+    """A chunk whose ingest leaves a name at pending_llm (e.g. propose_form)
+    parks that name to pending_llm_tried after ingest, so it doesn't appear
+    in the next iteration's fetch_pending_llm_names. The drain then exits."""
+    from ingredients.cli import _drain_mapping_in_chunks
+    from common.llm.batch_provider import BatchResult, BatchStatus, BatchSubmission
+
+    # Two pending names; only "good" gets cleared. "stuck" stays at pending_llm
+    # and must be parked.
+    pending = ["good", "stuck"]
+    parked: list[str] = []
+
+    def _fetch(conn, mapper_version, limit=None):
+        # The fetch query naturally excludes parked names.
+        live = [n for n in pending if n not in parked]
+        return live[:limit] if limit else list(live)
+
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.fetch_pending_llm_names", _fetch,
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.db.fetch_pending_llm_names", _fetch,
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver._candidates_with_parents",
+        lambda c, n: [],
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.lexical_layer.bulk_lexical_candidates",
+        lambda conn, names, limit=20: {n: [] for n in names},
+    )
+
+    # Simulate ingest: "good" gets a chose write (clears it from queue);
+    # "stuck" gets a propose_form (no DB write at all here).
+    def _write_resolution(conn, normalized_name, taxonomy_node_id, source, mapper_version):
+        if normalized_name in pending:
+            pending.remove(normalized_name)
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.write_resolution", _write_resolution,
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.enqueue_form_proposal",
+        lambda *a, **kw: None,
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver._lookup_node_by_slug",
+        lambda c, s: 1,
+    )
+
+    # park_attempted_names: record what was parked.
+    def _park(conn, mapper_version, names):
+        for n in names:
+            if n in pending and n not in parked:
+                parked.append(n)
+        return len(names)
+    monkeypatch.setattr(
+        "ingredients.mapping.db.park_attempted_names", _park,
+    )
+
+    submit_calls: list[int] = []
+    def _submit(requests):
+        reqs = list(requests)
+        submit_calls.append(len(reqs))
+        return BatchSubmission(
+            batch_id=f"b{len(submit_calls)}", provider="openai",
+            model_id="gpt-5-mini", request_count=len(reqs),
+        )
+    provider = MagicMock()
+    provider.model_id = "gpt-5-mini"
+    provider.submit.side_effect = _submit
+    provider.status.side_effect = lambda bid: BatchStatus(
+        batch_id=bid, state="completed", completed=2, total=2,
+    )
+
+    from common.llm.sidecar import load_sidecar
+    def _fetch_results(batch_id):
+        sc = load_sidecar(batch_id, batches_dir=tmp_path)
+        # Map the two custom_ids to chose vs propose_form.
+        out = []
+        for cid, name in sc.request_map.items():
+            if name == "good":
+                out.append(BatchResult(
+                    custom_id=cid,
+                    raw_text='{"action": "chose", "node_id": 1}',
+                    error=None,
+                ))
+            else:
+                out.append(BatchResult(
+                    custom_id=cid,
+                    raw_text='{"action": "propose_form", "slug": "x", '
+                             '"display_name": "X", "parent_slug": "p"}',
+                    error=None,
+                ))
+        return iter(out)
+    provider.fetch_results.side_effect = _fetch_results
+
+    db = MagicMock()
+    db.conn = MagicMock()
+    rc = _drain_mapping_in_chunks(
+        db, provider, tmp_path,
+        chunk_size=10, total_limit=None, poll_interval=0,
+    )
+    assert rc == 0
+    # Exactly one chunk submitted (the second iteration finds queue empty
+    # because "stuck" was parked).
+    assert submit_calls == [2]
+    assert parked == ["stuck"]
 
 
 def test_run_all_drains_queue_in_chunks(tmp_path, monkeypatch):
@@ -175,6 +441,12 @@ def test_run_all_drains_queue_in_chunks(tmp_path, monkeypatch):
         ])
     provider.fetch_results.side_effect = _fetch_results
 
+    # Parking is a no-op in this test (all names get cleared by chose writes).
+    monkeypatch.setattr(
+        "ingredients.mapping.db.park_attempted_names",
+        lambda conn, mapper_version, names: 0,
+    )
+
     # Run the loop.
     db = MagicMock()
     db.conn = MagicMock()
@@ -249,6 +521,12 @@ def test_run_all_retries_on_enqueue_token_limit(tmp_path, monkeypatch):
         ])
     provider.fetch_results.side_effect = _fetch_results
 
+    # Parking is a no-op in this test (all names get cleared by chose writes).
+    monkeypatch.setattr(
+        "ingredients.mapping.db.park_attempted_names",
+        lambda conn, mapper_version, names: 0,
+    )
+
     db = MagicMock()
     db.conn = MagicMock()
     rc = _drain_mapping_in_chunks(
@@ -317,6 +595,12 @@ def test_drain_respects_total_limit(tmp_path, monkeypatch):
         ])
     provider.fetch_results.side_effect = _fetch_results
 
+    # Parking is a no-op in this test (all names get cleared by chose writes).
+    monkeypatch.setattr(
+        "ingredients.mapping.db.park_attempted_names",
+        lambda conn, mapper_version, names: 0,
+    )
+
     db = MagicMock()
     db.conn = MagicMock()
     rc = _drain_mapping_in_chunks(
@@ -383,6 +667,12 @@ def test_drain_chunk_size_capped_by_remaining_limit(tmp_path, monkeypatch):
             for cid in sc.request_map.keys()
         ])
     provider.fetch_results.side_effect = _fetch_results
+
+    # Parking is a no-op in this test (all names get cleared by chose writes).
+    monkeypatch.setattr(
+        "ingredients.mapping.db.park_attempted_names",
+        lambda conn, mapper_version, names: 0,
+    )
 
     db = MagicMock()
     db.conn = MagicMock()

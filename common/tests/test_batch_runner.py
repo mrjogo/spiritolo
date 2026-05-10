@@ -52,6 +52,29 @@ def test_submit_writes_sidecar_with_request_map(tmp_path):
     assert sc.flow == "mapping.resolve_pending"
 
 
+def test_submit_batch_returns_submitted_names(tmp_path):
+    """BatchSubmitOutcome.submitted_names exposes row IDs in submit order
+    so the caller can drive post-ingest bookkeeping (e.g. parking
+    failures) without re-loading the sidecar."""
+    rows = [("alpha", "sys", "u1"), ("beta", "sys", "u2"), ("gamma", "sys", "u3")]
+    provider = _stub_provider()
+    provider.submit.return_value = BatchSubmission(
+        batch_id="batch_abc", provider="openai",
+        model_id="gpt-5-mini", request_count=3,
+    )
+    outcome = submit_batch(
+        provider=provider, rows=rows,
+        to_request=lambda i, r: BatchRequest(
+            custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2],
+        ),
+        row_to_id=lambda r: r[0],
+        flow="test_flow",
+        version_constant="vtest",
+        batches_dir=tmp_path,
+    )
+    assert outcome.submitted_names == ("alpha", "beta", "gamma")
+
+
 def test_ingest_dispatches_to_callbacks_and_marks_sidecar(tmp_path):
     # Set up a sidecar from a prior submit.
     provider = _stub_provider()
@@ -94,6 +117,39 @@ def test_ingest_dispatches_to_callbacks_and_marks_sidecar(tmp_path):
     # Sidecar renamed to .ingested.
     assert (tmp_path / "batch_abc.json.ingested").exists()
     assert not (tmp_path / "batch_abc.json").exists()
+
+
+def test_ingest_counts_empty_raw_text_as_error(tmp_path):
+    """Providers occasionally return a 200 with an empty body (refusals,
+    guardrails) and r.error is None. on_result skips those gracefully but
+    they used to be counted as 'ok' in the summary, hiding silent losses.
+    Anything that on_result can't act on must show up in 'error'."""
+    submit_batch(
+        provider=_stub_provider(),
+        rows=[("vodka", "s", "u0"), ("rye", "s", "u1"), ("gin", "s", "u2")],
+        to_request=lambda i, r: BatchRequest(custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2]),
+        row_to_id=lambda r: r[0],
+        flow="mapping.resolve_pending", version_constant="v3",
+        batches_dir=tmp_path,
+    )
+
+    ingest_provider = MagicMock()
+    ingest_provider.status.return_value = BatchStatus(
+        batch_id="batch_abc", state="completed", completed=3, total=3,
+    )
+    ingest_provider.fetch_results.return_value = iter([
+        BatchResult(custom_id="r0", raw_text='{"action":"chose"}', error=None),
+        BatchResult(custom_id="r1", raw_text="",   error=None),    # empty body
+        BatchResult(custom_id="r2", raw_text=None, error=None),    # missing body
+    ])
+
+    counts = ingest_batch(
+        provider=ingest_provider, batch_id="batch_abc",
+        flow="mapping.resolve_pending", version_constant="v3",
+        on_result=lambda *a: None, batches_dir=tmp_path,
+    )
+    assert counts["ok"] == 1
+    assert counts["error"] == 2
 
 
 def test_ingest_continues_when_on_result_raises(tmp_path):

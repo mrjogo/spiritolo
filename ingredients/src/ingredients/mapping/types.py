@@ -8,7 +8,9 @@ from dataclasses import dataclass
 from typing import Literal
 
 # Source values match the recipe_ingredients.mapper_source check constraint.
-MapperSource = Literal["alias", "lexical", "pending_llm", "llm", "abstain"]
+MapperSource = Literal[
+    "alias", "lexical", "pending_llm", "pending_llm_tried", "llm", "abstain",
+]
 
 
 @dataclass(frozen=True)

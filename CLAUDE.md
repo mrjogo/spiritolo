@@ -171,7 +171,14 @@ cd ingredients && uv run python -m ingredients.cli map review-proposals
 
 # After bumping MAPPER_VERSION, re-map everything left at the old version.
 cd ingredients && uv run python -m ingredients.cli map --reset --except-version v1 --yes
+
+# Unpark names that previous runs parked at 'pending_llm_tried' (e.g.
+# after approving a form proposal or editing the taxonomy). Then re-run
+# `map resolve-pending --provider …` to re-submit.
+cd ingredients && uv run python -m ingredients.cli map retry-failures
 ```
+
+The chunked Batch drain (`--batch`) parks any name that didn't get a clearing action ('chose' or 'abstain') from a chunk's ingest — most commonly `propose_form`, but also parse failures and transient provider errors — by flipping `mapper_source` to `pending_llm_tried`. Parked names are excluded from `fetch_pending_llm_names`, so subsequent chunks and subsequent runs don't re-submit them. Run `map retry-failures` to unpark after the blocker is resolved.
 
 Brand/expression nodes auto-create silently when the LLM proposes one with an existing parent; provenance is recorded in `taxonomy_provenance`. Form nodes (lemon_zest, lime_oil, ...) queue in `taxonomy_proposals` for human review via `map review-proposals`. Auto-created nodes default to `is_cluster_node = false` (the column added by `[E]`); the antichain stays curator-controlled.
 
@@ -230,7 +237,12 @@ cd ingredients && uv run python -m ingredients.cli cluster --review
 # After bumping a version constant, re-run leftovers.
 cd ingredients && uv run python -m ingredients.cli normalize-names --reset --except-version v1 --yes
 cd ingredients && uv run python -m ingredients.cli cluster --reset --except-version v1 --yes
+
+# Unpark names that previous runs parked at 'pending_llm_tried'.
+cd ingredients && uv run python -m ingredients.cli normalize-names retry-failures
 ```
+
+The chunked Batch drain parks names whose chunk didn't produce a clearing action by flipping `canonical_name_source` to `pending_llm_tried`. Run `normalize-names retry-failures` to unpark.
 
 The canonical-name pool grows bottom-up on staging: ~20 well-known cocktails are bootstrapped as `cocktail_aliases`, and LLM resolutions add to it. Restore a staging backup to get the current pool locally.
 

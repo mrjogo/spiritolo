@@ -174,27 +174,34 @@ def ingest_normalize_names_batch(
         raw = row_id
         normalized = normalize_cocktail_name(raw)
 
-        if action == "chose":
-            canonical = action_obj["canonical_name"]
-            write_normalization(
-                conn, raw_name=raw, normalized=normalized,
-                canonical_name=canonical, source="llm",
-                normalizer_version=NORMALIZER_VERSION,
-            )
-        elif action == "propose":
-            canonical = action_obj["canonical_name"]
-            add_cocktail_alias(
-                conn, alias=normalized, canonical_name=canonical, source="llm",
-            )
-            write_normalization(
-                conn, raw_name=raw, normalized=normalized,
-                canonical_name=canonical, source="llm",
-                normalizer_version=NORMALIZER_VERSION,
-            )
-        elif action == "abstain":
-            write_normalize_abstain(
-                conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION,
-            )
+        # Any SQL error inside this body aborts the connection's transaction in
+        # Postgres; without an explicit ROLLBACK the next on_result call hits
+        # InFailedSqlTransaction and the rest of the chunk is lost.
+        try:
+            if action == "chose":
+                canonical = action_obj["canonical_name"]
+                write_normalization(
+                    conn, raw_name=raw, normalized=normalized,
+                    canonical_name=canonical, source="llm",
+                    normalizer_version=NORMALIZER_VERSION,
+                )
+            elif action == "propose":
+                canonical = action_obj["canonical_name"]
+                add_cocktail_alias(
+                    conn, alias=normalized, canonical_name=canonical, source="llm",
+                )
+                write_normalization(
+                    conn, raw_name=raw, normalized=normalized,
+                    canonical_name=canonical, source="llm",
+                    normalizer_version=NORMALIZER_VERSION,
+                )
+            elif action == "abstain":
+                write_normalize_abstain(
+                    conn, raw_name=raw, normalizer_version=NORMALIZER_VERSION,
+                )
+        except Exception:
+            conn.rollback()
+            raise
 
     return ingest_batch(
         provider=provider, batch_id=batch_id,

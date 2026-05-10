@@ -65,6 +65,19 @@ def _lookup_node_by_slug(conn: psycopg.Connection, slug: str) -> int | None:
     return row[0] if row else None
 
 
+def _node_exists(conn: psycopg.Connection, node_id: int) -> bool:
+    row = conn.execute(
+        "select 1 from taxonomy_nodes where id = %s", (node_id,),
+    ).fetchone()
+    return row is not None
+
+
+# taxonomy_nodes.node_kind has a CHECK constraint allowing only these values
+# (plus NULL). LLM-proposed brand/expression nodes must validate before INSERT
+# or the whole transaction aborts.
+_VALID_NODE_KINDS = {"brand", "expression"}
+
+
 def _create_brand_node(
     conn: psycopg.Connection,
     *,
@@ -161,13 +174,35 @@ def run_phase2(
             action = action_obj["action"]
 
             if action == "chose":
+                node_id = int(action_obj["node_id"])
+                if not _node_exists(conn, node_id):
+                    log.warning(
+                        "LLM chose node_id=%d which is not in taxonomy_nodes "
+                        "for %r — abstaining (likely hallucination)",
+                        node_id, normalized,
+                    )
+                    write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
+                    counts["abstain"] += 1
+                    progress(idx)
+                    continue
                 write_resolution(
                     conn, normalized_name=normalized,
-                    taxonomy_node_id=int(action_obj["node_id"]),
+                    taxonomy_node_id=node_id,
                     source="llm", mapper_version=MAPPER_VERSION,
                 )
                 counts["chose"] += 1
             elif action == "propose_brand":
+                node_kind = action_obj.get("node_kind")
+                if node_kind not in _VALID_NODE_KINDS:
+                    log.warning(
+                        "LLM proposed invalid node_kind=%r for %r "
+                        "(must be 'brand' or 'expression') — abstaining",
+                        node_kind, normalized,
+                    )
+                    write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
+                    counts["abstain"] += 1
+                    progress(idx)
+                    continue
                 parent_id = _lookup_node_by_slug(conn, action_obj["parent_slug"])
                 if parent_id is None:
                     write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
@@ -184,7 +219,7 @@ def run_phase2(
                         slug=action_obj["slug"],
                         display_name=action_obj["display_name"],
                         parent_id=parent_id,
-                        node_kind=action_obj["node_kind"],
+                        node_kind=node_kind,
                         raw_string=normalized,
                         prompt_hash_value=prompt_hash(normalized, None, site, cands),
                         model_id=provider.model_id,
@@ -305,25 +340,46 @@ def ingest_phase2_batch(
         action = action_obj["action"]
         normalized = row_id
 
-        if action == "chose":
-            write_resolution(
-                conn, normalized_name=normalized,
-                taxonomy_node_id=int(action_obj["node_id"]),
-                source="llm", mapper_version=MAPPER_VERSION,
-            )
-        elif action == "propose_brand":
-            cands = _candidates_with_parents(conn, normalized)
-            parent_id = _lookup_node_by_slug(conn, action_obj["parent_slug"])
-            if parent_id is None:
-                write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
-                return
-            try:
+        # Any SQL error inside this body aborts the connection's transaction in
+        # Postgres; without an explicit ROLLBACK the next on_result call hits
+        # InFailedSqlTransaction and the rest of the chunk is lost.
+        try:
+            if action == "chose":
+                node_id = int(action_obj["node_id"])
+                if not _node_exists(conn, node_id):
+                    log.warning(
+                        "LLM chose node_id=%d which is not in taxonomy_nodes "
+                        "for %r — abstaining (likely hallucination)",
+                        node_id, normalized,
+                    )
+                    write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
+                    return
+                write_resolution(
+                    conn, normalized_name=normalized,
+                    taxonomy_node_id=node_id,
+                    source="llm", mapper_version=MAPPER_VERSION,
+                )
+            elif action == "propose_brand":
+                node_kind = action_obj.get("node_kind")
+                if node_kind not in _VALID_NODE_KINDS:
+                    log.warning(
+                        "LLM proposed invalid node_kind=%r for %r "
+                        "(must be 'brand' or 'expression') — abstaining",
+                        node_kind, normalized,
+                    )
+                    write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
+                    return
+                cands = _candidates_with_parents(conn, normalized)
+                parent_id = _lookup_node_by_slug(conn, action_obj["parent_slug"])
+                if parent_id is None:
+                    write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
+                    return
                 new_id = _create_brand_node(
                     conn,
                     slug=action_obj["slug"],
                     display_name=action_obj["display_name"],
                     parent_id=parent_id,
-                    node_kind=action_obj["node_kind"],
+                    node_kind=node_kind,
                     raw_string=normalized,
                     prompt_hash_value=prompt_hash(normalized, None, None, cands),
                     model_id=provider.model_id,
@@ -332,23 +388,23 @@ def ingest_phase2_batch(
                     conn, normalized_name=normalized, taxonomy_node_id=new_id,
                     source="llm", mapper_version=MAPPER_VERSION,
                 )
-            except Exception:
-                conn.rollback()
-                raise
-        elif action == "propose_form":
-            cands = _candidates_with_parents(conn, normalized)
-            parent_id = _lookup_node_by_slug(conn, action_obj["parent_slug"])
-            enqueue_form_proposal(
-                conn,
-                raw_string=normalized,
-                proposed_slug=action_obj["slug"],
-                proposed_display_name=action_obj["display_name"],
-                proposed_parent_id=parent_id,
-                candidates=cands,
-                mapper_version=MAPPER_VERSION,
-            )
-        elif action == "abstain":
-            write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
+            elif action == "propose_form":
+                cands = _candidates_with_parents(conn, normalized)
+                parent_id = _lookup_node_by_slug(conn, action_obj["parent_slug"])
+                enqueue_form_proposal(
+                    conn,
+                    raw_string=normalized,
+                    proposed_slug=action_obj["slug"],
+                    proposed_display_name=action_obj["display_name"],
+                    proposed_parent_id=parent_id,
+                    candidates=cands,
+                    mapper_version=MAPPER_VERSION,
+                )
+            elif action == "abstain":
+                write_abstain(conn, normalized_name=normalized, mapper_version=MAPPER_VERSION)
+        except Exception:
+            conn.rollback()
+            raise
 
     return ingest_batch(
         provider=provider, batch_id=batch_id,

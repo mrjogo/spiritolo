@@ -177,6 +177,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Name recorded on each decision.",
     )
 
+    p_retry = map_sub.add_parser(
+        "retry-failures",
+        help="Unpark names parked by the chunked drain "
+             "(pending_llm_tried -> pending_llm). Run after the "
+             "underlying blocker is resolved (form proposal approved, "
+             "taxonomy edit landed, etc.).",
+    )
+    p_retry.add_argument(
+        "--limit", type=int, default=None,
+        help="Unpark at most N rows (no ordering guarantees).",
+    )
+    p_retry.add_argument(
+        "--yes", action="store_true",
+        help="Skip the count-and-confirm prompt.",
+    )
+
     # normalize-names: Phase 1 by default; resolve-pending / list-pending sub-subcommands.
     p_norm = sub.add_parser("normalize-names",
                             help="Cocktail-name normalization. Phase 1 by default.")
@@ -228,6 +244,21 @@ def build_arg_parser() -> argparse.ArgumentParser:
     )
     p_list_pending.add_argument("--limit", type=int, default=50,
                                 help="List at most N names (default: 50).")
+
+    p_retry_norm = norm_sub.add_parser(
+        "retry-failures",
+        help="Unpark names parked by the chunked drain "
+             "(pending_llm_tried -> pending_llm). Run after the "
+             "underlying blocker is resolved.",
+    )
+    p_retry_norm.add_argument(
+        "--limit", type=int, default=None,
+        help="Unpark at most N rows.",
+    )
+    p_retry_norm.add_argument(
+        "--yes", action="store_true",
+        help="Skip the count-and-confirm prompt.",
+    )
 
     # cluster: cluster compute by default; audit sub-subcommand.
     p_cluster = sub.add_parser("cluster",
@@ -335,6 +366,98 @@ def run_worker(args: argparse.Namespace) -> int:
 
         mode = "dry-run" if args.dry_run else "applied"
         print_summary("Parse ingredients", changes, mode=mode)
+        return 0
+    finally:
+        db.close()
+
+
+def run_map_retry_failures(args: argparse.Namespace) -> int:
+    """Unpark Phase-2 failures: flip mapper_source 'pending_llm_tried'
+    back to 'pending_llm' for the current MAPPER_VERSION."""
+    from ingredients.mapping.db import unpark_failures
+    from ingredients.mapping.mapper import MAPPER_VERSION
+
+    db = IngredientsDatabase()
+    try:
+        # Show current count first.
+        n_parked = db.conn.execute(
+            """
+            select count(*) from recipe_ingredients
+            where mapper_source = 'pending_llm_tried'
+              and mapper_version = %s
+            """,
+            (MAPPER_VERSION,),
+        ).fetchone()[0]
+        if n_parked == 0:
+            log.info("nothing parked at mapper_version=%s", MAPPER_VERSION)
+            return 0
+
+        cap = (
+            min(args.limit, n_parked) if args.limit is not None else n_parked
+        )
+        log.info("would unpark %d of %d parked rows at mapper_version=%s",
+                 cap, n_parked, MAPPER_VERSION)
+        if not args.yes:
+            sys.stderr.write("Proceed? [y/N]: ")
+            sys.stderr.flush()
+            answer = sys.stdin.readline().strip().lower()
+            if answer not in ("y", "yes"):
+                log.info("aborted by operator")
+                return 1
+
+        n = unpark_failures(db.conn, mapper_version=MAPPER_VERSION,
+                            limit=args.limit)
+        db.conn.commit()
+        log.info(
+            "unparked %d rows; run 'map resolve-pending --provider …' "
+            "to re-submit", n,
+        )
+        return 0
+    finally:
+        db.close()
+
+
+def run_normalize_names_retry_failures(args: argparse.Namespace) -> int:
+    """Unpark Phase-2 dedup failures: flip canonical_name_source
+    'pending_llm_tried' back to 'pending_llm' for the current
+    NORMALIZER_VERSION."""
+    from ingredients.dedup.db import unpark_failures
+    from ingredients.dedup.version import NORMALIZER_VERSION
+
+    db = IngredientsDatabase()
+    try:
+        n_parked = db.conn.execute(
+            """
+            select count(*) from recipes
+            where canonical_name_source = 'pending_llm_tried'
+              and normalizer_version = %s
+            """,
+            (NORMALIZER_VERSION,),
+        ).fetchone()[0]
+        if n_parked == 0:
+            log.info("nothing parked at normalizer_version=%s", NORMALIZER_VERSION)
+            return 0
+
+        cap = (
+            min(args.limit, n_parked) if args.limit is not None else n_parked
+        )
+        log.info("would unpark %d of %d parked rows at normalizer_version=%s",
+                 cap, n_parked, NORMALIZER_VERSION)
+        if not args.yes:
+            sys.stderr.write("Proceed? [y/N]: ")
+            sys.stderr.flush()
+            answer = sys.stdin.readline().strip().lower()
+            if answer not in ("y", "yes"):
+                log.info("aborted by operator")
+                return 1
+
+        n = unpark_failures(db.conn, normalizer_version=NORMALIZER_VERSION,
+                            limit=args.limit)
+        db.conn.commit()
+        log.info(
+            "unparked %d rows; run 'normalize-names resolve-pending --provider …' "
+            "to re-submit", n,
+        )
         return 0
     finally:
         db.close()
@@ -513,7 +636,7 @@ def _drain_mapping_in_chunks(
     Each chunk's per-chunk size is min(chunk_size, total_limit_remaining).
     """
     import time
-    from ingredients.mapping.db import fetch_pending_llm_names
+    from ingredients.mapping.db import fetch_pending_llm_names, park_attempted_names
     from ingredients.mapping.llm_resolver import (
         ingest_phase2_batch, submit_phase2_batch,
     )
@@ -624,6 +747,27 @@ def _drain_mapping_in_chunks(
             log.info("chunk %d ingested: %s (drained %d total)",
                      chunk_idx, dict(counts), drained)
 
+            # Park names that didn't clear ('propose_form', parse error,
+            # provider error, etc.) so they don't reappear in the next
+            # chunk or the next run. Operator runs `map retry-failures`
+            # to unpark after resolving the underlying blocker.
+            stuck = park_attempted_names(
+                db.conn, mapper_version=MAPPER_VERSION,
+                names=list(outcome.submitted_names),
+            )
+            db.conn.commit()
+            if stuck:
+                aggregate_counts["parked"] = aggregate_counts.get("parked", 0) + stuck
+                log.info("chunk %d parked %d stuck names as pending_llm_tried",
+                         chunk_idx, stuck)
+
+    parked_total = aggregate_counts.get("parked", 0)
+    if parked_total:
+        log.info(
+            "parked %d names as pending_llm_tried "
+            "(run 'map retry-failures' to retry)",
+            parked_total,
+        )
     print_summary(
         f"Map resolve-pending ({chunk_idx} chunks, {drained} drained)",
         {"all": aggregate_counts}, mode="applied",
@@ -688,7 +832,7 @@ def _drain_dedup_in_chunks(
     are called and the version constant. See that function for the full
     rationale on chunking, 429 backoff, and Ctrl-C handling."""
     import time
-    from ingredients.dedup.db import fetch_pending_canonical_names
+    from ingredients.dedup.db import fetch_pending_canonical_names, park_attempted_names
     from ingredients.dedup.normalizer_llm import (
         ingest_normalize_names_batch, submit_normalize_names_batch,
     )
@@ -790,6 +934,27 @@ def _drain_dedup_in_chunks(
             log.info("chunk %d ingested: %s (drained %d total)",
                      chunk_idx, dict(counts), drained)
 
+            # Park names that didn't clear ('noop' / parse error / provider
+            # error / etc.) so they don't reappear in the next chunk or run.
+            # Operator runs `normalize-names retry-failures` to unpark after
+            # resolving the underlying blocker.
+            stuck = park_attempted_names(
+                db.conn, normalizer_version=NORMALIZER_VERSION,
+                names=list(outcome.submitted_names),
+            )
+            db.conn.commit()
+            if stuck:
+                aggregate_counts["parked"] = aggregate_counts.get("parked", 0) + stuck
+                log.info("chunk %d parked %d stuck names as pending_llm_tried",
+                         chunk_idx, stuck)
+
+    parked_total = aggregate_counts.get("parked", 0)
+    if parked_total:
+        log.info(
+            "parked %d names as pending_llm_tried "
+            "(run 'normalize-names retry-failures' to retry)",
+            parked_total,
+        )
     print_summary(
         f"normalize-names resolve-pending ({chunk_idx} chunks, {drained} drained)",
         {"all": aggregate_counts}, mode="applied",
@@ -879,6 +1044,8 @@ def run_map(args: argparse.Namespace) -> int:
         return run_resolve_pending(args)
     if getattr(args, "map_cmd", None) == "review-proposals":
         return run_review_proposals(args)
+    if getattr(args, "map_cmd", None) == "retry-failures":
+        return run_map_retry_failures(args)
     from ingredients.mapping.mapper import MAPPER_VERSION, run_phase1
     if args.review:
         # Eval runs against the fixture taxonomy in eval_fixture.py, so it
@@ -969,6 +1136,9 @@ def run_map(args: argparse.Namespace) -> int:
 def run_normalize_names(args: argparse.Namespace) -> int:
     from ingredients.dedup.db import fetch_pending_canonical_names
     from ingredients.dedup.version import NORMALIZER_VERSION
+
+    if getattr(args, "normalize_cmd", None) == "retry-failures":
+        return run_normalize_names_retry_failures(args)
 
     if getattr(args, "normalize_cmd", None) == "resolve-pending":
         from ingredients.dedup.normalizer_llm import (

@@ -159,3 +159,70 @@ def fetch_pending_llm_names(
         sql += " limit %s"
         params.append(limit)
     return [row[0] for row in conn.execute(sql, params).fetchall()]
+
+
+def park_attempted_names(
+    conn: psycopg.Connection, *, mapper_version: str, names: list[str],
+) -> int:
+    """Flip recipe_ingredients rows from 'pending_llm' to
+    'pending_llm_tried' for the given mapper_version, restricted to rows
+    whose normalized name is in `names`. Caller commits.
+
+    Used by the chunked Phase-2 drain after each chunk's ingest: names
+    that did not get a clearing action ('chose' or 'abstain') stay at
+    'pending_llm' and would otherwise re-appear in the next chunk's
+    fetch_pending_llm_names. Parking them excludes them from the queue
+    until a version bump or `map retry-failures` resurrects them.
+
+    Returns rowcount (informational; can be > len(names) when one name
+    has many recipe_ingredients rows)."""
+    if not names:
+        return 0
+    cur = conn.execute(
+        """
+        update recipe_ingredients
+           set mapper_source = 'pending_llm_tried'
+         where mapper_version = %s
+           and mapper_source  = 'pending_llm'
+           and lower(trim(name)) = any(%s::text[])
+        """,
+        (mapper_version, names),
+    )
+    return cur.rowcount
+
+
+def unpark_failures(
+    conn: psycopg.Connection, *, mapper_version: str, limit: int | None = None,
+) -> int:
+    """Flip 'pending_llm_tried' rows at the given mapper_version back to
+    'pending_llm' so the next `map resolve-pending` re-submits them.
+    Caller commits.
+
+    With `limit=N`, flips at most N rows (selected by id, no ordering
+    guarantees beyond Postgres's default). Without `limit`, flips
+    everything at the version. Returns rowcount."""
+    if limit is None:
+        cur = conn.execute(
+            """
+            update recipe_ingredients
+               set mapper_source = 'pending_llm'
+             where mapper_version = %s
+               and mapper_source  = 'pending_llm_tried'
+            """,
+            (mapper_version,),
+        )
+    else:
+        cur = conn.execute(
+            """
+            update recipe_ingredients
+               set mapper_source = 'pending_llm'
+             where id in (
+                 select id from recipe_ingredients
+                  where mapper_version = %s
+                    and mapper_source  = 'pending_llm_tried'
+                  limit %s
+             )
+            """,
+            (mapper_version, limit),
+        )
+    return cur.rowcount
