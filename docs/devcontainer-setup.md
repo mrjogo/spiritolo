@@ -6,9 +6,9 @@
 ## Startup Lifecycle
 
 ```
-1. initializeCommand/       HOST      — sets up SSH agent socket symlink
+1. initializeCommand/       HOST      — captures host paths, GH token, SSH agent
 2. Dockerfile               build     — installs tmux, Claude Code, .inputrc
-3. devcontainer.json         start     — mounts ~/.claude, sets env (incl. HOST_HOME, HOST_PROJECT_DIR)
+3. devcontainer.json         start     — mounts ~/.claude, sets env
 4. postCreateCommand/        container — bridges Claude Code paths
 ```
 
@@ -18,9 +18,11 @@ Lifecycle hooks use the devcontainer **object format** — each mixin adds a nam
 
 ### initializeCommand/capture-claude-env.sh (host)
 
-Creates a stable symlink named `devcontainer-ssh-agent.sock` pointing to the SSH agent socket. On macOS, the symlink is created inside Docker Desktop's LinuxKit VM at `/run/` (pointing to the VM's SSH agent relay). On Linux, it's created in `$XDG_RUNTIME_DIR` (pointing to `$SSH_AUTH_SOCK`). The devcontainer.json mount source uses `${localEnv:XDG_RUNTIME_DIR:/run}` to resolve the right path per platform.
+Writes `.devcontainer/.env.devcontainer` (gitignored) with:
+- `HOST_PROJECT_DIR` — needed because Claude Code keys history by absolute path, and the host path differs from the container path
+- `GH_TOKEN` — forwarded from `gh auth token` so `gh` works inside the container without re-auth
 
-`HOST_HOME` and `HOST_PROJECT_DIR` (used by `setup-claude-code.sh` for path bridging) are passed via `containerEnv` in `devcontainer.json` using `${localEnv:HOME}` and `${localWorkspaceFolder}`, not via this script — so they work even in runtimes (like DevPod) that don't reliably honor `initializeCommand` before container creation.
+Creates a stable symlink named `devcontainer-ssh-agent.sock` pointing to the SSH agent socket. On macOS, the symlink is created inside Docker Desktop's LinuxKit VM at `/run/` (pointing to the VM's SSH agent relay). On Linux, it's created in `$XDG_RUNTIME_DIR` (pointing to `$SSH_AUTH_SOCK`). The devcontainer.json mount source uses `${localEnv:XDG_RUNTIME_DIR:/run}` to resolve the right path per platform.
 
 ### Dockerfile
 
@@ -31,7 +33,7 @@ Creates a stable symlink named `devcontainer-ssh-agent.sock` pointing to the SSH
 ### devcontainer.json
 
 - Mounts `~/.claude` (shared config/history/plugins) and the host SSH agent socket (via the stable symlink)
-- Sets `CLAUDE_CONFIG_DIR`, `HOST_HOME`, `HOST_PROJECT_DIR`, `SSH_AUTH_SOCK`, `CLAUDE_NOTIFY_HOST`, and `PATH`
+- Sets `CLAUDE_CONFIG_DIR`, `HOST_HOME`, `SSH_AUTH_SOCK`, `CLAUDE_NOTIFY_HOST`, and `PATH`
 - Installs GitHub CLI and the Claude Code VS Code extension
 
 ### postCreateCommand/setup-claude-code.sh (container)
@@ -107,7 +109,7 @@ In devcontainers, the `CLAUDE_NOTIFY_HOST` env var is set to `host.docker.intern
 
 ## Troubleshooting
 
-- **No conversation history:** check `HOST_PROJECT_DIR` is set inside the container (`echo $HOST_PROJECT_DIR`); it should equal the host-side absolute path of the workspace folder
+- **No conversation history:** check `.devcontainer/.env.devcontainer` exists and contains `HOST_PROJECT_DIR`
 - **"exists as a real directory" error:** remove the directory manually as the error suggests, rebuild
-- **`gh` fails:** ensure `GH_TOKEN` is exported on the host (e.g., via `.zshrc` or `launchctl setenv`); the container reads it via `${localEnv:GH_TOKEN}` in `containerEnv`
+- **`gh` fails:** run `gh auth login` on host before starting container
 - **Claude Code not found:** check `~/.local/bin` is on PATH

@@ -1,10 +1,23 @@
 #!/bin/bash
 # [repo-mixin:devcontainer-claude] Host-side initialization script.
 # Runs on the HOST before the container starts (via initializeCommand).
-# Sets up the SSH agent socket symlink that devcontainer.json mounts into the container.
-# HOST_HOME and HOST_PROJECT_DIR are passed via containerEnv (localEnv:HOME and
-# localWorkspaceFolder), so this script no longer writes an env file.
+# Captures host-side state that the container needs for path bridging and auth.
 set -e
+
+# Build env file for the container (passed via runArgs --env-file).
+# This file is gitignored. It captures values that only exist on the host.
+ENV_FILE=".devcontainer/.env.devcontainer"
+: > "$ENV_FILE"
+
+# Capture host project directory for Claude Code history path bridging.
+# Claude keys conversation history by absolute path, which differs between host and container.
+echo "HOST_PROJECT_DIR=$PWD" >> "$ENV_FILE"
+
+# Forward GitHub CLI auth token into the container.
+# gh reads GH_TOKEN natively — no login step needed inside the container.
+if command -v gh &>/dev/null && gh auth status &>/dev/null 2>&1; then
+    echo "GH_TOKEN=$(gh auth token 2>/dev/null)" >> "$ENV_FILE"
+fi
 
 # Forward the host's SSH agent socket into a stable location for devcontainer.json to mount.
 # The mount source uses ${localEnv:XDG_RUNTIME_DIR:/run}/devcontainer-ssh-agent.sock:

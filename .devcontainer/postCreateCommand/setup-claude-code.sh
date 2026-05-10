@@ -5,7 +5,7 @@
 # this script creates symlinks so Claude finds the right history inside the container.
 # Also bridges plugin paths that reference the host home directory.
 #
-# Requires: HOST_HOME and HOST_PROJECT_DIR env vars (set via containerEnv in devcontainer.json).
+# Requires: HOST_HOME env var and HOST_PROJECT_DIR from .env.devcontainer.
 set -e
 
 # Path mangling — Claude Code converts /foo/bar to -foo-bar for directory names
