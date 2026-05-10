@@ -35,6 +35,7 @@ log = logging.getLogger("common.llm.batch_runner")
 class BatchSubmitOutcome:
     submission: BatchSubmission
     sidecar_path: Path
+    submitted_names: tuple[str, ...] = ()  # row identities sent in this batch
 
 
 def submit_batch(
@@ -65,7 +66,10 @@ def submit_batch(
         request_map=request_map,
     )
     path = write_sidecar(sc, batches_dir=batches_dir)
-    return BatchSubmitOutcome(submission=submission, sidecar_path=path)
+    return BatchSubmitOutcome(
+        submission=submission, sidecar_path=path,
+        submitted_names=tuple(request_map.values()),
+    )
 
 
 def ingest_batch(

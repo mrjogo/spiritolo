@@ -52,6 +52,29 @@ def test_submit_writes_sidecar_with_request_map(tmp_path):
     assert sc.flow == "mapping.resolve_pending"
 
 
+def test_submit_batch_returns_submitted_names(tmp_path):
+    """BatchSubmitOutcome.submitted_names exposes row IDs in submit order
+    so the caller can drive post-ingest bookkeeping (e.g. parking
+    failures) without re-loading the sidecar."""
+    rows = [("alpha", "sys", "u1"), ("beta", "sys", "u2"), ("gamma", "sys", "u3")]
+    provider = _stub_provider()
+    provider.submit.return_value = BatchSubmission(
+        batch_id="batch_abc", provider="openai",
+        model_id="gpt-5-mini", request_count=3,
+    )
+    outcome = submit_batch(
+        provider=provider, rows=rows,
+        to_request=lambda i, r: BatchRequest(
+            custom_id=f"r{i}", system_prompt=r[1], user_prompt=r[2],
+        ),
+        row_to_id=lambda r: r[0],
+        flow="test_flow",
+        version_constant="vtest",
+        batches_dir=tmp_path,
+    )
+    assert outcome.submitted_names == ("alpha", "beta", "gamma")
+
+
 def test_ingest_dispatches_to_callbacks_and_marks_sidecar(tmp_path):
     # Set up a sidecar from a prior submit.
     provider = _stub_provider()
