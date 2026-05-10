@@ -1,8 +1,8 @@
 # devcontainer-python-uv mixin
 
 Applied from: https://github.com/mrjogo/repo-mixin/tree/main/mixins/devcontainer-python-uv
-Applied commit: 0b97f52ad7efad619bee341ff2d83f0a24a46fc4
-Applied: 2026-04-18
+Applied commit: 56d6d32dfacb61a3c58306653e64234023e52b6c
+Applied: 2026-05-09
 
 ## What this does
 
