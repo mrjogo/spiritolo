@@ -121,3 +121,106 @@ def test_ingest_rolls_back_on_writer_error(tmp_path, monkeypatch):
     assert counts["ok"] == 2
     assert counts["writer_error"] == 1
     assert conn.rollback.call_count == 1
+
+
+def test_dedup_drain_parks_stuck_names(tmp_path, monkeypatch):
+    """Dedup version of the mapping parking test: a chunk that leaves a name at
+    pending_llm (here, via a parse failure — unrecognized action string) parks
+    it so the next iteration's queue is empty and the drain terminates.
+
+    Without the parking fix, _drain_dedup_in_chunks would loop forever because
+    'stuck drink' stays at pending_llm and reappears on every fetch."""
+    from ingredients.cli import _drain_dedup_in_chunks
+    from common.llm.batch_provider import BatchResult, BatchStatus, BatchSubmission
+    from unittest.mock import MagicMock
+
+    pending = ["good drink", "stuck drink"]
+    parked: list[str] = []
+
+    def _fetch(conn, normalizer_version, limit=None):
+        # Simulates the actual queue: excludes parked names.
+        live = [n for n in pending if n not in parked]
+        return live[:limit] if limit else list(live)
+
+    monkeypatch.setattr(
+        "ingredients.dedup.normalizer_llm.fetch_pending_canonical_names", _fetch,
+    )
+    monkeypatch.setattr(
+        "ingredients.dedup.db.fetch_pending_canonical_names", _fetch,
+    )
+    monkeypatch.setattr(
+        "ingredients.dedup.normalizer_llm.lexical_candidates",
+        lambda conn, normalized, limit=20: [],
+    )
+
+    def _write_normalization(conn, raw_name, normalized, canonical_name, source, normalizer_version):
+        if raw_name in pending:
+            pending.remove(raw_name)
+    monkeypatch.setattr(
+        "ingredients.dedup.normalizer_llm.write_normalization",
+        _write_normalization,
+    )
+
+    def _park(conn, normalizer_version, names):
+        for n in names:
+            if n in pending and n not in parked:
+                parked.append(n)
+        return len(names)
+    monkeypatch.setattr(
+        "ingredients.dedup.db.park_attempted_names", _park,
+    )
+
+    submit_calls: list[int] = []
+
+    def _submit(requests):
+        reqs = list(requests)
+        submit_calls.append(len(reqs))
+        return BatchSubmission(
+            batch_id=f"b{len(submit_calls)}", provider="openai",
+            model_id="gpt-5-mini", request_count=len(reqs),
+        )
+
+    provider = MagicMock()
+    provider.model_id = "gpt-5-mini"
+    provider.submit.side_effect = _submit
+    provider.status.side_effect = lambda bid: BatchStatus(
+        batch_id=bid, state="completed", completed=2, total=2,
+    )
+
+    from common.llm.sidecar import load_sidecar
+
+    def _fetch_results(batch_id):
+        sc = load_sidecar(batch_id, batches_dir=tmp_path)
+        out = []
+        for cid, raw in sc.request_map.items():
+            if raw == "good drink":
+                out.append(BatchResult(
+                    custom_id=cid,
+                    raw_text='{"action": "chose", "canonical_name": "Good Drink"}',
+                    error=None,
+                ))
+            else:
+                # "noop" is not in parse_response's allowed set; raises ValueError,
+                # caught by the except-Exception in on_result, which returns without
+                # writing — leaving the row at pending_llm. This is the stuck path
+                # that parking is designed to fix.
+                out.append(BatchResult(
+                    custom_id=cid,
+                    raw_text='{"action": "noop"}',
+                    error=None,
+                ))
+        return iter(out)
+
+    provider.fetch_results.side_effect = _fetch_results
+
+    db = MagicMock()
+    db.conn = MagicMock()
+    rc = _drain_dedup_in_chunks(
+        db, provider, tmp_path,
+        chunk_size=10, total_limit=None, poll_interval=0,
+    )
+    assert rc == 0
+    # Exactly one chunk submitted (the second iteration's queue is empty
+    # because "stuck drink" was parked, not re-fetched endlessly).
+    assert submit_calls == [2]
+    assert parked == ["stuck drink"]
