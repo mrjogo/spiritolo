@@ -19,7 +19,7 @@ export const NODE_KIND_OPTIONS = ['brand', 'expression'] as const;
 const slugSchema = z
   .string()
   .min(1, 'slug required')
-  .regex(/^[a-z0-9_]+$/, 'slug must be lowercase letters, digits, underscores');
+  .regex(/^[a-z0-9][a-z0-9-]*$/, 'slug must be kebab-case (lowercase letters, digits, dashes; must start with a letter or digit)');
 
 const displayNameSchema = z.string().min(1, 'display name required');
 const aliasArraySchema = z.array(z.string().min(1));
@@ -55,6 +55,6 @@ export const setNodeParentsSchema = z.object({
 export function deriveSlug(displayName: string): string {
   return displayName
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '_')
-    .replace(/^_+|_+$/g, '');
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
 }

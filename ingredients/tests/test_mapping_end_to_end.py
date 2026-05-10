@@ -56,12 +56,12 @@ def test_full_pipeline_against_fixture(fixture_taxonomy):
 
     provider = StubProvider({
         "bombay sapphire": (
-            '{"action": "propose_brand", "slug": "bombay_sapphire", '
-            '"display_name": "Bombay Sapphire", "parent_slug": "london_dry_gin", '
+            '{"action": "propose_brand", "slug": "bombay-sapphire", '
+            '"display_name": "Bombay Sapphire", "parent_slug": "london-dry-gin", '
             '"node_kind": "brand"}'
         ),
         "lemon zest": (
-            '{"action": "propose_form", "slug": "lemon_zest", '
+            '{"action": "propose_form", "slug": "lemon-zest", '
             '"display_name": "Lemon Zest", "parent_slug": "lemon"}'
         ),
         "mystery spirit": '{"action": "abstain"}',
@@ -83,7 +83,7 @@ def test_full_pipeline_against_fixture(fixture_taxonomy):
 
     # Auto-created brand exists with provenance.
     new_node = conn.execute(
-        "select id from taxonomy_nodes where slug = 'bombay_sapphire'"
+        "select id from taxonomy_nodes where slug = 'bombay-sapphire'"
     ).fetchone()
     assert new_node is not None
     prov = conn.execute(

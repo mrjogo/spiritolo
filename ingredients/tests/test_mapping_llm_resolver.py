@@ -66,14 +66,14 @@ def test_resolver_auto_creates_brand_with_existing_parent(fixture_taxonomy):
     _seed_pending(conn, ["bombay sapphire"])
     provider = StubProvider({
         "bombay sapphire": (
-            '{"action": "propose_brand", "slug": "bombay_sapphire", '
-            '"display_name": "Bombay Sapphire", "parent_slug": "london_dry_gin", '
+            '{"action": "propose_brand", "slug": "bombay-sapphire", '
+            '"display_name": "Bombay Sapphire", "parent_slug": "london-dry-gin", '
             '"node_kind": "brand"}'
         ),
     })
     summary = run_phase2(conn, provider=provider)
     new_node = conn.execute(
-        "select id, node_kind from taxonomy_nodes where slug = 'bombay_sapphire'"
+        "select id, node_kind from taxonomy_nodes where slug = 'bombay-sapphire'"
     ).fetchone()
     assert new_node is not None
     new_id, new_node_kind = new_node
@@ -83,7 +83,7 @@ def test_resolver_auto_creates_brand_with_existing_parent(fixture_taxonomy):
     parent_id_row = conn.execute(
         "select parent_id from taxonomy_edges where child_id = %s", (new_id,),
     ).fetchone()
-    assert parent_id_row[0] == ids["london_dry_gin"]
+    assert parent_id_row[0] == ids["london-dry-gin"]
 
     # Provenance row written.
     prov = conn.execute(
@@ -109,13 +109,13 @@ def test_resolver_idempotent_when_two_rows_propose_same_brand_slug(fixture_taxon
     _seed_pending(conn, ["bombay sapphire", "bombay sapphire gin"])
     provider = StubProvider({
         "bombay sapphire": (
-            '{"action": "propose_brand", "slug": "bombay_sapphire", '
-            '"display_name": "Bombay Sapphire", "parent_slug": "london_dry_gin", '
+            '{"action": "propose_brand", "slug": "bombay-sapphire", '
+            '"display_name": "Bombay Sapphire", "parent_slug": "london-dry-gin", '
             '"node_kind": "brand"}'
         ),
         "bombay sapphire gin": (
-            '{"action": "propose_brand", "slug": "bombay_sapphire", '
-            '"display_name": "Bombay Sapphire", "parent_slug": "london_dry_gin", '
+            '{"action": "propose_brand", "slug": "bombay-sapphire", '
+            '"display_name": "Bombay Sapphire", "parent_slug": "london-dry-gin", '
             '"node_kind": "brand"}'
         ),
     })
@@ -123,7 +123,7 @@ def test_resolver_idempotent_when_two_rows_propose_same_brand_slug(fixture_taxon
 
     # Exactly one node was created; both rows resolved to it.
     nodes = conn.execute(
-        "select id from taxonomy_nodes where slug = 'bombay_sapphire'"
+        "select id from taxonomy_nodes where slug = 'bombay-sapphire'"
     ).fetchall()
     assert len(nodes) == 1
     new_id = nodes[0][0]
@@ -174,7 +174,7 @@ def test_resolver_enqueues_form_proposal_and_marks_pending(fixture_taxonomy):
     _seed_pending(conn, ["lemon zest"])
     provider = StubProvider({
         "lemon zest": (
-            '{"action": "propose_form", "slug": "lemon_zest", '
+            '{"action": "propose_form", "slug": "lemon-zest", '
             '"display_name": "Lemon Zest", "parent_slug": "lemon"}'
         ),
     })
@@ -189,7 +189,7 @@ def test_resolver_enqueues_form_proposal_and_marks_pending(fixture_taxonomy):
     proposals = conn.execute(
         "select raw_string, proposed_slug, proposed_parent_id, status from taxonomy_proposals"
     ).fetchall()
-    assert proposals == [("lemon zest", "lemon_zest", ids["lemon"], "pending")]
+    assert proposals == [("lemon zest", "lemon-zest", ids["lemon"], "pending")]
     assert summary == {"propose_form": 1}
 
 
@@ -278,7 +278,7 @@ def test_brand_auto_create_rolls_back_if_resolution_fails(fixture_taxonomy, monk
     provider = StubProvider({
         "beefeater": (
             '{"action": "propose_brand", "slug": "beefeater", '
-            '"display_name": "Beefeater", "parent_slug": "london_dry_gin", '
+            '"display_name": "Beefeater", "parent_slug": "london-dry-gin", '
             '"node_kind": "brand"}'
         ),
     })

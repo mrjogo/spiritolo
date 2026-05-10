@@ -20,13 +20,13 @@ describe('CreateChildModal', () => {
     const dn = screen.getByLabelText(/display name/i);
     await user.type(dn, 'Aperol Spritz');
     const slug = screen.getByLabelText(/^slug/i) as HTMLInputElement;
-    expect(slug.value).toBe('aperol_spritz');
+    expect(slug.value).toBe('aperol-spritz');
     // Touch the slug — auto-derive should stop.
     await user.clear(slug);
-    await user.type(slug, 'aperol_spritz_v2');
+    await user.type(slug, 'aperol-spritz-v2');
     await user.clear(dn);
     await user.type(dn, 'Other Name');
-    expect(slug.value).toBe('aperol_spritz_v2');
+    expect(slug.value).toBe('aperol-spritz-v2');
   });
 
   it('rejects empty display_name', async () => {

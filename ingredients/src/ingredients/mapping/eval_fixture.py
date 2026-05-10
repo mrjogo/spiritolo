@@ -4,10 +4,10 @@ Layout (relevant for cascade coverage):
 
     citrus
       └── lemon
-            ├── lemon_juice    [alias: 'lemon juice']
-            └── lemon_wheel
+            ├── lemon-juice    [alias: 'lemon juice']
+            └── lemon-wheel
     gin                        [alias: 'gin', 'london dry gin']
-      └── london_dry_gin
+      └── london-dry-gin
             └── tanqueray      (node_kind=brand, alias: 'tanqueray', 'tanqueray gin')
     bourbon                    [alias: 'bourbon']
 
@@ -27,10 +27,10 @@ def seed(conn: psycopg.Connection) -> dict[str, int]:
     nodes = [
         ("citrus",          "Citrus",          None),
         ("lemon",           "Lemon",           None),
-        ("lemon_juice",     "Lemon Juice",     None),
-        ("lemon_wheel",     "Lemon Wheel",     None),
+        ("lemon-juice",     "Lemon Juice",     None),
+        ("lemon-wheel",     "Lemon Wheel",     None),
         ("gin",             "Gin",             None),
-        ("london_dry_gin",  "London Dry Gin",  None),
+        ("london-dry-gin",  "London Dry Gin",  None),
         ("tanqueray",       "Tanqueray",       "brand"),
         ("bourbon",         "Bourbon",         None),
     ]
@@ -45,10 +45,10 @@ def seed(conn: psycopg.Connection) -> dict[str, int]:
 
     edges = [
         ("citrus",         "lemon"),
-        ("lemon",          "lemon_juice"),
-        ("lemon",          "lemon_wheel"),
-        ("gin",            "london_dry_gin"),
-        ("london_dry_gin", "tanqueray"),
+        ("lemon",          "lemon-juice"),
+        ("lemon",          "lemon-wheel"),
+        ("gin",            "london-dry-gin"),
+        ("london-dry-gin", "tanqueray"),
     ]
     for parent, child in edges:
         conn.execute(
@@ -57,9 +57,9 @@ def seed(conn: psycopg.Connection) -> dict[str, int]:
         )
 
     aliases = [
-        ("lemon juice",      "lemon_juice"),
+        ("lemon juice",      "lemon-juice"),
         ("gin",              "gin"),
-        ("london dry gin",   "london_dry_gin"),
+        ("london dry gin",   "london-dry-gin"),
         ("tanqueray",        "tanqueray"),
         ("tanqueray gin",    "tanqueray"),
         ("bourbon",          "bourbon"),

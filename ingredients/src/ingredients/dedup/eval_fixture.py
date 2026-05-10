@@ -23,48 +23,48 @@ _NODES = [
     ("bitters", "Bitters", None, False, None, False, None),
     # Whiskey subtypes (antichain)
     ("bourbon", "Bourbon", None, True, "base_spirit", False, "whiskey"),
-    ("rye_whiskey", "Rye Whiskey", None, True, "base_spirit", False, "whiskey"),
+    ("rye-whiskey", "Rye Whiskey", None, True, "base_spirit", False, "whiskey"),
     # Gin sub-styles (antichain)
-    ("london_dry_gin", "London Dry Gin", None, True, "base_spirit", False, "gin"),
-    ("old_tom_gin", "Old Tom Gin", None, True, "base_spirit", False, "gin"),
+    ("london-dry-gin", "London Dry Gin", None, True, "base_spirit", False, "gin"),
+    ("old-tom-gin", "Old Tom Gin", None, True, "base_spirit", False, "gin"),
     # Rum subtypes
-    ("white_rum", "White Rum", None, True, "base_spirit", False, "rum"),
+    ("white-rum", "White Rum", None, True, "base_spirit", False, "rum"),
     # Vermouth subtypes (antichain)
-    ("sweet_vermouth", "Sweet Vermouth", None, True, "modifier", False, "vermouth"),
-    ("dry_vermouth", "Dry Vermouth", None, True, "modifier", False, "vermouth"),
+    ("sweet-vermouth", "Sweet Vermouth", None, True, "modifier", False, "vermouth"),
+    ("dry-vermouth", "Dry Vermouth", None, True, "modifier", False, "vermouth"),
     # Amari (antichain — substance-modeled)
     ("campari", "Campari", None, True, "modifier", False, "amaro"),
     ("aperol", "Aperol", None, True, "modifier", False, "amaro"),
     # Bitters (antichain — substance-modeled)
-    ("angostura_bitters", "Angostura Bitters", None, True, "bitters", False, "bitters"),
-    ("peychauds_bitters", "Peychaud's Bitters", None, True, "bitters", False, "bitters"),
-    ("orange_bitters", "Orange Bitters", None, True, "bitters", False, "bitters"),
+    ("angostura-bitters", "Angostura Bitters", None, True, "bitters", False, "bitters"),
+    ("peychauds-bitters", "Peychaud's Bitters", None, True, "bitters", False, "bitters"),
+    ("orange-bitters", "Orange Bitters", None, True, "bitters", False, "bitters"),
     # Citrus juices (antichain)
-    ("lemon_juice", "Lemon Juice", None, True, "citrus", False, None),
-    ("lime_juice", "Lime Juice", None, True, "citrus", False, None),
+    ("lemon-juice", "Lemon Juice", None, True, "citrus", False, None),
+    ("lime-juice", "Lime Juice", None, True, "citrus", False, None),
     # Sweeteners
-    ("simple_syrup", "Simple Syrup", None, True, "sweetener", False, None),
+    ("simple-syrup", "Simple Syrup", None, True, "sweetener", False, None),
     # Dilution + ice
-    ("soda_water", "Soda Water", None, True, "dilution", False, None),
+    ("soda-water", "Soda Water", None, True, "dilution", False, None),
     ("ice", "Ice", None, True, "ice", False, None),
-    # Garnish: one defining (cocktail_onion), one stylistic (lemon_twist)
-    ("cocktail_onion", "Cocktail Onion", None, True, "garnish", True, None),
-    ("lemon_twist", "Lemon Twist", None, False, "garnish", False, None),
+    # Garnish: one defining (cocktail-onion), one stylistic (lemon-twist)
+    ("cocktail-onion", "Cocktail Onion", None, True, "garnish", True, None),
+    ("lemon-twist", "Lemon Twist", None, False, "garnish", False, None),
     # Brand-level (NOT antichain)
-    ("tanqueray", "Tanqueray", "brand", False, None, False, "london_dry_gin"),
-    ("bombay_sapphire", "Bombay Sapphire", "brand", False, None, False, "london_dry_gin"),
+    ("tanqueray", "Tanqueray", "brand", False, None, False, "london-dry-gin"),
+    ("bombay-sapphire", "Bombay Sapphire", "brand", False, None, False, "london-dry-gin"),
 ]
 
 _ALIASES_TAX = [
-    ("rye", "rye_whiskey"),
+    ("rye", "rye-whiskey"),
     ("bourbon whiskey", "bourbon"),
-    ("london dry", "london_dry_gin"),
-    ("rosso vermouth", "sweet_vermouth"),
-    ("italian vermouth", "sweet_vermouth"),
-    ("french vermouth", "dry_vermouth"),
-    ("angostura", "angostura_bitters"),
-    ("peychauds", "peychauds_bitters"),
-    ("peychaud's", "peychauds_bitters"),
+    ("london dry", "london-dry-gin"),
+    ("rosso vermouth", "sweet-vermouth"),
+    ("italian vermouth", "sweet-vermouth"),
+    ("french vermouth", "dry-vermouth"),
+    ("angostura", "angostura-bitters"),
+    ("peychauds", "peychauds-bitters"),
+    ("peychaud's", "peychauds-bitters"),
 ]
 
 _COCKTAIL_ALIASES = [
