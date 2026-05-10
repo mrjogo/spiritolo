@@ -258,6 +258,115 @@ def _make_drain_args(chunk_size: int = 2, limit=None) -> argparse.Namespace:
     )
 
 
+def test_drain_parks_stuck_names(tmp_path, monkeypatch):
+    """A chunk whose ingest leaves a name at pending_llm (e.g. propose_form)
+    parks that name to pending_llm_tried after ingest, so it doesn't appear
+    in the next iteration's fetch_pending_llm_names. The drain then exits."""
+    from ingredients.cli import _drain_mapping_in_chunks
+    from common.llm.batch_provider import BatchResult, BatchStatus, BatchSubmission
+
+    # Two pending names; only "good" gets cleared. "stuck" stays at pending_llm
+    # and must be parked.
+    pending = ["good", "stuck"]
+    parked: list[str] = []
+
+    def _fetch(conn, mapper_version, limit=None):
+        # The fetch query naturally excludes parked names.
+        live = [n for n in pending if n not in parked]
+        return live[:limit] if limit else list(live)
+
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.fetch_pending_llm_names", _fetch,
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.db.fetch_pending_llm_names", _fetch,
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver._candidates_with_parents",
+        lambda c, n: [],
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.lexical_layer.bulk_lexical_candidates",
+        lambda conn, names, limit=20: {n: [] for n in names},
+    )
+
+    # Simulate ingest: "good" gets a chose write (clears it from queue);
+    # "stuck" gets a propose_form (no DB write at all here).
+    def _write_resolution(conn, normalized_name, taxonomy_node_id, source, mapper_version):
+        if normalized_name in pending:
+            pending.remove(normalized_name)
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.write_resolution", _write_resolution,
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver.enqueue_form_proposal",
+        lambda *a, **kw: None,
+    )
+    monkeypatch.setattr(
+        "ingredients.mapping.llm_resolver._lookup_node_by_slug",
+        lambda c, s: 1,
+    )
+
+    # park_attempted_names: record what was parked.
+    def _park(conn, mapper_version, names):
+        for n in names:
+            if n in pending and n not in parked:
+                parked.append(n)
+        return len(names)
+    monkeypatch.setattr(
+        "ingredients.mapping.db.park_attempted_names", _park,
+    )
+
+    submit_calls: list[int] = []
+    def _submit(requests):
+        reqs = list(requests)
+        submit_calls.append(len(reqs))
+        return BatchSubmission(
+            batch_id=f"b{len(submit_calls)}", provider="openai",
+            model_id="gpt-5-mini", request_count=len(reqs),
+        )
+    provider = MagicMock()
+    provider.model_id = "gpt-5-mini"
+    provider.submit.side_effect = _submit
+    provider.status.side_effect = lambda bid: BatchStatus(
+        batch_id=bid, state="completed", completed=2, total=2,
+    )
+
+    from common.llm.sidecar import load_sidecar
+    def _fetch_results(batch_id):
+        sc = load_sidecar(batch_id, batches_dir=tmp_path)
+        # Map the two custom_ids to chose vs propose_form.
+        out = []
+        for cid, name in sc.request_map.items():
+            if name == "good":
+                out.append(BatchResult(
+                    custom_id=cid,
+                    raw_text='{"action": "chose", "node_id": 1}',
+                    error=None,
+                ))
+            else:
+                out.append(BatchResult(
+                    custom_id=cid,
+                    raw_text='{"action": "propose_form", "slug": "x", '
+                             '"display_name": "X", "parent_slug": "p"}',
+                    error=None,
+                ))
+        return iter(out)
+    provider.fetch_results.side_effect = _fetch_results
+
+    db = MagicMock()
+    db.conn = MagicMock()
+    rc = _drain_mapping_in_chunks(
+        db, provider, tmp_path,
+        chunk_size=10, total_limit=None, poll_interval=0,
+    )
+    assert rc == 0
+    # Exactly one chunk submitted (the second iteration finds queue empty
+    # because "stuck" was parked).
+    assert submit_calls == [2]
+    assert parked == ["stuck"]
+
+
 def test_run_all_drains_queue_in_chunks(tmp_path, monkeypatch):
     """--all loops submit→poll→ingest until the pending queue is empty.
 
@@ -331,6 +440,12 @@ def test_run_all_drains_queue_in_chunks(tmp_path, monkeypatch):
             for cid in sc.request_map.keys()
         ])
     provider.fetch_results.side_effect = _fetch_results
+
+    # Parking is a no-op in this test (all names get cleared by chose writes).
+    monkeypatch.setattr(
+        "ingredients.mapping.db.park_attempted_names",
+        lambda conn, mapper_version, names: 0,
+    )
 
     # Run the loop.
     db = MagicMock()
@@ -406,6 +521,12 @@ def test_run_all_retries_on_enqueue_token_limit(tmp_path, monkeypatch):
         ])
     provider.fetch_results.side_effect = _fetch_results
 
+    # Parking is a no-op in this test (all names get cleared by chose writes).
+    monkeypatch.setattr(
+        "ingredients.mapping.db.park_attempted_names",
+        lambda conn, mapper_version, names: 0,
+    )
+
     db = MagicMock()
     db.conn = MagicMock()
     rc = _drain_mapping_in_chunks(
@@ -474,6 +595,12 @@ def test_drain_respects_total_limit(tmp_path, monkeypatch):
         ])
     provider.fetch_results.side_effect = _fetch_results
 
+    # Parking is a no-op in this test (all names get cleared by chose writes).
+    monkeypatch.setattr(
+        "ingredients.mapping.db.park_attempted_names",
+        lambda conn, mapper_version, names: 0,
+    )
+
     db = MagicMock()
     db.conn = MagicMock()
     rc = _drain_mapping_in_chunks(
@@ -540,6 +667,12 @@ def test_drain_chunk_size_capped_by_remaining_limit(tmp_path, monkeypatch):
             for cid in sc.request_map.keys()
         ])
     provider.fetch_results.side_effect = _fetch_results
+
+    # Parking is a no-op in this test (all names get cleared by chose writes).
+    monkeypatch.setattr(
+        "ingredients.mapping.db.park_attempted_names",
+        lambda conn, mapper_version, names: 0,
+    )
 
     db = MagicMock()
     db.conn = MagicMock()
