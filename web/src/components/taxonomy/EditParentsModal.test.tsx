@@ -6,7 +6,7 @@ import type { TaxonomyViewRow } from './shapeData';
 
 function row(id: number, name: string, child_ids: number[] = []): TaxonomyViewRow {
   return {
-    id, slug: name.toLowerCase().replace(/ /g, '_'), display_name: name,
+    id, slug: name.toLowerCase().replace(/ /g, '-'), display_name: name,
     node_kind: null, default_role: null,
     is_cluster_node: false, is_defining_garnish: false,
     parent_ids: [], child_ids, aliases: [], recipe_count: 0,
@@ -16,9 +16,9 @@ function row(id: number, name: string, child_ids: number[] = []): TaxonomyViewRo
 const ROWS = [
   row(1, 'amari'),
   row(42, 'campari', []),
-  row(84, 'bitter_aperitif'),
-  row(312, 'italian_aperitif'),
-  row(208, 'italian_liqueur'),
+  row(84, 'bitter-aperitif'),
+  row(312, 'italian-aperitif'),
+  row(208, 'italian-liqueur'),
   row(319, 'italicus'),
 ];
 
@@ -36,7 +36,7 @@ describe('EditParentsModal', () => {
       />,
     );
     expect(screen.getByText('amari')).toBeInTheDocument();
-    expect(screen.getByText('bitter_aperitif')).toBeInTheDocument();
+    expect(screen.getByText('bitter-aperitif')).toBeInTheDocument();
     expect(screen.getAllByLabelText(/^remove/i)).toHaveLength(2);
   });
 
@@ -63,7 +63,7 @@ describe('EditParentsModal', () => {
     const listbox = screen.getByRole('listbox');
     // Self ('campari', id=42) is filtered out; everything else shows up.
     expect(within(listbox).getByText('amari')).toBeInTheDocument();
-    expect(within(listbox).getByText('italian_aperitif')).toBeInTheDocument();
+    expect(within(listbox).getByText('italian-aperitif')).toBeInTheDocument();
     expect(within(listbox).queryByText('campari')).toBeNull();
   });
 
@@ -77,13 +77,13 @@ describe('EditParentsModal', () => {
     );
     await user.type(screen.getByPlaceholderText(/search/i), 'ital');
     const listbox = screen.getByRole('listbox');
-    expect(within(listbox).getByText('italian_liqueur')).toBeInTheDocument();
+    expect(within(listbox).getByText('italian-liqueur')).toBeInTheDocument();
     expect(within(listbox).getByText('italicus')).toBeInTheDocument();
     expect(within(listbox).queryByText('amari')).toBeNull();
     await user.keyboard('{Enter}');
-    // First alphabetical match (italian_aperitif) is added as a chip; once
+    // First alphabetical match (italian-aperitif) is added as a chip; once
     // selected, it disappears from the list.
-    expect(screen.getByLabelText(/remove italian_aperitif/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/remove italian-aperitif/i)).toBeInTheDocument();
   });
 
   it('hides descendants of the current node from the list (no cycles)', () => {
@@ -102,7 +102,7 @@ describe('EditParentsModal', () => {
       />,
     );
     const listbox = screen.getByRole('listbox');
-    expect(within(listbox).queryByText('italian_aperitif')).toBeNull();
+    expect(within(listbox).queryByText('italian-aperitif')).toBeNull();
   });
 
   it('clicking a list row adds it as a chip', async () => {
@@ -114,8 +114,8 @@ describe('EditParentsModal', () => {
       />,
     );
     const listbox = screen.getByRole('listbox');
-    await user.click(within(listbox).getByText('italian_liqueur'));
-    expect(screen.getByLabelText(/remove italian_liqueur/i)).toBeInTheDocument();
+    await user.click(within(listbox).getByText('italian-liqueur'));
+    expect(screen.getByLabelText(/remove italian-liqueur/i)).toBeInTheDocument();
   });
 
   it('Save calls onSave with the current selection', async () => {
@@ -129,7 +129,7 @@ describe('EditParentsModal', () => {
     );
     await user.click(screen.getByLabelText('remove amari'));
     const listbox = screen.getByRole('listbox');
-    await user.click(within(listbox).getByText('italian_liqueur'));
+    await user.click(within(listbox).getByText('italian-liqueur'));
     await user.click(screen.getByRole('button', { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledWith(42, expect.arrayContaining([84, 208]));
     expect(onSave.mock.calls[0][1]).not.toContain(1);

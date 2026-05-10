@@ -10,10 +10,10 @@ def test_enqueue_writes_pending_row(fixture_taxonomy):
     pid = enqueue_form_proposal(
         conn,
         raw_string="lemon zest",
-        proposed_slug="lemon_zest",
+        proposed_slug="lemon-zest",
         proposed_display_name="Lemon Zest",
         proposed_parent_id=ids["lemon"],
-        candidates=[{"node_id": ids["lemon_wheel"], "display_name": "Lemon Wheel", "similarity": 0.6}],
+        candidates=[{"node_id": ids["lemon-wheel"], "display_name": "Lemon Wheel", "similarity": 0.6}],
         mapper_version="v1",
     )
     row = conn.execute(
@@ -21,19 +21,19 @@ def test_enqueue_writes_pending_row(fixture_taxonomy):
         "from taxonomy_proposals where id = %s",
         (pid,),
     ).fetchone()
-    assert row == ("lemon zest", "lemon_zest", "pending", "Lemon Zest")
+    assert row == ("lemon zest", "lemon-zest", "pending", "Lemon Zest")
 
 
 def test_enqueue_is_idempotent_per_version(fixture_taxonomy):
     conn, ids = fixture_taxonomy
     enqueue_form_proposal(
-        conn, raw_string="lemon zest", proposed_slug="lemon_zest",
+        conn, raw_string="lemon zest", proposed_slug="lemon-zest",
         proposed_display_name="Lemon Zest", proposed_parent_id=ids["lemon"],
         candidates=[], mapper_version="v1",
     )
     # Same string + same version: no duplicate row, returns existing id.
     pid2 = enqueue_form_proposal(
-        conn, raw_string="lemon zest", proposed_slug="lemon_zest",
+        conn, raw_string="lemon zest", proposed_slug="lemon-zest",
         proposed_display_name="Lemon Zest", proposed_parent_id=ids["lemon"],
         candidates=[], mapper_version="v1",
     )
@@ -44,12 +44,12 @@ def test_enqueue_is_idempotent_per_version(fixture_taxonomy):
 def test_fetch_pending_returns_only_pending(fixture_taxonomy):
     conn, ids = fixture_taxonomy
     pid = enqueue_form_proposal(
-        conn, raw_string="lemon zest", proposed_slug="lemon_zest",
+        conn, raw_string="lemon zest", proposed_slug="lemon-zest",
         proposed_display_name="Lemon Zest", proposed_parent_id=ids["lemon"],
         candidates=[], mapper_version="v1",
     )
     enqueue_form_proposal(
-        conn, raw_string="lime oil", proposed_slug="lime_oil",
+        conn, raw_string="lime oil", proposed_slug="lime-oil",
         proposed_display_name="Lime Oil", proposed_parent_id=ids["lemon"],
         candidates=[], mapper_version="v1",
     )

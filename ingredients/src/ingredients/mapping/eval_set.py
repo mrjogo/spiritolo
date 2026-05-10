@@ -33,11 +33,11 @@ class MapperEvalCase:
 EVAL_CASES: list[MapperEvalCase] = [
     # alias hits
     MapperEvalCase("gin",            "oz", "punch", "gin",          "alias"),
-    MapperEvalCase("Lemon Juice",    "oz", "punch", "lemon_juice",  "alias"),
+    MapperEvalCase("Lemon Juice",    "oz", "punch", "lemon-juice",  "alias"),
     MapperEvalCase("tanqueray gin",  "oz", "punch", "tanqueray",    "alias"),
     MapperEvalCase("bourbon",        "oz", "punch", "bourbon",      "alias"),
     # lexical hit (typo)
-    MapperEvalCase("lemon juicee",   "oz", "punch", "lemon_juice",  "lexical"),
+    MapperEvalCase("lemon juicee",   "oz", "punch", "lemon-juice",  "lexical"),
     # ambiguous lexical -> pending_llm
     MapperEvalCase("dry gin",        "oz", "punch", None,           "pending_llm"),
     # off-corpus -> pending_llm (Phase 1 only)

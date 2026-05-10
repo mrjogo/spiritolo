@@ -9,7 +9,7 @@ def test_exact_alias_hit_returns_resolved(fixture_taxonomy):
     conn, ids = fixture_taxonomy
     result = resolve_alias(conn, "lemon juice")
     assert isinstance(result, Resolved)
-    assert result.taxonomy_node_id == ids["lemon_juice"]
+    assert result.taxonomy_node_id == ids["lemon-juice"]
     assert result.source == "alias"
 
 

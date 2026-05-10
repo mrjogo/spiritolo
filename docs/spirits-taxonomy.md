@@ -16,7 +16,7 @@ Three tables, vanilla Postgres, no extensions. Works on Supabase as-is.
 -- One row per concept: a category, a brand, an expression, a fresh ingredient.
 taxonomy_nodes (
   id            bigint PRIMARY KEY,
-  slug          text UNIQUE NOT NULL,         -- 'rye_whiskey', 'lemon', 'buffalo_trace_eagle_rare_10'
+  slug          text UNIQUE NOT NULL,         -- 'rye-whiskey', 'lemon', 'buffalo-trace-eagle-rare-10'
   display_name  text NOT NULL,                -- 'Rye Whiskey'
   node_kind     text CHECK (node_kind IN ('brand', 'expression')),  -- nullable; see Node kinds below
   created_at    timestamptz NOT NULL DEFAULT now()
@@ -70,8 +70,8 @@ it's not a kind.
 
 Add a node when the concept is:
 
-- **Definitional or regulatory** — `whiskey`, `bourbon`, `rye_whiskey`, `london_dry_gin`, `single_malt_scotch`, `vermouth`, `amaro`.
-- **A brand or expression** (`node_kind = 'brand'` / `'expression'`) — `buffalo_trace`, `eagle_rare_10`. Hand-curate the well-known; let the [D] mapper auto-create the long tail when it exists.
+- **Definitional or regulatory** — `whiskey`, `bourbon`, `rye-whiskey`, `london-dry-gin`, `single-malt-scotch`, `vermouth`, `amaro`.
+- **A brand or expression** (`node_kind = 'brand'` / `'expression'`) — `buffalo-trace`, `eagle-rare-10`. Hand-curate the well-known; let the [D] mapper auto-create the long tail when it exists.
 - **A category whose children share substitution semantics** — `citrus` (parent of `lemon`, `lime`), `berries` (parent of `strawberry`, `raspberry`).
 
 ## What does not belong as a node
@@ -93,7 +93,7 @@ An alias is a free-text variant that resolves to a single existing node. Use ali
 
 - **Capitalization or punctuation variants** — `'anejo'` / `'añejo'`, `'peychaud''s'` / `'peychauds'`.
 - **Language variants of one canonical name** — `'rosso vermouth'` / `'italian vermouth'` / `'sweet vermouth'`.
-- **Generic substance terms covered by the brand-as-substance carve-out** — `'aromatic bitters'` → `angostura_bitters` (the cocktail community treats Angostura as the substance, not a brand call).
+- **Generic substance terms covered by the brand-as-substance carve-out** — `'aromatic bitters'` → `angostura-bitters` (the cocktail community treats Angostura as the substance, not a brand call).
 
 Do **not** use aliases for:
 
@@ -103,11 +103,12 @@ Hand-curate the well-known brand and expression nodes in the seed; the [D] mappe
 
 ### Slug naming
 
-- **Brand slug** is the brand or company name in snake_case, always — no suffix: `angostura`, `peychauds`, `fee_brothers`, `bittermens`, `branca`, `nonino`, `campari`, `aperol`, `cynar`.
-- **Expression slug** is the manufacturer's full product name in snake_case when the bottle has a descriptor: `angostura_aromatic_bitters` (not just `angostura_bitters` — Angostura also makes Orange Bitters and Cocoa Bitters), `fee_brothers_west_indian_orange_bitters`, `bittermens_xocolatl_mole_bitters`, `fernet_branca`, `amaro_nonino`. Defensive specificity reserves room for siblings without forcing renames later.
-- **Eponymous expressions (no bottle descriptor).** A few brand-as-substance products are sold with the brand name alone on the bottle (Campari, Aperol, Cynar, Suze, Drambuie, Bénédictine). For these, the expression slug appends the family-parent slug: `campari_amaro`, `aperol_amaro`, `cynar_amaro`, `suze_aperitif`, `drambuie_liqueur`, `benedictine_liqueur`. The brand slug stays clean.
+- **All slugs are kebab-case** (`[a-z0-9][a-z0-9-]*`). The DB enforces this with a CHECK constraint on `taxonomy_nodes.slug` and `taxonomy_proposals.proposed_slug`.
+- **Brand slug** is the brand or company name in kebab-case, always — no suffix: `angostura`, `peychauds`, `fee-brothers`, `bittermens`, `branca`, `nonino`, `campari`, `aperol`, `cynar`.
+- **Expression slug** is the manufacturer's full product name in kebab-case when the bottle has a descriptor: `angostura-aromatic-bitters` (not just `angostura-bitters` — Angostura also makes Orange Bitters and Cocoa Bitters), `fee-brothers-west-indian-orange-bitters`, `bittermens-xocolatl-mole-bitters`, `fernet-branca`, `amaro-nonino`. Defensive specificity reserves room for siblings without forcing renames later.
+- **Eponymous expressions (no bottle descriptor).** A few brand-as-substance products are sold with the brand name alone on the bottle (Campari, Aperol, Cynar, Suze, Drambuie, Bénédictine). For these, the expression slug appends the family-parent slug: `campari-amaro`, `aperol-amaro`, `cynar-amaro`, `suze-aperitif`, `drambuie-liqueur`, `benedictine-liqueur`. The brand slug stays clean.
 - **Display names** follow normal title case and match what the manufacturer prints on the bottle: `Angostura`, `Angostura Aromatic Bitters`, `Peychaud's Bitters`, `Campari`. Brand and expression nodes can share a display name when the bottle calls both by the same name; `node_kind` distinguishes them, and aliases route cocktail-vocabulary text (`'campari'`, `'aperol'`) to the expression (the cluster identity) rather than the brand.
-- Aliases handle cocktail-vocabulary shortcuts (`'angostura'` → `angostura_aromatic_bitters` because cocktail text means that product when it says "angostura"; `'aromatic bitters'` → same, because the recipe community uses the generic interchangeably with the canonical Angostura product).
+- Aliases handle cocktail-vocabulary shortcuts (`'angostura'` → `angostura-aromatic-bitters` because cocktail text means that product when it says "angostura"; `'aromatic bitters'` → same, because the recipe community uses the generic interchangeably with the canonical Angostura product).
 
 ### Brand nodes are top-level
 
@@ -119,7 +120,7 @@ Each expression carries the type parent itself; the brand parent is provenance, 
 
 `taxonomy_nodes.is_cluster_node` marks the cluster-identity cut for the [E] dedup pipeline. **The cut does not have to sit at uniform DAG depth.** Different branches mark different levels.
 
-The default pattern is **type-level cluster**: the substance type carries `is_cluster_node = true` (e.g. `bourbon`, `london_dry_gin`, `orange_bitters`, `creole_bitters`). Brands sit under the family parent or under the type; their expressions get `[brand, type]` as parents so the rollup deterministically lands at the type cluster_node. The variant_key still distinguishes specific brand calls (Tanqueray vs Bombay, Angostura vs Bittercube Aromatic) — it just doesn't shift cluster identity.
+The default pattern is **type-level cluster**: the substance type carries `is_cluster_node = true` (e.g. `bourbon`, `london-dry-gin`, `orange-bitters`, `creole-bitters`). Brands sit under the family parent or under the type; their expressions get `[brand, type]` as parents so the rollup deterministically lands at the type cluster_node. The variant_key still distinguishes specific brand calls (Tanqueray vs Bombay, Angostura vs Bittercube Aromatic) — it just doesn't shift cluster identity.
 
 The exception is **brand-as-substance**: a few commercially-branded products are recognized as their own definitional substance by the cocktail community (Campari, Aperol, Fernet-Branca, Chartreuse, Cynar, Suze, Bénédictine, Drambuie, Pimm's). For these, `is_cluster_node` lives on the **expression** itself. Apply this pattern only when a single brand has no real substitutes in the cocktail vocabulary — when the brand name really means that brand and only that brand, with no broader category that captures the same dedup intent.
 
@@ -129,27 +130,27 @@ Concrete example (the `bitters` family — uniformly type-level):
 
 ```
 bitters (parent, default_role='bitters')
-├── angostura_style_aromatic_bitters (is_cluster_node=true)
-├── orange_bitters (is_cluster_node=true)
-├── chocolate_bitters (is_cluster_node=true)
-└── creole_bitters (is_cluster_node=true)
+├── angostura-style-aromatic-bitters (is_cluster_node=true)
+├── orange-bitters (is_cluster_node=true)
+├── chocolate-bitters (is_cluster_node=true)
+└── creole-bitters (is_cluster_node=true)
 
 (top-level, no parent — brands span categories)
 - angostura          (node_kind='brand')
 - peychauds          (node_kind='brand')
 - regans             (node_kind='brand')
-- fee_brothers       (node_kind='brand')
+- fee-brothers       (node_kind='brand')
 - bittermens         (node_kind='brand')
-- the_bitter_truth   (node_kind='brand')
+- the-bitter-truth   (node_kind='brand')
 
 (expressions: dual-parented [brand, type])
-- angostura_aromatic_bitters              parents: [angostura, angostura_style_aromatic_bitters]
-- angostura_orange_bitters                parents: [angostura, orange_bitters]
-- peychauds_bitters                       parents: [peychauds, creole_bitters]
-- regans_orange_bitters                   parents: [regans, orange_bitters]
-- fee_brothers_west_indian_orange_bitters parents: [fee_brothers, orange_bitters]
-- bittermens_xocolatl_mole_bitters        parents: [bittermens, chocolate_bitters]
-- the_bitter_truth_creole_bitters         parents: [the_bitter_truth, creole_bitters]
+- angostura-aromatic-bitters              parents: [angostura, angostura-style-aromatic-bitters]
+- angostura-orange-bitters                parents: [angostura, orange-bitters]
+- peychauds-bitters                       parents: [peychauds, creole-bitters]
+- regans-orange-bitters                   parents: [regans, orange-bitters]
+- fee-brothers-west-indian-orange-bitters parents: [fee-brothers, orange-bitters]
+- bittermens-xocolatl-mole-bitters        parents: [bittermens, chocolate-bitters]
+- the-bitter-truth-creole-bitters         parents: [the-bitter-truth, creole-bitters]
 ```
 
 Each expression rolls up to its type cluster_node deterministically: the brand parent has no parent (dead-end for cluster search), the type parent is the cluster. The antichain integrity rule prevents the case where two cluster ancestors exist on different paths.

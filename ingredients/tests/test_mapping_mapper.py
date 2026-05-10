@@ -34,7 +34,7 @@ def test_phase1_resolves_alias_lexical_and_marks_pending(fixture_taxonomy):
     ).fetchall()
     assert rows == [
         ("gin",                  ids["gin"],         "alias",       MAPPER_VERSION),
-        ("lemon juicee",         ids["lemon_juice"], "lexical",     MAPPER_VERSION),
+        ("lemon juicee",         ids["lemon-juice"], "lexical",     MAPPER_VERSION),
         ("totally weird thing",  None,               "pending_llm", MAPPER_VERSION),
     ]
     assert summary == {"alias": 1, "lexical": 1, "pending_llm": 1}

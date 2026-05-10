@@ -26,7 +26,7 @@ function renderCard(node: Parameters<typeof NodeCard>[0]['node'], mode: 'pinned'
 }
 
 const node: TaxonomyNode = {
-  id: 1, slug: 'rye_whiskey', display_name: 'Rye Whiskey',
+  id: 1, slug: 'rye-whiskey', display_name: 'Rye Whiskey',
   node_kind: 'expression', default_role: 'modifier',
   is_cluster_node: true, is_defining_garnish: false,
   parent_ids: [10, 11], child_ids: [20, 21],

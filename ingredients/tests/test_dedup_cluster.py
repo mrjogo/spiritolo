@@ -133,9 +133,9 @@ def test_run_cluster_compute_groups_identical_negronis(dedup_fixture, db_conn):
     """)
     for rid in (5001, 5002):
         for pos, slug, amount in (
-            (1, "london_dry_gin",  1.0),
+            (1, "london-dry-gin",  1.0),
             (2, "campari",         1.0),
-            (3, "sweet_vermouth",  1.0),
+            (3, "sweet-vermouth",  1.0),
         ):
             db_conn.execute("""
                 insert into recipe_ingredients
@@ -171,9 +171,9 @@ def test_run_cluster_compute_separates_ratio_variants(dedup_fixture, db_conn):
     """)
     for rid, gin_amt in ((5101, 1.0), (5102, 1.5)):
         for pos, slug, amount in (
-            (1, "london_dry_gin",  gin_amt),
+            (1, "london-dry-gin",  gin_amt),
             (2, "campari",         1.0),
-            (3, "sweet_vermouth",  1.0),
+            (3, "sweet-vermouth",  1.0),
         ):
             db_conn.execute("""
                 insert into recipe_ingredients
@@ -206,9 +206,9 @@ def test_cluster_compute_dry_run_does_not_write(dedup_fixture, db_conn):
         on conflict (source_url) do nothing
     """)
     for pos, slug, amount in (
-        (1, "london_dry_gin", 1.0),
+        (1, "london-dry-gin", 1.0),
         (2, "campari",        1.0),
-        (3, "sweet_vermouth", 1.0),
+        (3, "sweet-vermouth", 1.0),
     ):
         db_conn.execute("""
             insert into recipe_ingredients
@@ -251,9 +251,9 @@ def test_run_cluster_compute_commits_per_batch(dedup_fixture, db_conn, monkeypat
             on conflict (source_url) do nothing
         """, (rid, f"http://x/batch/{rid}"))
         for pos, slug, amount in (
-            (1, "london_dry_gin",  1.0),
+            (1, "london-dry-gin",  1.0),
             (2, "campari",         1.0),
-            (3, "sweet_vermouth",  1.0),
+            (3, "sweet-vermouth",  1.0),
         ):
             db_conn.execute("""
                 insert into recipe_ingredients
@@ -296,9 +296,9 @@ def test_run_cluster_compute_ignores_ice(dedup_fixture, db_conn):
         on conflict (source_url) do nothing
     """)
     base = [
-        (1, "london_dry_gin", 1.0),
+        (1, "london-dry-gin", 1.0),
         (2, "campari",        1.0),
-        (3, "sweet_vermouth", 1.0),
+        (3, "sweet-vermouth", 1.0),
     ]
     for rid, ings in ((5201, base), (5202, base + [(4, "ice", 1.0)])):
         for pos, slug, amount in ings:

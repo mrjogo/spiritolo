@@ -30,7 +30,7 @@ def test_parse_response_chosen_node():
 def test_parse_response_brand_proposal():
     raw = (
         '{"action": "propose_brand", "slug": "tanqueray", '
-        '"display_name": "Tanqueray", "parent_slug": "london_dry_gin", '
+        '"display_name": "Tanqueray", "parent_slug": "london-dry-gin", '
         '"node_kind": "brand"}'
     )
     out = parse_response(raw)
@@ -41,12 +41,12 @@ def test_parse_response_brand_proposal():
 
 def test_parse_response_form_proposal():
     raw = (
-        '{"action": "propose_form", "slug": "lemon_zest", '
+        '{"action": "propose_form", "slug": "lemon-zest", '
         '"display_name": "Lemon Zest", "parent_slug": "lemon"}'
     )
     out = parse_response(raw)
     assert out["action"] == "propose_form"
-    assert out["slug"] == "lemon_zest"
+    assert out["slug"] == "lemon-zest"
 
 
 def test_parse_response_abstain():

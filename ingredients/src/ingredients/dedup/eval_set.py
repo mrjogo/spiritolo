@@ -35,49 +35,49 @@ class DedupEvalCase:
 CASES: list[DedupEvalCase] = [
     DedupEvalCase(
         raw_name="Negroni",
-        ingredients=[("london_dry_gin", 1.0, "oz", 1),
+        ingredients=[("london-dry-gin", 1.0, "oz", 1),
                      ("campari",        1.0, "oz", 2),
-                     ("sweet_vermouth", 1.0, "oz", 3)],
+                     ("sweet-vermouth", 1.0, "oz", 3)],
         expect_canonical="negroni",
         expect_cluster_label="negroni-classic",
     ),
     DedupEvalCase(
         raw_name="The Best Negroni Recipe",
-        ingredients=[("london_dry_gin", 1.0, "oz", 1),
+        ingredients=[("london-dry-gin", 1.0, "oz", 1),
                      ("campari",        1.0, "oz", 2),
-                     ("sweet_vermouth", 1.0, "oz", 3)],
+                     ("sweet-vermouth", 1.0, "oz", 3)],
         expect_canonical="negroni",
         expect_cluster_label="negroni-classic",
     ),
     DedupEvalCase(
         raw_name="Negroni (Italian Aperitivo)",
-        ingredients=[("london_dry_gin", 1.5, "oz", 1),  # different ratio, same cluster
+        ingredients=[("london-dry-gin", 1.5, "oz", 1),  # different ratio, same cluster
                      ("campari",        1.0, "oz", 2),
-                     ("sweet_vermouth", 1.0, "oz", 3)],
+                     ("sweet-vermouth", 1.0, "oz", 3)],
         expect_canonical="negroni",
         expect_cluster_label="negroni-classic",
     ),
     DedupEvalCase(
         raw_name="Aperol Negroni",
-        ingredients=[("london_dry_gin", 1.0, "oz", 1),
+        ingredients=[("london-dry-gin", 1.0, "oz", 1),
                      ("aperol",         1.0, "oz", 2),
-                     ("sweet_vermouth", 1.0, "oz", 3)],
+                     ("sweet-vermouth", 1.0, "oz", 3)],
         expect_canonical="aperol negroni",
         expect_cluster_label="aperol-negroni",  # different cluster from negroni-classic
     ),
     DedupEvalCase(
         raw_name="Old Fashioned",
         ingredients=[("bourbon",            2.0, "oz",   1),
-                     ("simple_syrup",       0.25, "oz",  2),
-                     ("angostura_bitters",  2.0, "dash", 3)],
+                     ("simple-syrup",       0.25, "oz",  2),
+                     ("angostura-bitters",  2.0, "dash", 3)],
         expect_canonical="old fashioned",
         expect_cluster_label="old-fashioned-bourbon",
     ),
     DedupEvalCase(
         raw_name="Rye Old Fashioned",
-        ingredients=[("rye_whiskey",        2.0, "oz",   1),
-                     ("simple_syrup",       0.25, "oz",  2),
-                     ("angostura_bitters",  2.0, "dash", 3)],
+        ingredients=[("rye-whiskey",        2.0, "oz",   1),
+                     ("simple-syrup",       0.25, "oz",  2),
+                     ("angostura-bitters",  2.0, "dash", 3)],
         expect_canonical="old fashioned",  # name still normalizes
         expect_cluster_label="old-fashioned-rye",  # but ingredient set differs
     ),
