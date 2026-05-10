@@ -4,7 +4,6 @@ db_conn fixture; constructs argparse.Namespace by hand to bypass parser."""
 from __future__ import annotations
 
 import argparse
-from unittest.mock import patch
 
 
 def _truncate(conn):
