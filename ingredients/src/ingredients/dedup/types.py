@@ -11,7 +11,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-NormalizerSource = Literal["alias", "lexical", "pending_llm", "llm", "abstain"]
+NormalizerSource = Literal[
+    "alias", "lexical", "pending_llm", "pending_llm_tried", "llm", "abstain",
+]
 
 
 @dataclass(frozen=True)

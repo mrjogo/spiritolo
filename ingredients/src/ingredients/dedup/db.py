@@ -178,6 +178,72 @@ def write_normalize_abstain(
     return cur.rowcount
 
 
+def park_attempted_names(
+    conn: psycopg.Connection, *, normalizer_version: str, names: list[str],
+) -> int:
+    """Flip recipes rows from 'pending_llm' to 'pending_llm_tried' for the
+    given normalizer_version, restricted to rows whose name is in `names`.
+    Caller commits.
+
+    Used by the chunked Phase-2 drain after each chunk's ingest: names
+    that did not get a clearing action stay at 'pending_llm' and would
+    otherwise re-appear in the next chunk's fetch_pending_canonical_names.
+    Parking them excludes them from the queue until a version bump or
+    `normalize-names retry-failures` resurrects them.
+
+    Returns rowcount. Empty `names` is a no-op returning 0."""
+    if not names:
+        return 0
+    cur = conn.execute(
+        """
+        update recipes
+           set canonical_name_source = 'pending_llm_tried'
+         where normalizer_version = %s
+           and canonical_name_source = 'pending_llm'
+           and name = any(%s::text[])
+        """,
+        (normalizer_version, names),
+    )
+    return cur.rowcount
+
+
+def unpark_failures(
+    conn: psycopg.Connection, *, normalizer_version: str, limit: int | None = None,
+) -> int:
+    """Flip 'pending_llm_tried' rows at the given normalizer_version back to
+    'pending_llm' so the next `normalize-names resolve-pending` re-submits them.
+    Caller commits.
+
+    With `limit=N`, flips at most N rows (selected by id, no ordering
+    guarantees beyond Postgres's default). Without `limit`, flips
+    everything at the version. Returns rowcount."""
+    if limit is None:
+        cur = conn.execute(
+            """
+            update recipes
+               set canonical_name_source = 'pending_llm'
+             where normalizer_version = %s
+               and canonical_name_source = 'pending_llm_tried'
+            """,
+            (normalizer_version,),
+        )
+    else:
+        cur = conn.execute(
+            """
+            update recipes
+               set canonical_name_source = 'pending_llm'
+             where id in (
+                 select id from recipes
+                  where normalizer_version = %s
+                    and canonical_name_source = 'pending_llm_tried'
+                  limit %s
+             )
+            """,
+            (normalizer_version, limit),
+        )
+    return cur.rowcount
+
+
 def add_cocktail_alias(
     conn: psycopg.Connection, *, alias: str, canonical_name: str,
     source: str = "llm",
