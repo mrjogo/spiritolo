@@ -19,6 +19,20 @@
   --tx-expression: #3a6b6e;
   --tx-brand: #7a9a82;
 
+  /* ── Form kit ──────────────────────────────────────────────────────────
+     One height, one border colour, one focus colour. Inputs, selects,
+     toggles, and buttons all consume these tokens so a row of mixed
+     controls reads as a single band. */
+  --tx-form-h: 36px;
+  --tx-form-radius: 3px;
+  --tx-form-border: var(--tx-frame-edge);          /* #8a6a35 */
+  --tx-form-border-focus: var(--tx-gold);          /* #c9a449 */
+  --tx-form-bg: rgba(255, 252, 244, 0.92);
+  --tx-form-bg-hover: rgba(255, 252, 244, 1);
+  --tx-form-disabled-fg: rgba(74, 44, 15, 0.45);
+  --tx-focus-ring: 0 0 0 2px rgba(201, 164, 73, 0.30);
+  --tx-danger: #a8503e;
+
   font-family: 'Cormorant Garamond', Georgia, serif;
   color: var(--tx-ivory);
   background: radial-gradient(
@@ -164,6 +178,23 @@
   color: var(--tx-brown-faint);
 }
 
+/* Inline link inside the cream card. Reads as a navigable link without the
+   stark blue browser default — color matches the card's ink, hover reveals
+   a gold underline. Used for parent/child entries in NodeCard. */
+.tx-link {
+  color: var(--tx-brown-ink);
+  text-decoration: underline;
+  text-decoration-color: rgba(122, 85, 32, 0.4);
+  text-underline-offset: 2px;
+  transition: color 120ms ease, text-decoration-color 120ms ease;
+}
+.tx-link:hover,
+.tx-link:focus-visible {
+  color: var(--tx-brown-mid);
+  text-decoration-color: var(--tx-gold);
+  outline: none;
+}
+
 .tx-rule {
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--tx-gold) 20%, var(--tx-gold) 80%, transparent);
@@ -176,4 +207,353 @@
   border-bottom-color: var(--tx-gold);
   border-bottom-width: 2px;
   padding-bottom: 1px;
+}
+
+/* ── CreateChildModal ──────────────────────────────────────────────────── */
+.tx-modal {
+  background: linear-gradient(180deg, #f8f0d8 0%, #efe2bf 100%);
+  border: 1px solid var(--tx-frame-edge, #8b6f3a);
+  padding: 22px 24px;
+  border-radius: 4px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6);
+  max-width: 400px;
+  width: calc(100vw - 48px);
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  color: var(--tx-brown-ink, #4a2c0f);
+}
+.tx-modal__title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 18px;
+  font-weight: 600;
+  margin: 0 0 4px;
+}
+.tx-modal__subtitle {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  opacity: 0.7;
+  margin-bottom: 12px;
+}
+.tx-modal__label {
+  display: block;
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  opacity: 0.7;
+  margin-bottom: 2px;
+}
+.tx-modal__error {
+  font-size: 10px;
+  font-style: italic;
+  color: var(--tx-danger);
+  margin-top: 2px;
+}
+
+/* ── Form kit ──────────────────────────────────────────────────────────── */
+
+/* Text-like inputs. All share height, border, focus ring. */
+.tx-input {
+  width: 100%;
+  height: var(--tx-form-h);
+  padding: 0 12px;
+  border: 1px solid var(--tx-form-border);
+  border-radius: var(--tx-form-radius);
+  background: var(--tx-form-bg);
+  color: var(--tx-brown-ink);
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 14px;
+  line-height: 1;
+  transition: border-color 100ms ease, box-shadow 100ms ease, background 100ms ease;
+}
+.tx-input::placeholder {
+  color: var(--tx-brown-faint);
+  font-style: italic;
+  opacity: 0.7;
+}
+.tx-input:hover { background: var(--tx-form-bg-hover); }
+.tx-input:focus {
+  outline: none;
+  border-color: var(--tx-form-border-focus);
+  box-shadow: var(--tx-focus-ring);
+}
+.tx-input:disabled {
+  color: var(--tx-form-disabled-fg);
+  cursor: not-allowed;
+}
+.tx-input--invalid,
+.tx-input[aria-invalid="true"] {
+  border-color: var(--tx-danger);
+}
+
+/* Native <select> restyled to match: appearance:none + inline gold chevron. */
+.tx-select {
+  width: 100%;
+  height: var(--tx-form-h);
+  padding: 0 32px 0 12px;
+  border: 1px solid var(--tx-form-border);
+  border-radius: var(--tx-form-radius);
+  background-color: var(--tx-form-bg);
+  color: var(--tx-brown-ink);
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 14px;
+  line-height: 1;
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238a6a35' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  cursor: pointer;
+  transition: border-color 100ms ease, box-shadow 100ms ease, background-color 100ms ease;
+}
+.tx-select:hover { background-color: var(--tx-form-bg-hover); }
+.tx-select:focus {
+  outline: none;
+  border-color: var(--tx-form-border-focus);
+  box-shadow: var(--tx-focus-ring);
+}
+
+/* Toggle: a button whose hit-target hugs the form-control row. */
+.tx-toggle {
+  height: var(--tx-form-h);
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px 0 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--tx-brown-ink);
+  font-family: 'Cinzel', serif;
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  border-radius: var(--tx-form-radius);
+}
+.tx-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--tx-focus-ring);
+}
+.tx-toggle:disabled { opacity: 0.5; cursor: not-allowed; }
+.tx-toggle__track {
+  position: relative;
+  width: 30px;
+  height: 16px;
+  border-radius: 8px;
+  background: #d4c8a8;
+  border: 1px solid var(--tx-form-border);
+  flex-shrink: 0;
+  transition: background 120ms ease;
+}
+.tx-toggle[aria-checked="true"] .tx-toggle__track {
+  background: var(--tx-gold);
+}
+.tx-toggle__thumb {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--tx-cream);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+  transition: left 120ms ease;
+}
+.tx-toggle[aria-checked="true"] .tx-toggle__thumb { left: 16px; }
+
+/* Buttons. Always typed by role; never default browser chrome. */
+.tx-btn {
+  height: var(--tx-form-h);
+  padding: 0 18px;
+  border-radius: var(--tx-form-radius);
+  border: 1px solid var(--tx-form-border);
+  font-family: 'Cinzel', serif;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 100ms ease, color 100ms ease, border-color 100ms ease, box-shadow 100ms ease;
+  user-select: none;
+}
+.tx-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--tx-focus-ring);
+}
+.tx-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.tx-btn--primary {
+  background: var(--tx-gold);
+  color: var(--tx-walnut-deep);
+  border-color: var(--tx-form-border);
+}
+.tx-btn--primary:not(:disabled):hover {
+  background: var(--tx-gold-bright);
+}
+
+.tx-btn--ghost {
+  background: transparent;
+  color: var(--tx-brown-ink);
+}
+.tx-btn--ghost:not(:disabled):hover {
+  background: rgba(138, 106, 53, 0.10);
+}
+
+.tx-btn--danger {
+  background: transparent;
+  color: var(--tx-danger);
+  border-color: var(--tx-danger);
+}
+.tx-btn--danger:not(:disabled):hover {
+  background: var(--tx-danger);
+  color: var(--tx-cream);
+}
+
+/* Compact button — same role/colour, shorter row. Used inside lists. */
+.tx-btn--sm {
+  height: 24px;
+  padding: 0 10px;
+  font-size: 10px;
+  letter-spacing: 0.15em;
+}
+
+/* Icon-only button: round, transparent until focus/hover. Used for
+   per-row × / ↩ controls in EditParentsModal and modal close buttons. */
+.tx-icon-btn {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--tx-brown-soft);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+  transition: background 100ms ease, color 100ms ease;
+}
+.tx-icon-btn:hover { background: rgba(138, 106, 53, 0.12); }
+.tx-icon-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--tx-focus-ring);
+}
+.tx-icon-btn--danger { color: var(--tx-danger); }
+.tx-icon-btn--success { color: #2a7a3a; }
+
+/* Multi-chip input row. Looks like .tx-input but accepts wrapping
+   chips alongside the typed text. focus-within drives the focus ring
+   so the visual focus is the same regardless of which child has focus. */
+.tx-input-chips {
+  width: 100%;
+  min-height: var(--tx-form-h);
+  padding: 4px 8px;
+  border: 1px solid var(--tx-form-border);
+  border-radius: var(--tx-form-radius);
+  background: var(--tx-form-bg);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  transition: border-color 100ms ease, box-shadow 100ms ease;
+}
+.tx-input-chips:focus-within {
+  outline: none;
+  border-color: var(--tx-form-border-focus);
+  box-shadow: var(--tx-focus-ring);
+}
+.tx-input-chips__input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  color: var(--tx-brown-ink);
+  flex: 1 1 80px;
+  min-width: 80px;
+  font-size: 13px;
+  padding: 4px 0;
+  height: 22px;
+}
+.tx-input-chips__input::placeholder {
+  color: var(--tx-brown-faint);
+  font-style: italic;
+  opacity: 0.7;
+}
+/* Breathing room between the trailing chip and the cursor / placeholder. */
+.tx-input-chips:has(.tx-chip) .tx-input-chips__input {
+  padding-left: 6px;
+}
+
+/* Chip used by AliasChipEditor — height harmonises with the form row. */
+.tx-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  padding: 0 8px;
+  background: rgba(255, 252, 244, 0.85);
+  border: 1px solid var(--tx-form-border);
+  border-radius: 11px;
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 12px;
+  color: var(--tx-brown-ink);
+}
+.tx-chip__remove {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--tx-danger);
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 0 0 2px;
+}
+
+/* Field row: label above control, consistent vertical rhythm. */
+.tx-field { margin-bottom: 12px; }
+.tx-field__label {
+  display: block;
+  font-family: 'Cinzel', serif;
+  font-size: 9px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--tx-brown-faint);
+  margin-bottom: 4px;
+}
+.tx-field__error {
+  font-family: 'Cormorant Garamond', Georgia, serif;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--tx-danger);
+  margin-top: 4px;
+}
+
+.tx-form-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.tx-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.tx-toggle-row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+@keyframes tx-pulse {
+  0%   { box-shadow: 0 0 0 0   var(--tx-gold, #d4a857); opacity: 1;   }
+  70%  { box-shadow: 0 0 0 18px rgba(212, 168, 87, 0); opacity: 0.4; }
+  100% { box-shadow: 0 0 0 18px rgba(212, 168, 87, 0); opacity: 0;   }
+}
+.tx-highlight-pulse {
+  border-radius: 50%;
+  animation: tx-pulse 2s ease-out 1 forwards;
 }

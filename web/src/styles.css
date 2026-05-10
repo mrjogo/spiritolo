@@ -14,8 +14,25 @@ body {
   background: #fafafa;
 }
 
+/* Site-wide link styling — brown ink with a subtle underline that brightens
+   to gold on hover/focus. Matches the deco palette used across the
+   taxonomy card and the rest of the cream/brown chrome. The `.tx-link`
+   class on <button> elements (e.g. parent/child entries) reuses these
+   exact tokens so anchor and pseudo-link buttons read identically.
+   Components that need an unstyled link (header brand/nav, site logo)
+   override `text-decoration` and `color` locally. */
 a {
-  color: #0a58ca;
+  color: #2c1d0c;
+  text-decoration: underline;
+  text-decoration-color: rgba(122, 85, 32, 0.4);
+  text-underline-offset: 2px;
+  transition: color 120ms ease, text-decoration-color 120ms ease;
+}
+a:hover,
+a:focus-visible {
+  color: #3a2a14;
+  text-decoration-color: #c9a449;
+  outline: none;
 }
 
 .page {
@@ -344,12 +361,12 @@ a {
   justify-content: space-between;
   gap: 8px;
   padding: 2px 0;
-  font-size: 13px;
+  /* Inherit from the card body (15px) so recipes match parents/children. */
 }
 
 .tx-card__recipes-site {
   font-family: ui-monospace, monospace;
-  font-size: 10px;
+  font-size: 12px;
   color: var(--color-fg-muted, #8a6a35);
   white-space: nowrap;
 }

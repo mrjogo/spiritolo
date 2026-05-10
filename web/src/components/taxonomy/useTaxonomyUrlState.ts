@@ -11,6 +11,12 @@ export interface UseTaxonomyUrlStateReturn {
   focusedId: number | null;
   focusedEdge: EdgeRef | null;
   setFocusedId: (id: number | null) => void;
+  /**
+   * Focus by slug directly. Use when the id-based setter would race against
+   * the rows update — e.g., right after creating a node, when the new id
+   * isn't in the captured `byId` lookup yet but the slug is already known.
+   */
+  setFocusedSlug: (slug: string | null) => void;
   setFocusedEdge: (edge: EdgeRef | null) => void;
   clearFocus: () => void;
 }
@@ -73,6 +79,25 @@ export function useTaxonomyUrlState({
     [byId, setSearchParams],
   );
 
+  const setFocusedSlug = useCallback(
+    (slug: string | null) => {
+      setSearchParams(
+        (prev) => {
+          const next = new URLSearchParams(prev);
+          next.delete('edge');
+          if (slug == null) {
+            next.delete('node');
+            return next;
+          }
+          next.set('node', slug);
+          return next;
+        },
+        { replace: false },
+      );
+    },
+    [setSearchParams],
+  );
+
   const setFocusedEdge = useCallback(
     (edge: EdgeRef | null) => {
       setSearchParams(
@@ -104,5 +129,5 @@ export function useTaxonomyUrlState({
     );
   }, [setSearchParams]);
 
-  return { focusedId, focusedEdge, setFocusedId, setFocusedEdge, clearFocus };
+  return { focusedId, focusedEdge, setFocusedId, setFocusedSlug, setFocusedEdge, clearFocus };
 }

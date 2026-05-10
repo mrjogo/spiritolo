@@ -23,6 +23,14 @@ vi.useFakeTimers = ((config?: Parameters<typeof originalUseFakeTimers>[0]) => {
   return result;
 }) as typeof vi.useFakeTimers;
 
-afterEach(() => {
+afterEach(async () => {
   cleanup();
+  // Drain any pending real-timer callbacks left by unawaited userEvent calls
+  // (e.g. userEvent.setup().type(el, text) without await). Without this,
+  // pending setTimeout(0) events from one test fire into the next test's DOM
+  // via userEvent's getActiveElementOrBody, corrupting keyboard state.
+  // We drain 40 rounds to cover up to 40 pending setTimeout(0) chains.
+  for (let i = 0; i < 40; i++) {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
 });
