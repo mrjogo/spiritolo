@@ -41,6 +41,11 @@ const SITE_HEADER_HEIGHT = 56;
 // Smaller = tighter zoom on the focused node.
 const FOCUS_FIT_PADDING = 60;
 
+// The page title sits over the top of the canvas. After a focus zoom we
+// bias the camera so the focused subgraph clears it — the topmost (parent)
+// row would otherwise hide behind the title bar.
+const TITLE_CLEAR_PX = 70;
+
 type State =
   | { status: 'loading' }
   | { status: 'error'; message: string }
@@ -98,7 +103,17 @@ export function Taxonomy() {
 
 function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
   const [rows, setRows] = useState<TaxonomyViewRow[]>(initialRows);
-  const { nodes, links } = useMemo(() => viewRowsToGraph(rows), [rows]);
+  // Carry simulation state (x/y/vx/vy/fx/fy on each node) across rows updates.
+  // Without this, adding a node hands ForceGraph2D a fresh array of fresh
+  // objects and the canvas re-cold-starts (warmupTicks runs against
+  // random positions, so the graph visibly resets every time).
+  const prevNodesRef = useRef<TaxonomyNode[]>([]);
+  const { nodes, links } = useMemo(
+    // eslint-disable-next-line react-hooks/refs -- intentional carry-across-rebuilds cache
+    () => viewRowsToGraph(rows, prevNodesRef.current),
+    [rows],
+  );
+  useEffect(() => { prevNodesRef.current = nodes; }, [nodes]);
   const [size, setSize] = useState({
     w: window.innerWidth,
     h: window.innerHeight - SITE_HEADER_HEIGHT,
@@ -106,7 +121,7 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
   const [hovered, setHovered] = useState<TaxonomyNode | null>(null);
   const [query, setQuery] = useState('');
   const [filters, setFilters] = useState<Set<FilterKey>>(new Set());
-  const { focusedId, focusedEdge, setFocusedId, setFocusedEdge, clearFocus } =
+  const { focusedId, focusedEdge, setFocusedId, setFocusedSlug, setFocusedEdge, clearFocus } =
     useTaxonomyUrlState({ nodes });
   const [hoveredEdge, setHoveredEdge] = useState<EdgeRef | null>(null);
   const [dagMode, setDagMode] = useState<DagMode | undefined>(undefined);
@@ -117,6 +132,11 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
   const [editingParentsFor, setEditingParentsFor] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [creatingFor, setCreatingFor] = useState<TaxonomyViewRow | null>(null);
+  // Tracks an in-flight create from "Submit" until the new node appears on
+  // the graph. While set, a persistent "Creating …" toast is shown; when
+  // pulseCoords first resolves for the new node, this clears and a normal
+  // "Created" toast takes over.
+  const [creating, setCreating] = useState<{ displayName: string; id: number | null } | null>(null);
   const [plusCoords, setPlusCoords] = useState<{ x: number; y: number; r: number } | null>(null);
   const [pulseFor, setPulseFor] = useState<number | null>(null);
   const [pulseCoords, setPulseCoords] = useState<{ x: number; y: number; radius: number } | null>(null);
@@ -196,23 +216,46 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
     return () => clearTimeout(t);
   }, [pulseFor]);
 
+  // Bridge: once the new node has been positioned and the pulse can render
+  // (signaled by pulseCoords being non-null AFTER a creating-with-id was
+  // recorded), retire the persistent "Creating …" indicator and surface the
+  // standard "Created" toast.
+  useEffect(() => {
+    if (creating?.id == null) return;
+    if (pulseCoords == null) return;
+    const c = creating;
+    setCreating(null);
+    setToast({ message: `Created ${c.displayName} (#${c.id})` });
+  }, [creating, pulseCoords]);
+
   useEffect(() => {
     if (pulseFor === null) { setPulseCoords(null); return; }
-    const id = requestAnimationFrame(() => {
+    // Retry until the canvas can resolve the node's screen coords. A
+    // freshly-created node may not have a valid x/y on the very first
+    // frame after setRows; bail-and-forget would silently miss the pulse.
+    let frame = 0;
+    let cancelled = false;
+    const startedAt = performance.now();
+    const tick = () => {
+      if (cancelled) return;
       const c = canvasRef.current?.getNodeScreenCoords(pulseFor);
-      if (!c) return;
       const node = rows.find((r) => r.id === pulseFor);
-      if (!node) return;
-      const zoom = canvasRef.current?.getZoom() ?? 1;
-      setPulseCoords({ x: c.x, y: c.y, radius: outerRingRadius(node as TaxonomyNode, sizeMode) * zoom });
-      if (c.x < 0 || c.y < 0 || c.x > size.w || c.y > size.h) {
-        const runtime = (rows.find((r) => r.id === pulseFor) as { x?: number; y?: number } | undefined);
-        if (runtime?.x != null && runtime.y != null) {
-          canvasRef.current?.centerAt(runtime.x, runtime.y, 600);
+      if (c && node) {
+        const zoom = canvasRef.current?.getZoom() ?? 1;
+        setPulseCoords({ x: c.x, y: c.y, radius: outerRingRadius(node as TaxonomyNode, sizeMode) * zoom });
+        if (c.x < 0 || c.y < 0 || c.x > size.w || c.y > size.h) {
+          const runtime = (rows.find((r) => r.id === pulseFor) as { x?: number; y?: number } | undefined);
+          if (runtime?.x != null && runtime.y != null) {
+            canvasRef.current?.centerAt(runtime.x, runtime.y, 600);
+          }
         }
+        return;
       }
-    });
-    return () => cancelAnimationFrame(id);
+      if (performance.now() - startedAt > 2000) return;
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => { cancelled = true; cancelAnimationFrame(frame); };
   }, [pulseFor, rows, sizeMode, size]);
 
   const dimmedIds = useMemo(() => {
@@ -291,7 +334,15 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
       }
     }
     const inFrame = new Set<number>([focusedNode.id, ...positions.keys()]);
-    canvasRef.current?.fitToNodes((n) => inFrame.has(n.id), 600, FOCUS_FIT_PADDING);
+    // Single-shot fit that reserves room at the top for the page title.
+    // Avoids the prior fit + delayed centerAt sequence, which scrolled the
+    // view a moment after it had already landed.
+    canvasRef.current?.fitToNodesWithTopGuard(
+      (n) => inFrame.has(n.id),
+      TITLE_CLEAR_PX,
+      600,
+      FOCUS_FIT_PADDING,
+    );
   }, [focusedNode, nodes, byId, size, focusedId, settled]);
   /* eslint-enable react-hooks/immutability */
 
@@ -375,6 +426,7 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
         width={size.w}
         height={size.h}
         dimmedIds={dimmedIds}
+        focusedId={focusedId}
         dagMode={dagMode}
         sizeMode={sizeMode}
         onNodeClick={(n) => {
@@ -428,6 +480,7 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
                 onEditField={handleEditField}
                 onEditParents={(id) => setEditingParentsFor(id)}
                 onDelete={(id) => setDeletingId(id)}
+                onFocusNode={(id) => setFocusedId(id)}
                 parentLookup={parentLookup}
               />
             );
@@ -455,6 +508,10 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
           parent={{ id: creatingFor.id, display_name: creatingFor.display_name }}
           onCancel={() => setCreatingFor(null)}
           onCreate={async (parentId, input) => {
+            // Show a persistent "Creating …" indicator from click until the
+            // graph actually shows the new node. The success toast fires from
+            // the pulseCoords-watching effect below.
+            setCreating({ displayName: input.display_name, id: null });
             try {
               const newId = await createTaxonomyNode(parentId, input);
               setRows((prev) => [
@@ -469,10 +526,15 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
                 },
               ].map((r) => r.id === parentId ? { ...r, child_ids: [...r.child_ids, newId] } : r));
               setCreatingFor(null);
-              setFocusedId(newId);
+              // Focus by slug, not id: the id-based setter would close over
+              // the pre-create byId map (the new node isn't in `nodes` yet
+              // in this render's closure) and silently delete ?node= instead
+              // of selecting the new node.
+              setFocusedSlug(input.slug);
               setPulseFor(newId);
-              setToast({ message: `Created ${input.display_name} (#${newId})` });
+              setCreating({ displayName: input.display_name, id: newId });
             } catch (e) {
+              setCreating(null);
               setToast({ message: `Create failed: ${String(e)}`, kind: 'error' });
             }
           }}
@@ -533,7 +595,15 @@ function LoadedView({ rows: initialRows }: { rows: TaxonomyViewRow[] }) {
           }}
         />
       )}
-      {toast && <Toast {...toast} onDismiss={() => setToast(null)} />}
+      {creating && (
+        <Toast
+          kind="progress"
+          persist
+          message={`Creating ${creating.displayName}…`}
+          onDismiss={() => {}}
+        />
+      )}
+      {toast && !creating && <Toast {...toast} onDismiss={() => setToast(null)} />}
     </>
   );
 }

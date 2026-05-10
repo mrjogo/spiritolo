@@ -107,4 +107,50 @@ describe('useTaxonomyUrlState — write side', () => {
     act(() => { result.current.setFocusedId(null); });
     expect(result.current.focusedId).toBeNull();
   });
+
+  it('setFocusedSlug writes ?node=<slug> even for slugs not yet in nodes', () => {
+    // Mirrors the create flow: caller knows the slug before nodes catches up.
+    const { result } = renderHook(() => useTaxonomyUrlState({ nodes: NODES }), {
+      wrapper: wrapperWithUrl('/taxonomy'),
+    });
+    act(() => { result.current.setFocusedSlug('brand_new_slug'); });
+    // focusedId stays null until the slug appears in `nodes`, but the URL
+    // is set so the next render with updated nodes will resolve it.
+    expect(result.current.focusedId).toBeNull();
+
+    // Re-render with NODES containing the slug — focusedId now resolves.
+    const extendedNodes = [
+      ...NODES,
+      {
+        ...NODES[0],
+        id: 99,
+        slug: 'brand_new_slug',
+        display_name: 'Brand New',
+        parent_ids: [1],
+        child_ids: [],
+      },
+    ];
+    const { result: result2 } = renderHook(
+      () => useTaxonomyUrlState({ nodes: extendedNodes }),
+      { wrapper: wrapperWithUrl('/taxonomy?node=brand_new_slug') },
+    );
+    expect(result2.current.focusedId).toBe(99);
+  });
+
+  it('setFocusedSlug clears any ?edge', () => {
+    const { result } = renderHook(() => useTaxonomyUrlState({ nodes: NODES }), {
+      wrapper: wrapperWithUrl('/taxonomy?edge=gin~london_dry_gin'),
+    });
+    act(() => { result.current.setFocusedSlug('gin'); });
+    expect(result.current.focusedId).toBe(1);
+    expect(result.current.focusedEdge).toBeNull();
+  });
+
+  it('setFocusedSlug(null) clears the node param', () => {
+    const { result } = renderHook(() => useTaxonomyUrlState({ nodes: NODES }), {
+      wrapper: wrapperWithUrl('/taxonomy?node=gin'),
+    });
+    act(() => { result.current.setFocusedSlug(null); });
+    expect(result.current.focusedId).toBeNull();
+  });
 });

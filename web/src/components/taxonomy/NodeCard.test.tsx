@@ -35,13 +35,18 @@ const node: TaxonomyNode = {
 };
 
 describe('<NodeCard>', () => {
-  it('renders the node properties with the renamed labels', () => {
+  it('renders the node properties with unified labels', () => {
     renderCard(node);
     expect(screen.getByText('RYE WHISKEY')).toBeInTheDocument();
-    expect(screen.getByText(/rye, rye whisky/)).toBeInTheDocument();
-    expect(screen.getByText(/node kind/i)).toBeInTheDocument();
-    expect(screen.getByText(/default ingredient role/i)).toBeInTheDocument();
-    expect(screen.getByText(/clustering node/i)).toBeInTheDocument();
+    // Aliases render as individual chips, not a comma-joined string.
+    expect(screen.getByText('rye')).toBeInTheDocument();
+    expect(screen.getByText('rye whisky')).toBeInTheDocument();
+    // Hover and pinned both use the same label set now.
+    expect(screen.getByText('NODE KIND')).toBeInTheDocument();
+    expect(screen.getByText('DEFAULT ROLE')).toBeInTheDocument();
+    expect(screen.getByText('CLUSTER')).toBeInTheDocument();
+    expect(screen.getByText('DEFINING GARNISH')).toBeInTheDocument();
+    expect(screen.getByText('ALIASES')).toBeInTheDocument();
     // recipe count appears as "(47)" in the RECIPES heading
     expect(screen.getByText(/RECIPES/)).toBeInTheDocument();
     expect(screen.getByText(/\(47\)/)).toBeInTheDocument();
@@ -84,6 +89,22 @@ describe('<NodeCard>', () => {
     renderCard(node, 'hover', onDismiss);
     await user.keyboard('{Escape}');
     expect(onDismiss).not.toHaveBeenCalled();
+  });
+
+  it('hover mode never shows the recipes "Loading…" placeholder', () => {
+    // Regression: hover mode used to render "Loading…" forever because the
+    // recipe-fetching effect only runs in pinned mode but the placeholder
+    // wasn't gated, so recipes-stays-null → text-stays-visible.
+    const recipeNode: TaxonomyNode = {
+      id: 1, slug: 'gin', display_name: 'Gin',
+      node_kind: null, default_role: 'base_spirit',
+      is_cluster_node: true, is_defining_garnish: false,
+      parent_ids: [], child_ids: [], aliases: [],
+      recipe_count: 5, labelW: 10, labelH: 11,
+    };
+    renderCard(recipeNode, 'hover');
+    expect(screen.queryByText(/Loading…/)).not.toBeInTheDocument();
+    expect(fromMock).not.toHaveBeenCalled();
   });
 
   it('does not fetch recipes when recipe_count is 0', async () => {
@@ -186,8 +207,8 @@ describe('NodeCard — pinned mode editing', () => {
       </MemoryRouter>,
     );
     expect(screen.getByText(/PARENTS · 2/)).toBeInTheDocument();
-    expect(screen.getByText(/Amari/)).toBeInTheDocument();
-    expect(screen.getByText('#17')).toBeInTheDocument();
+    expect(screen.getByText(/Amari \(id: 17\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Bitter Aperitif \(id: 84\)/)).toBeInTheDocument();
   });
 
   it('clicking pencil on PARENTS section calls onEditParents', async () => {
@@ -222,6 +243,115 @@ describe('NodeCard — pinned mode editing', () => {
       </MemoryRouter>,
     );
     expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
+  });
+
+  it('renders CHILDREN section with each child name #id from the lookup', () => {
+    render(
+      <MemoryRouter>
+        <NodeCard
+          node={makeNode({ child_ids: [200, 201] })}
+          mode="pinned"
+          onDismiss={vi.fn()}
+          onEditField={vi.fn()}
+          onEditParents={vi.fn()}
+          onDelete={vi.fn()}
+          parentLookup={new Map([
+            [200, { id: 200, display_name: 'Negroni Sbagliato' }],
+            [201, { id: 201, display_name: 'Americano' }],
+          ])}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText(/CHILDREN · 2/)).toBeInTheDocument();
+    expect(screen.getByText(/Negroni Sbagliato \(id: 200\)/)).toBeInTheDocument();
+    expect(screen.getByText(/Americano \(id: 201\)/)).toBeInTheDocument();
+  });
+
+  it('clicking a parent or child calls onFocusNode when wired', async () => {
+    const onFocusNode = vi.fn();
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <NodeCard
+          node={makeNode({ parent_ids: [17], child_ids: [200] })}
+          mode="pinned"
+          onDismiss={vi.fn()}
+          onEditField={vi.fn()}
+          onEditParents={vi.fn()}
+          onDelete={vi.fn()}
+          onFocusNode={onFocusNode}
+          parentLookup={new Map([
+            [17, { id: 17, display_name: 'Amari' }],
+            [200, { id: 200, display_name: 'Negroni Sbagliato' }],
+          ])}
+        />
+      </MemoryRouter>,
+    );
+    await user.click(screen.getByText(/Amari/));
+    expect(onFocusNode).toHaveBeenCalledWith(17);
+    await user.click(screen.getByText(/Negroni Sbagliato/));
+    expect(onFocusNode).toHaveBeenCalledWith(200);
+  });
+
+  it('does not show the "use + on graph to add" instruction', () => {
+    render(
+      <MemoryRouter>
+        <NodeCard
+          node={makeNode()}
+          mode="pinned"
+          onDismiss={vi.fn()}
+          onEditField={vi.fn()}
+          onEditParents={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByText(/use \+/i)).not.toBeInTheDocument();
+  });
+
+  it('clicking anywhere in an EditableField row enters edit mode (not just the pencil)', async () => {
+    const user = userEvent.setup();
+    const onEditField = vi.fn().mockResolvedValue(undefined);
+    render(
+      <MemoryRouter>
+        <NodeCard
+          node={makeNode()}
+          mode="pinned"
+          onDismiss={vi.fn()}
+          onEditField={onEditField}
+          onEditParents={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    // The whole row is one button now; clicking the value text should open
+    // edit mode and reveal a focused text input.
+    await user.click(screen.getByRole('button', { name: /edit display name/i }));
+    const input = screen.getByDisplayValue('Campari');
+    expect(input).toBeInTheDocument();
+  });
+
+  it('renders visible labels for each editable field in pinned-edit mode', () => {
+    render(
+      <MemoryRouter>
+        <NodeCard
+          node={makeNode()}
+          mode="pinned"
+          onDismiss={vi.fn()}
+          onEditField={vi.fn()}
+          onEditParents={vi.fn()}
+          onDelete={vi.fn()}
+        />
+      </MemoryRouter>,
+    );
+    // DISPLAY NAME is no longer a row label — the title at the top of the
+    // card IS the display-name editor.
+    expect(screen.getByText('SLUG')).toBeInTheDocument();
+    expect(screen.getByText('NODE KIND')).toBeInTheDocument();
+    expect(screen.getByText('DEFAULT ROLE')).toBeInTheDocument();
+    expect(screen.getByText('CLUSTER')).toBeInTheDocument();
+    expect(screen.getByText('DEFINING GARNISH')).toBeInTheDocument();
+    expect(screen.getByText('ALIASES')).toBeInTheDocument();
   });
 
   it('clicking Delete in pinned mode calls onDelete with node id', async () => {

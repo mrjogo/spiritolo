@@ -35,6 +35,14 @@ export interface TaxonomyNode extends TaxonomyViewRow {
   labelH: number;
 }
 
+// Runtime view of a node — what react-force-graph actually mutates. Reads
+// of x/y/vx/vy go through this; the lib's own GraphData type doesn't allow
+// `null` on fx/fy, so those stay private to the pinning code.
+type RuntimeNode = TaxonomyNode & {
+  x?: number; y?: number;
+  vx?: number; vy?: number;
+};
+
 export interface TaxonomyLink {
   source: number;
   target: number;
@@ -44,16 +52,46 @@ export function effectiveKind(node: TaxonomyViewRow): TaxonomyRole {
   return (node.node_kind ?? 'unknown') as TaxonomyRole;
 }
 
-export function viewRowsToGraph(rows: TaxonomyViewRow[]): {
+export function viewRowsToGraph(
+  rows: TaxonomyViewRow[],
+  prev: TaxonomyNode[] = [],
+): {
   nodes: TaxonomyNode[];
   links: TaxonomyLink[];
 } {
   const ctx = getMeasureCtx();
-  const nodes: TaxonomyNode[] = rows.map((r) => ({
-    ...r,
-    labelW: ctx.measureText(r.display_name).width,
-    labelH: LABEL_HEIGHT,
-  }));
+  const prevById = new Map(prev.map((n) => [n.id, n as RuntimeNode]));
+  const nodes: TaxonomyNode[] = rows.map((r) => {
+    const prior = prevById.get(r.id);
+    const carry: Partial<Pick<RuntimeNode, 'x' | 'y' | 'vx' | 'vy'>> = {};
+    if (prior) {
+      // Existing node: preserve simulation state so a rows update doesn't
+      // cold-restart the canvas. Without this, every add/edit reshapes
+      // the world from random positions.
+      if (prior.x != null) carry.x = prior.x;
+      if (prior.y != null) carry.y = prior.y;
+      if (prior.vx != null) carry.vx = prior.vx;
+      if (prior.vy != null) carry.vy = prior.vy;
+    } else {
+      // Brand-new node: seed near a known parent so it has valid coords on
+      // the very next render. Lets the focus/pulse effects find the node
+      // immediately instead of bailing on undefined x/y.
+      for (const pid of r.parent_ids) {
+        const p = prevById.get(pid);
+        if (p?.x != null && p.y != null) {
+          carry.x = p.x;
+          carry.y = p.y;
+          break;
+        }
+      }
+    }
+    return {
+      ...r,
+      ...carry,
+      labelW: ctx.measureText(r.display_name).width,
+      labelH: LABEL_HEIGHT,
+    };
+  });
   const links: TaxonomyLink[] = [];
   for (const row of rows) {
     for (const childId of row.child_ids) {

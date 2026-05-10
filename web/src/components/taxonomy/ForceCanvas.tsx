@@ -34,6 +34,16 @@ export interface ForceCanvasHandle {
     ms?: number,
     padding?: number,
   ) => void;
+  /** Like fitToNodes, but reserves `topGuardPx` pixels at the top of the
+   *  viewport (e.g. for an overlaid page title). Computes zoom + center in
+   *  one shot so the camera lands and stays — no follow-up animation that
+   *  would drift the view after the user expects it to settle. */
+  fitToNodesWithTopGuard: (
+    filter: (node: TaxonomyNode) => boolean,
+    topGuardPx: number,
+    ms?: number,
+    padding?: number,
+  ) => void;
   centerAt: (x: number, y: number, ms?: number) => void;
   /** Convert a node's simulation coords to viewport (CSS) pixel coords. Returns null if not yet positioned. */
   getNodeScreenCoords: (id: number) => { x: number; y: number } | null;
@@ -55,6 +65,10 @@ interface Props {
   width: number;
   height: number;
   dimmedIds?: Set<number>;
+  /** The single actually-focused node (the one the user clicked / has via
+   *  `?node=`). Drawn with a gold halo behind it so it stands out from
+   *  its un-dimmed neighbors. */
+  focusedId?: number | null;
   dagMode?: DagMode;
   sizeMode?: NodeSizeMode;
   onNodeClick: (node: TaxonomyNode) => void;
@@ -71,7 +85,7 @@ function endpointId(end: TaxonomyNode | number): number {
 
 export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCanvas(
   {
-    nodes, links, width, height, dimmedIds, dagMode, sizeMode = 'recipes',
+    nodes, links, width, height, dimmedIds, focusedId, dagMode, sizeMode = 'recipes',
     onNodeClick, onNodeHover, onLinkClick, onLinkHover, onBackgroundClick, onEngineStop,
   },
   ref,
@@ -89,6 +103,47 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
     fit: () => inner.current?.zoomToFit(400, 60),
     fitToNodes: (filter, ms = 400, padding = 60) =>
       inner.current?.zoomToFit(ms, padding, (n) => filter(n as TaxonomyNode)),
+    fitToNodesWithTopGuard: (filter, topGuardPx, ms = 400, padding = 60) => {
+      const g = inner.current;
+      if (!g) return;
+      // Compute the bbox manually (in sim coords) of the filtered subset
+      // including each node's render radius. Then derive zoom + camera
+      // center against a viewport whose effective height is reduced by
+      // topGuardPx. Apply both in a single transition so there's no
+      // post-fit drift.
+      let minX = Infinity, maxX = -Infinity;
+      let minY = Infinity, maxY = -Infinity;
+      let any = false;
+      for (const n of nodes) {
+        if (!filter(n)) continue;
+        const x = (n as { x?: number }).x;
+        const y = (n as { y?: number }).y;
+        if (x == null || y == null) continue;
+        const r = nodeRadius(n, sizeMode);
+        if (x - r < minX) minX = x - r;
+        if (x + r > maxX) maxX = x + r;
+        if (y - r < minY) minY = y - r;
+        if (y + r > maxY) maxY = y + r;
+        any = true;
+      }
+      if (!any) return;
+      const bboxW = maxX - minX;
+      const bboxH = maxY - minY;
+      const cx = (minX + maxX) / 2;
+      const cy = (minY + maxY) / 2;
+      const availW = width;
+      const availH = Math.max(1, height - topGuardPx);
+      const z = Math.min(
+        availW / (bboxW + 2 * padding),
+        availH / (bboxH + 2 * padding),
+      );
+      // Bias camera up in sim-space so the bbox center lands at the
+      // midpoint of the available (post-title) region instead of the
+      // canvas center.
+      const adjustedCy = cy - (topGuardPx / 2) / z;
+      g.centerAt(cx, adjustedCy, ms);
+      g.zoom(z, ms);
+    },
     centerAt: (x, y, ms = 400) => inner.current?.centerAt(x, y, ms),
     getNodeScreenCoords: (id) => {
       const g = inner.current;
@@ -99,7 +154,7 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
       return { x, y };
     },
     getZoom: () => inner.current?.zoom() ?? 1,
-  }), [nodes]);
+  }), [nodes, width, height, sizeMode]);
 
   useEffect(() => {
     const fg = inner.current;
@@ -161,13 +216,36 @@ export const ForceCanvas = forwardRef<ForceCanvasHandle, Props>(function ForceCa
       nodeCanvasObject={(node, ctx, globalScale) => {
         const n = node as TaxonomyNode & { x: number; y: number };
         const dimmed = dimmedIds?.has(n.id) ?? false;
+        const isFocused = focusedId != null && n.id === focusedId;
+        // Halo for the actually-selected node, drawn under everything so
+        // dimmed-neighbor alpha doesn't double-multiply against it.
+        if (isFocused) {
+          const r = nodeRadius(n, sizeMode);
+          const outerR = r + OUTER_RING_PAD;
+          const haloR = outerR * 4.0;
+          const grad = ctx.createRadialGradient(n.x, n.y, outerR, n.x, n.y, haloR);
+          grad.addColorStop(0, 'rgba(201, 164, 73, 0.55)');
+          grad.addColorStop(0.5, 'rgba(201, 164, 73, 0.22)');
+          grad.addColorStop(1, 'rgba(201, 164, 73, 0)');
+          ctx.fillStyle = grad;
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, haloR, 0, 2 * Math.PI);
+          ctx.fill();
+        }
         ctx.globalAlpha = dimmed ? 0.18 : 1;
         drawNode(n, ctx, sizeMode);
         if (globalScale > SHOW_LABEL_AT) {
           ctx.font = LABEL_FONT;
-          ctx.fillStyle = TX_BROWN_FAINT;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'top';
+          // Thin outline in the page-background walnut. Invisible on the
+          // dark bg, but punches a clean text shape through the focused
+          // node's gold halo without throwing a visible shadow.
+          ctx.strokeStyle = '#160d05';
+          ctx.lineWidth = 2;
+          ctx.lineJoin = 'round';
+          ctx.strokeText(n.display_name, n.x, n.y + nodeRadius(n, sizeMode) + 3);
+          ctx.fillStyle = TX_BROWN_FAINT;
           ctx.fillText(n.display_name, n.x, n.y + nodeRadius(n, sizeMode) + 3);
         }
         ctx.globalAlpha = 1;

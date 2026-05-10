@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditParentsModal } from './EditParentsModal';
 import type { TaxonomyViewRow } from './shapeData';
@@ -25,7 +25,7 @@ const ROWS = [
 const NODE = row(42, 'campari');
 
 describe('EditParentsModal', () => {
-  it('lists current parents with name #id and × to remove', () => {
+  it('lists current parents as removable chips above the search', () => {
     render(
       <EditParentsModal
         node={NODE}
@@ -36,7 +36,6 @@ describe('EditParentsModal', () => {
       />,
     );
     expect(screen.getByText('amari')).toBeInTheDocument();
-    expect(screen.getByText('#1')).toBeInTheDocument();
     expect(screen.getByText('bitter_aperitif')).toBeInTheDocument();
     expect(screen.getAllByLabelText(/^remove/i)).toHaveLength(2);
   });
@@ -54,7 +53,21 @@ describe('EditParentsModal', () => {
     expect(onSave).not.toHaveBeenCalled();
   });
 
-  it('search shows results with #id; pressing Enter on highlighted adds to staging', async () => {
+  it('result list is always visible — empty query shows all eligible nodes', () => {
+    render(
+      <EditParentsModal
+        node={NODE} currentParentIds={[]} rows={ROWS}
+        onCancel={vi.fn()} onSave={vi.fn()}
+      />,
+    );
+    const listbox = screen.getByRole('listbox');
+    // Self ('campari', id=42) is filtered out; everything else shows up.
+    expect(within(listbox).getByText('amari')).toBeInTheDocument();
+    expect(within(listbox).getByText('italian_aperitif')).toBeInTheDocument();
+    expect(within(listbox).queryByText('campari')).toBeNull();
+  });
+
+  it('typing filters the list; Enter on highlighted adds it', async () => {
     const user = userEvent.setup();
     render(
       <EditParentsModal
@@ -63,15 +76,18 @@ describe('EditParentsModal', () => {
       />,
     );
     await user.type(screen.getByPlaceholderText(/search/i), 'ital');
-    expect(screen.getByText('italian_liqueur')).toBeInTheDocument();
-    expect(screen.getByText('italicus')).toBeInTheDocument();
+    const listbox = screen.getByRole('listbox');
+    expect(within(listbox).getByText('italian_liqueur')).toBeInTheDocument();
+    expect(within(listbox).getByText('italicus')).toBeInTheDocument();
+    expect(within(listbox).queryByText('amari')).toBeNull();
     await user.keyboard('{Enter}');
-    // First result added — exact behavior: top result
-    expect(screen.getAllByText(/^italian_/i).length).toBeGreaterThan(0);
+    // First alphabetical match (italian_aperitif) is added as a chip; once
+    // selected, it disappears from the list.
+    expect(screen.getByLabelText(/remove italian_aperitif/i)).toBeInTheDocument();
   });
 
-  it('greys out descendants of the current node (would-cycle)', () => {
-    // make 312 a descendant of 42: 42 → 312
+  it('hides descendants of the current node from the list (no cycles)', () => {
+    // Make 312 a child of 42: 42 → 312
     const rowsWithDescendant = [
       ...ROWS.filter((r) => r.id !== 42),
       { ...NODE, child_ids: [312] },
@@ -85,15 +101,24 @@ describe('EditParentsModal', () => {
         onSave={vi.fn()}
       />,
     );
-    const input = screen.getByPlaceholderText(/search/i);
-    input.focus();
-    userEvent.setup().type(input, 'italian_aperitif');
-    // The descendant row should render with the cycle marker
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect((screen as any).queryByText(/would create cycle/i)).toBeTruthy();
+    const listbox = screen.getByRole('listbox');
+    expect(within(listbox).queryByText('italian_aperitif')).toBeNull();
   });
 
-  it('SAVE calls onSave with merged parent_ids (current minus removed plus added)', async () => {
+  it('clicking a list row adds it as a chip', async () => {
+    const user = userEvent.setup();
+    render(
+      <EditParentsModal
+        node={NODE} currentParentIds={[]} rows={ROWS}
+        onCancel={vi.fn()} onSave={vi.fn()}
+      />,
+    );
+    const listbox = screen.getByRole('listbox');
+    await user.click(within(listbox).getByText('italian_liqueur'));
+    expect(screen.getByLabelText(/remove italian_liqueur/i)).toBeInTheDocument();
+  });
+
+  it('Save calls onSave with the current selection', async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();
     render(
@@ -103,10 +128,30 @@ describe('EditParentsModal', () => {
       />,
     );
     await user.click(screen.getByLabelText('remove amari'));
-    await user.type(screen.getByPlaceholderText(/search/i), 'italian_liqueur');
-    await user.keyboard('{Enter}');
+    const listbox = screen.getByRole('listbox');
+    await user.click(within(listbox).getByText('italian_liqueur'));
     await user.click(screen.getByRole('button', { name: /^save$/i }));
     expect(onSave).toHaveBeenCalledWith(42, expect.arrayContaining([84, 208]));
     expect(onSave.mock.calls[0][1]).not.toContain(1);
+  });
+
+  it('Save button is disabled when there are no changes', () => {
+    render(
+      <EditParentsModal
+        node={NODE} currentParentIds={[1, 84]} rows={ROWS}
+        onCancel={vi.fn()} onSave={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole('button', { name: /^save$/i })).toBeDisabled();
+  });
+
+  it('"none" placeholder shows when nothing is selected', () => {
+    render(
+      <EditParentsModal
+        node={NODE} currentParentIds={[]} rows={ROWS}
+        onCancel={vi.fn()} onSave={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/^none$/i)).toBeInTheDocument();
   });
 });

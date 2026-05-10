@@ -8,28 +8,97 @@ interface Props {
    *  Each chip add/remove fires onSave eagerly so a controlled
    *  parent (e.g. react-hook-form) stays in sync. */
   alwaysEdit?: boolean;
+  /** Inline label rendered in the label column above the chips. Matches
+   *  EditableField's right-aligned small-caps Cinzel style. */
+  label?: string;
+  /** Read-only: render chips with no click-to-edit affordance. Used by the
+   *  hover-mode card. */
+  readOnly?: boolean;
 }
+
+// Match EditableField's grid for visual alignment. minmax(0, 1fr) on the
+// value column so chip + input intrinsic widths can't blow out the row.
+const LABEL_BASIS = 132;
+const COL_GAP = 18;
+
+const LABEL_STYLE: React.CSSProperties = {
+  fontFamily: "'Cinzel', serif",
+  fontSize: 10,
+  letterSpacing: '0.18em',
+  textTransform: 'uppercase',
+  opacity: 0.7,
+  textAlign: 'right',
+  whiteSpace: 'nowrap',
+  alignSelf: 'center',
+  paddingTop: 6, paddingBottom: 6,
+};
 
 const ROW_STYLE: React.CSSProperties = {
   position: 'relative',
-  padding: '4px 6px',
-  borderWidth: 1,
-  borderStyle: 'solid',
-  borderColor: 'transparent',
-  borderRadius: 'var(--tx-form-radius)',
+  padding: 0,
+  display: 'grid',
+  gridTemplateColumns: `${LABEL_BASIS}px minmax(0, 1fr)`,
+  columnGap: COL_GAP,
+  rowGap: 0,
+  alignItems: 'baseline',
+  width: '100%',
+  background: 'transparent',
+  textAlign: 'left',
+  font: 'inherit',
+  color: 'inherit',
+  border: 'none',
+};
+
+// Chip cell. The hover/edit outline + background live HERE — not on the
+// row — so the visual edit box wraps the chips only, never the label.
+// position: relative anchors the pencil-hint affordance.
+const CHIPS_CELL_STYLE: React.CSSProperties = {
+  position: 'relative',
+  gridColumn: 2,
   display: 'flex',
   flexWrap: 'wrap',
   gap: 6,
   alignItems: 'center',
   minHeight: 32,
+  minWidth: 0,
+  padding: '6px 8px',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'transparent',
+  borderRadius: 'var(--tx-form-radius)',
+  background: 'transparent',
 };
-const HOVER_STYLE: React.CSSProperties = { borderColor: 'var(--tx-form-border)' };
 
-export function AliasChipEditor({ value, onSave, onError, alwaysEdit = false }: Props) {
+function PencilHint() {
+  return (
+    <span
+      aria-hidden
+      style={{
+        position: 'absolute',
+        top: 4, right: 6,
+        fontSize: 11, lineHeight: 1,
+        color: 'var(--tx-brown-soft)',
+        opacity: 0.65,
+        pointerEvents: 'none',
+      }}
+    >
+      ✎
+    </span>
+  );
+}
+const CHIPS_CELL_HOVER_STYLE: React.CSSProperties = {
+  borderColor: 'var(--tx-form-border)',
+};
+const CHIPS_CELL_EDIT_STYLE: React.CSSProperties = {
+  borderColor: 'var(--tx-form-border-focus)',
+  background: '#fff',
+};
+
+export function AliasChipEditor({ value, onSave, onError, alwaysEdit = false, label, readOnly }: Props) {
   if (alwaysEdit) {
     return <ChipInput value={value} onSave={onSave} onError={onError} />;
   }
-  return <InlineEditor value={value} onSave={onSave} onError={onError} />;
+  return <InlineEditor value={value} onSave={onSave} onError={onError} label={label} readOnly={readOnly} />;
 }
 
 /** Always-edit, controlled chip input. Looks like a .tx-input. */
@@ -94,7 +163,7 @@ function ChipInput({ value, onSave, onError }: Omit<Props, 'alwaysEdit'>) {
 }
 
 /** Original inline view-mode-with-pencil editor used by NodeCard. */
-function InlineEditor({ value, onSave, onError }: Omit<Props, 'alwaysEdit'>) {
+function InlineEditor({ value, onSave, onError, label, readOnly }: Omit<Props, 'alwaysEdit'>) {
   const [hover, setHover] = useState(false);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<string[]>(value);
@@ -138,79 +207,92 @@ function InlineEditor({ value, onSave, onError }: Omit<Props, 'alwaysEdit'>) {
     return (
       <div
         ref={containerRef}
-        style={{ ...ROW_STYLE, ...HOVER_STYLE, background: 'var(--tx-form-bg)' }}
+        style={ROW_STYLE}
         onBlur={(e) => {
           if (containerRef.current && !containerRef.current.contains(e.relatedTarget as Node | null)) {
             void commit();
           }
         }}
       >
-        {draft.map((a, i) => (
-          <span key={`${a}-${i}`} className="tx-chip">
-            {a}
-            <button
-              type="button"
-              aria-label={`remove ${a}`}
-              onClick={() => remove(i)}
-              className="tx-chip__remove"
-            >×</button>
-          </span>
-        ))}
-        <input
-          ref={inputRef}
-          type="text"
-          value={input}
-          placeholder="+ add alias"
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              addCurrent();
-            } else if (e.key === 'Tab' && input.trim() !== '') {
-              e.preventDefault();
-              addCurrent();
-            } else if (e.key === 'Escape') {
-              setDraft(value);
-              setInput('');
-              setEditing(false);
-            }
-          }}
-          style={{
-            font: 'inherit',
-            color: 'inherit',
-            background: 'transparent',
-            border: 'none',
-            outline: 'none',
-            flex: '1 1 80px',
-            minWidth: 80,
-            fontSize: 13,
-          }}
-        />
+        {label && <span style={LABEL_STYLE}>{label}</span>}
+        <div style={{ ...CHIPS_CELL_STYLE, ...CHIPS_CELL_EDIT_STYLE }}>
+          {draft.map((a, i) => (
+            <span key={`${a}-${i}`} className="tx-chip">
+              {a}
+              <button
+                type="button"
+                aria-label={`remove ${a}`}
+                onClick={() => remove(i)}
+                className="tx-chip__remove"
+              >×</button>
+            </span>
+          ))}
+          <input
+            ref={inputRef}
+            type="text"
+            value={input}
+            placeholder="+ add alias"
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                addCurrent();
+              } else if (e.key === 'Tab' && input.trim() !== '') {
+                e.preventDefault();
+                addCurrent();
+              } else if (e.key === 'Escape') {
+                // First Esc cancels editing; don't propagate to NodeCard's
+                // window-level Escape handler (which would unfocus the node).
+                e.stopPropagation();
+                setDraft(value);
+                setInput('');
+                setEditing(false);
+              }
+            }}
+            style={{
+              font: 'inherit',
+              color: 'inherit',
+              background: 'transparent',
+              border: 'none',
+              outline: 'none',
+              flex: '1 1 60px',
+              minWidth: 60,
+              fontSize: 13,
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  const chipsContent = value.length === 0
+    ? <span style={{ fontStyle: 'italic', opacity: 0.6 }}>—</span>
+    : value.map((a) => <span key={a} className="tx-chip">{a}</span>);
+
+  if (readOnly) {
+    return (
+      <div style={ROW_STYLE} aria-label={label ?? 'aliases'}>
+        {label && <span style={LABEL_STYLE}>{label}</span>}
+        <div style={CHIPS_CELL_STYLE}>{chipsContent}</div>
       </div>
     );
   }
 
   return (
-    <div
-      style={{ ...ROW_STYLE, ...(hover ? HOVER_STYLE : {}) }}
+    <button
+      type="button"
+      onClick={() => setEditing(true)}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      aria-label={label ? `edit ${label}` : 'edit aliases'}
+      style={{ ...ROW_STYLE, cursor: 'pointer' }}
     >
-      {value.length === 0
-        ? <span style={{ fontStyle: 'italic', opacity: 0.6 }}>—</span>
-        : value.map((a) => <span key={a} className="tx-chip">{a}</span>)}
-      <button
-        type="button"
-        aria-label="edit aliases"
-        onClick={() => setEditing(true)}
-        style={{
-          position: 'absolute', right: 6, top: 6,
-          background: 'transparent', border: 'none', cursor: 'pointer',
-          color: 'var(--tx-brown-soft)', padding: 0, lineHeight: 1, fontSize: 13,
-          opacity: hover ? 1 : 0,
-        }}
-      >✎</button>
-    </div>
+      {label && <span style={LABEL_STYLE}>{label}</span>}
+      <div style={{ ...CHIPS_CELL_STYLE, ...(hover ? CHIPS_CELL_HOVER_STYLE : {}) }}>
+        {chipsContent}
+        {hover && <PencilHint />}
+      </div>
+    </button>
   );
 }
 

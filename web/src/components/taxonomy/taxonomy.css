@@ -178,6 +178,23 @@
   color: var(--tx-brown-faint);
 }
 
+/* Inline link inside the cream card. Reads as a navigable link without the
+   stark blue browser default — color matches the card's ink, hover reveals
+   a gold underline. Used for parent/child entries in NodeCard. */
+.tx-link {
+  color: var(--tx-brown-ink);
+  text-decoration: underline;
+  text-decoration-color: rgba(122, 85, 32, 0.4);
+  text-underline-offset: 2px;
+  transition: color 120ms ease, text-decoration-color 120ms ease;
+}
+.tx-link:hover,
+.tx-link:focus-visible {
+  color: var(--tx-brown-mid);
+  text-decoration-color: var(--tx-gold);
+  outline: none;
+}
+
 .tx-rule {
   height: 1px;
   background: linear-gradient(90deg, transparent, var(--tx-gold) 20%, var(--tx-gold) 80%, transparent);
