@@ -91,6 +91,12 @@ recommended; an aborted half-restore is messier than starting over.
 account locally, sign in as your dev user → `handle_new_user` creates
 the row → set `profiles.is_admin = true` via Studio or `psql`.
 
+> **Just need /proposals data?** For e2e work on the proposal review
+> page specifically, the smaller `supabase/seeds/e2e_proposals.fixture.sql`
+> (manually applied after `db reset`; not wired into the seed list)
+> lands a curated ~100-proposal slice without needing a full staging
+> restore. Header in that file documents the apply command.
+
 ### Disaster recovery — fresh Supabase project
 
 ```bash
