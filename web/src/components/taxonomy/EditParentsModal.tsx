@@ -13,6 +13,10 @@ interface Props {
 
 const RESULTS_HEIGHT = 220;
 
+// Multi-select parent picker for the taxonomy curation UI. A single-
+// select sibling lives at web/src/components/proposals/NodePicker.tsx
+// — they share the keyboard + scroll-list idiom but not code. If you
+// edit one, check whether the other should track the change.
 export function EditParentsModal({ node, currentParentIds, rows, onCancel, onSave }: Props) {
   const [selectedIds, setSelectedIds] = useState<number[]>(currentParentIds);
   const [query, setQuery] = useState('');
