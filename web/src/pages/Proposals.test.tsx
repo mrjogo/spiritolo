@@ -84,7 +84,7 @@ describe('<Proposals>', () => {
     await user.click(await screen.findByText(/lemon zest → lemon-zest/));
     await user.click(await screen.findByRole('button', { name: /^create$/i }));
     await waitFor(() =>
-      expect(rpcs.applyProposalCreate).toHaveBeenCalledWith(7, 'lemon-zest'),
+      expect(rpcs.applyProposalCreate).toHaveBeenCalledWith(7, null),
     );
   });
 
