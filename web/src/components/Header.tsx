@@ -22,6 +22,7 @@ export function Header() {
       <nav className="site-header__nav">
         <Link to="/recipes">Recipes</Link>
         {!adminLoading && isAdmin && <Link to="/taxonomy">Taxonomy</Link>}
+        {!adminLoading && isAdmin && <Link to="/proposals">Proposals</Link>}
       </nav>
       {user && (
         <div className="site-header__user">

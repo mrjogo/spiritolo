@@ -16,6 +16,10 @@ const Taxonomy = lazy(() =>
   import('./pages/Taxonomy').then((m) => ({ default: m.Taxonomy })),
 );
 
+const Proposals = lazy(() =>
+  import('./pages/Proposals').then((m) => ({ default: m.Proposals })),
+);
+
 // Self-contained fallback for the lazy chunk: matches the in-page
 // "settling" spinner so loading the chunk → loading data → settling
 // the d3 simulation all show the same affordance in the same spot,
@@ -73,6 +77,14 @@ export default function App() {
               element={
                 <Suspense fallback={<TaxonomyChunkFallback />}>
                   <Taxonomy />
+                </Suspense>
+              }
+            />
+            <Route
+              path="/proposals"
+              element={
+                <Suspense fallback={<div style={{ padding: 24 }}>Loading proposals…</div>}>
+                  <Proposals />
                 </Suspense>
               }
             />
