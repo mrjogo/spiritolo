@@ -13,7 +13,7 @@ def test_resolves_high_confidence_typo(fixture_taxonomy):
     # very high, the next-best match much lower.
     result = resolve_lexical(conn, "lemon juicee")
     assert isinstance(result, Resolved)
-    assert result.taxonomy_node_id == ids["lemon_juice"]
+    assert result.taxonomy_node_id == ids["lemon-juice"]
     assert result.source == "lexical"
 
 

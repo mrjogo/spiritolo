@@ -94,10 +94,11 @@ Stage CLIs (`fetch`, `classify`, `validate`, `extract`) share `--site` / `--limi
 
 DAG of canonical ingredients. **Read [docs/spirits-taxonomy.md](docs/spirits-taxonomy.md) before adding nodes** — the lean stance (taxonomy for definitional categories + hard constraints; vector layer for soft similarity) is load-bearing. Don't add sensory, stylistic, or colloquial nodes.
 
-Two non-obvious rules worth surfacing here (full treatment in the doc):
+Three non-obvious rules worth surfacing here (full treatment in the doc):
 
-- **Brand and product names always get their own nodes** (`node_kind='brand'` / `'expression'`), never aliases. Aliases are reserved for capitalization/punctuation/language variants of one canonical name, plus the brand-as-substance carve-out (`'aromatic bitters'` → `angostura_bitters`).
-- **`is_cluster_node` cuts the DAG asymmetrically.** A type node is the cluster identity in some branches (`orange_bitters`, `bourbon`); an expression node is the cluster identity in others (`angostura_bitters`, `peychauds_bitters` — brand-as-substance). The only invariant: no `is_cluster_node` node has an `is_cluster_node` ancestor.
+- **Slugs are kebab-case** — `taxonomy_nodes.slug` and `taxonomy_proposals.proposed_slug` carry a DB CHECK forbidding underscores (`slug !~ '_'`). The LLM prompt at [mapping/prompt.py](ingredients/src/ingredients/mapping/prompt.py) instructs `<kebab-case>` for `propose_brand` / `propose_form`. Display names and taxonomy aliases are free-text (spaces, capitalization, accents fine); only slugs are constrained.
+- **Brand and product names always get their own nodes** (`node_kind='brand'` / `'expression'`), never aliases. Aliases are reserved for capitalization/punctuation/language variants of one canonical name, plus the brand-as-substance carve-out (`'aromatic bitters'` → `angostura-bitters`).
+- **`is_cluster_node` cuts the DAG asymmetrically.** A type node is the cluster identity in some branches (`orange-bitters`, `bourbon`); an expression node is the cluster identity in others (`angostura-bitters`, `peychauds-bitters` — brand-as-substance). The only invariant: no `is_cluster_node` node has an `is_cluster_node` ancestor.
 
 Taxonomy nodes are managed on staging via the curation UI; they are not maintained as local seed files. To work against current reference data locally, restore a fresh `scripts/backup-supabase.sh` dump (see [docs/backups.md](docs/backups.md)).
 

@@ -34,24 +34,24 @@ def test_end_to_end_negroni_old_fashioned(dedup_fixture, db_conn):
             """, (rid, pos, amount, unit, ids[slug]))
 
     add_ingredients(7001, [
-        (1, "london_dry_gin",  1.0, "oz"),
+        (1, "london-dry-gin",  1.0, "oz"),
         (2, "campari",         1.0, "oz"),
-        (3, "sweet_vermouth",  1.0, "oz"),
+        (3, "sweet-vermouth",  1.0, "oz"),
     ])
     add_ingredients(7002, [
-        (1, "london_dry_gin",  1.0, "oz"),
+        (1, "london-dry-gin",  1.0, "oz"),
         (2, "campari",         1.0, "oz"),
-        (3, "sweet_vermouth",  1.0, "oz"),
+        (3, "sweet-vermouth",  1.0, "oz"),
     ])
     add_ingredients(7003, [
-        (1, "london_dry_gin",  1.5, "oz"),
+        (1, "london-dry-gin",  1.5, "oz"),
         (2, "campari",         1.0, "oz"),
-        (3, "sweet_vermouth",  1.0, "oz"),
+        (3, "sweet-vermouth",  1.0, "oz"),
     ])
     add_ingredients(7004, [
         (1, "bourbon",            2.0, "oz"),
-        (2, "simple_syrup",       0.25, "oz"),
-        (3, "angostura_bitters",  2.0, "dash"),
+        (2, "simple-syrup",       0.25, "oz"),
+        (3, "angostura-bitters",  2.0, "dash"),
     ])
 
     norm_counts = run_phase1(db_conn)

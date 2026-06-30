@@ -45,7 +45,7 @@ describe('<StructuredIngredients>', () => {
   it('renders raw line + parsed squircle aligned per row for admins', () => {
     const rows = [
       row({ position: 0, raw_text: '2 oz gin', amount: 2, unit: 'oz', name: 'gin', taxonomy_node_id: 5, taxonomy_nodes: { slug: 'gin', display_name: 'Gin' }, role: 'base_spirit', id: 17 }),
-      row({ position: 1, raw_text: '1 oz fresh lime juice', amount: 1, unit: 'oz', name: 'lime juice', modifier: 'fresh', taxonomy_node_id: 9, taxonomy_nodes: { slug: 'lime_juice', display_name: 'Lime Juice' }, role: 'citrus', id: 18 }),
+      row({ position: 1, raw_text: '1 oz fresh lime juice', amount: 1, unit: 'oz', name: 'lime juice', modifier: 'fresh', taxonomy_node_id: 9, taxonomy_nodes: { slug: 'lime-juice', display_name: 'Lime Juice' }, role: 'citrus', id: 18 }),
     ];
     renderIt({
       rawLines: ['2 oz gin', '1 oz fresh lime juice'],
@@ -67,7 +67,7 @@ describe('<StructuredIngredients>', () => {
     expect(second.getByText('1 oz')).toBeInTheDocument();
     expect(second.getByText('fresh')).toBeInTheDocument();
     expect(second.getByText('citrus')).toBeInTheDocument();
-    expect(second.getByRole('link', { name: /lime juice/i })).toHaveAttribute('href', '/taxonomy?node=lime_juice');
+    expect(second.getByRole('link', { name: /lime juice/i })).toHaveAttribute('href', '/taxonomy?node=lime-juice');
   });
 
   it('renders amount ranges as "min–max unit"', () => {

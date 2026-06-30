@@ -109,9 +109,9 @@ def test_review_proposals_approve_creates_node(fixture_taxonomy, test_db_url, mo
     conn.execute("truncate table taxonomy_proposals restart identity cascade")
     conn.commit()
     enqueue_form_proposal(
-        conn, raw_string="lemon zest", proposed_slug="lemon_zest",
+        conn, raw_string="lemon zest", proposed_slug="lemon-zest",
         proposed_display_name="Lemon Zest", proposed_parent_id=ids["lemon"],
-        candidates=[{"node_id": ids["lemon_wheel"], "display_name": "Lemon Wheel", "similarity": 0.6}],
+        candidates=[{"node_id": ids["lemon-wheel"], "display_name": "Lemon Wheel", "similarity": 0.6}],
         mapper_version="v1",
     )
 
@@ -123,7 +123,7 @@ def test_review_proposals_approve_creates_node(fixture_taxonomy, test_db_url, mo
     assert rc == 0
 
     new_node = conn.execute(
-        "select id, display_name from taxonomy_nodes where slug = 'lemon_zest'"
+        "select id, display_name from taxonomy_nodes where slug = 'lemon-zest'"
     ).fetchone()
     assert new_node is not None
     assert new_node[1] == "Lemon Zest"
