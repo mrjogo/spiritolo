@@ -298,16 +298,27 @@ The app is hosted on Supabase + Vercel free tiers under the project name
 - `staging` — deploy trunk. Both Vercel and the migrations workflow watch
   this branch.
 
-**Promotion (run locally):**
+**Promotion (open a PR):** `staging` is locked to PR-only merges by a
+repository ruleset — direct pushes (including `git push` and force-push)
+are rejected. Promote by opening a PR **base `staging`, head `main`** and
+merging it:
 
 ```bash
-git checkout staging
-git merge --ff-only main
-git push
+gh pr create --base staging --head main \
+  --title "Promote main → staging" --body "…"
 ```
 
-If `--ff-only` refuses, something landed on `staging` that isn't on `main`.
-Investigate before forcing.
+**Merge that PR with a _merge commit_ — never squash.** Squash-merging a
+promotion fabricates a new commit on `staging` containing all of `main`'s
+diff, which diverges the two branches at the content level and makes the
+next promotion conflict. A merge commit keeps trees converging cleanly.
+
+Do **not** expect `git merge --ff-only main` to work: GitHub's PR merge is
+never a fast-forward, so every promotion adds a merge commit and `staging`
+stays *topologically* ahead of `main` (by the accumulated merge commits)
+even though their file trees are identical after each promotion. That
+divergence is expected and benign — don't try to "fix" it with a rewrite.
+(The one thing that breaks it is a squash-merged promotion; see above.)
 
 **Frontend deploys:** Vercel handles them natively on every push to
 `staging` (production) and every PR (preview).
