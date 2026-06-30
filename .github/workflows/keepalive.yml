@@ -1,13 +1,15 @@
 # Keep-alive ping for the Supabase free-tier database.
 #
 # Supabase pauses free-tier projects after 7 days with no database activity.
-# This workflow performs a tiny read against the `recipes_public` view a couple
-# of times a week, which counts as DB activity and resets the 7-day pause timer.
+# This workflow calls a trivial RPC a couple of times a week, which executes a
+# query in Postgres and so resets the 7-day pause timer.
 #
-# Why `recipes_public`: it's the same view the web app reads, it has
-# `grant select ... to anon`, and it's guaranteed to exist (created in the
-# initial recipes migration). A read-only anon/publishable key is all that's
-# needed, so we store the lower-risk key rather than the service-role key.
+# Why an RPC and not a table read: the data schema is locked down to
+# `authenticated` (no anon-readable tables/views), so the only anon-reachable
+# surface is the purpose-built `public.keepalive()` function — a SECURITY
+# DEFINER `select 1` granted EXECUTE to anon. It exposes no data, so the
+# lower-risk publishable (anon) key is all we store, not the service-role key.
+# See supabase/migrations/20260630120000_keepalive_rpc.sql.
 #
 # Required GitHub repo secrets (Settings → Secrets and variables → Actions):
 #   SUPABASE_URL              e.g. https://<project-ref>.supabase.co
@@ -28,7 +30,7 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase REST API
+      - name: Call Supabase keep-alive RPC
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
@@ -40,14 +42,15 @@ jobs:
             exit 1
           fi
 
-          # Trivial read: one row, id column only. Headers carry the key; -s/-o
-          # discard the body and key so nothing sensitive is printed to the log.
-          status=$(curl -s -o /dev/null -w "%{http_code}" \
+          # POST to the keepalive() RPC. Headers carry the key; -s/-o discard the
+          # body and key so nothing sensitive is printed to the log.
+          status=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
             -H "apikey: ${SUPABASE_PUBLISHABLE_KEY}" \
             -H "Authorization: Bearer ${SUPABASE_PUBLISHABLE_KEY}" \
-            "${SUPABASE_URL}/rest/v1/recipes_public?select=id&limit=1")
+            -H "Content-Length: 0" \
+            "${SUPABASE_URL}/rest/v1/rpc/keepalive")
 
-          echo "Supabase REST ping returned HTTP ${status}"
+          echo "Supabase keep-alive RPC returned HTTP ${status}"
 
           if [ "${status}" != "200" ]; then
             echo "Keep-alive ping failed: expected HTTP 200, got ${status}." >&2
