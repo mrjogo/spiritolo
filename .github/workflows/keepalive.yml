@@ -1,0 +1,55 @@
+# Keep-alive ping for the Supabase free-tier database.
+#
+# Supabase pauses free-tier projects after 7 days with no database activity.
+# This workflow performs a tiny read against the `recipes_public` view a couple
+# of times a week, which counts as DB activity and resets the 7-day pause timer.
+#
+# Why `recipes_public`: it's the same view the web app reads, it has
+# `grant select ... to anon`, and it's guaranteed to exist (created in the
+# initial recipes migration). A read-only anon/publishable key is all that's
+# needed, so we store the lower-risk key rather than the service-role key.
+#
+# Required GitHub repo secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_URL              e.g. https://<project-ref>.supabase.co
+#   SUPABASE_PUBLISHABLE_KEY  the publishable (anon) key, sb_publishable_…
+#
+# The job fails (non-zero exit) if the request doesn't return HTTP 200, so a
+# broken ping surfaces as a failed Action run / notification.
+
+name: Supabase keep-alive
+
+on:
+  schedule:
+    # Mon & Thu at 12:00 UTC — two pings/week, comfortably inside the 7-day window.
+    - cron: "0 12 * * 1,4"
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_PUBLISHABLE_KEY: ${{ secrets.SUPABASE_PUBLISHABLE_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "${SUPABASE_URL:-}" ] || [ -z "${SUPABASE_PUBLISHABLE_KEY:-}" ]; then
+            echo "Missing SUPABASE_URL or SUPABASE_PUBLISHABLE_KEY secret." >&2
+            exit 1
+          fi
+
+          # Trivial read: one row, id column only. Headers carry the key; -s/-o
+          # discard the body and key so nothing sensitive is printed to the log.
+          status=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "apikey: ${SUPABASE_PUBLISHABLE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_PUBLISHABLE_KEY}" \
+            "${SUPABASE_URL}/rest/v1/recipes_public?select=id&limit=1")
+
+          echo "Supabase REST ping returned HTTP ${status}"
+
+          if [ "${status}" != "200" ]; then
+            echo "Keep-alive ping failed: expected HTTP 200, got ${status}." >&2
+            exit 1
+          fi
