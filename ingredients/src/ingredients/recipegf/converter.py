@@ -115,11 +115,14 @@ REASON_VALIDATION_FAILED = "validation_failed"
 # not keep a parallel unit table here. The only local unit knowledge is the
 # bridge below: parser-canonical spellings RecipeGF doesn't already alias.
 #
-# NOTE (consolidation): Spiritolo still has two *other* unit tables that predate
-# RecipeGF — the parser's ``units.py`` and dedup's role-classifier
-# ``_OZ_PER_UNIT``. Those should collapse onto RecipeGF too (the parser would
-# emit RecipeGF-valid units directly, retiring this bridge). That's the bigger
-# cross-stage pass; out of scope for P2, which just refuses to duplicate.
+# NOTE (consolidation): RecipeGF currently covers only ~21 of Spiritolo's ~66
+# canonical units (parser ``units.py``). The direction is to MIGRATE Spiritolo's
+# richer, hard-won vocabulary *into* RecipeGF's registries (an upstream RecipeGF
+# PR — it's the shared contract), THEN retire the parser's table + dedup's
+# ``_OZ_PER_UNIT`` + this bridge. NOT the reverse: collapsing onto today's
+# RecipeGF would drop ~45 units. Until then P2 *abstains* on unmapped units
+# (unknown_unit → review), so nothing is silently lost. See the "Unit coverage"
+# section in docs/recipegf-export.md for the categorized migration worklist.
 _UNITS = UnitValidator()
 
 # Parser-canonical units RecipeGF rejects but that map cleanly onto a

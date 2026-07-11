@@ -64,8 +64,8 @@ propose→review pattern:
      (ice/garnish/body) trusts dedup's `role` tag rather than re-detecting it,
      so a missing role → review (also a de-facto freshness guard, since export
      runs after cluster compute). *(The parser's own `units.py` and dedup's
-     `_OZ_PER_UNIT` are separate pre-RecipeGF unit tables slated to collapse
-     onto RecipeGF in a later cross-stage pass — out of scope here.)*
+     `_OZ_PER_UNIT` are separate pre-RecipeGF unit tables — see "Unit coverage"
+     below for how they consolidate.)*
 4. **Validate + bundle** —
    [`bundle.py`](../ingredients/src/ingredients/recipegf/bundle.py) assembles the
    pin-2 shape and enforces the seam guarantees. Every `Ok` recipe is validated
@@ -91,6 +91,36 @@ behind the same seam.
 | `duplicate_ingredient` | two ingredients resolve to the same name |
 | `no_body` | nothing left to mix after removing ice/garnish |
 | `validation_failed` | assembled doc failed `RecipeValidator` (should be rare) |
+
+## Unit coverage & the consolidation direction
+
+RecipeGF currently recognizes only **~21 of Spiritolo's ~66 canonical units**
+(the values `parser/units.py` emits). The other ~45 have no RecipeGF equivalent
+today, so the converter **abstains** on them (`unknown_unit` → review) — nothing
+is silently dropped, but those recipes don't export until the unit exists in
+RecipeGF.
+
+**The fix is to migrate Spiritolo's hard-won vocabulary INTO RecipeGF's
+registries (an upstream RecipeGF PR — RecipeGF is the shared contract), then
+retire `units.py`, dedup's `_OZ_PER_UNIT`, and this stage's alias bridge.** Not
+the reverse: collapsing onto today's RecipeGF would lose those 45. Regenerate
+the exact gap any time with a diff of `units.py`'s canonical values against
+`recipegf.UnitValidator.is_valid`. The gap, categorized:
+
+- **Pure spelling** RecipeGF should just alias: `tbsp→Tbs`, `pint→pnt`,
+  `quart→qt`, `gallon→gal` (this stage's 4-entry bridge is the stopgap).
+- **Bar measures with a known volume** → add to `bar-units.yaml` with
+  `approx_ml`: `jigger`, `pony`, `shot`, `dropper`, `squeeze`.
+- **Shaped-piece count nouns** (same shape as RecipeGF's `slice`/`wedge`/`wheel`)
+  → add to `count-units.yaml`: `leaf`, `stick`, `clove`, `pod`, `bean`, `scoop`,
+  `strip`, `stalk`, `sheet`, `ring`, `segment`, `spear`, `disc`, `coin`,
+  `quarter`, `half`, `chunk`, `seed`, `zest`, `peel`.
+- **Deliberately hard** (per-unit judgment; some may stay unrepresentable):
+  `part` (a *ratio*, not an absolute amount), container counts `bottle`/`can`/
+  `bag`/`bunch`/`packet`/`package` (volume is product-dependent — already flagged
+  in `units.py`), and vague `grind`/`sprinkle`/`handful`/`knob`/`swath`.
+
+`cube` is **not** in the gap: RecipeGF already aliases `cube → each`.
 
 ## `spiritolo/` extension verbs
 
