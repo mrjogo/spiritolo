@@ -80,6 +80,7 @@ class Ok:
     slug: str
     recipe: dict[str, Any]
     spiritolo_verbs: list[str] = field(default_factory=list)
+    technique: str = ""  # stir/shake/build/blend — stored for audit
 
 
 @dataclass(frozen=True)
@@ -419,4 +420,4 @@ def convert_recipe(source: SourceRecipe) -> ConversionResult:
         detail = "; ".join(f"{e.path}: {e.message}" for e in result.errors[:5])
         return Uncertain(REASON_VALIDATION_FAILED, detail)
 
-    return Ok(slug=slug, recipe=recipe, spiritolo_verbs=used)
+    return Ok(slug=slug, recipe=recipe, spiritolo_verbs=used, technique=technique.value)

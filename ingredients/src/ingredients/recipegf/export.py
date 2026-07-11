@@ -1,9 +1,11 @@
-"""Export orchestrator: drain the cluster export queue into validated pin-2
-bundles (persisted onto the cluster + optionally written as JSON files), and
-park anything the converter can't emit into ``recipegf_proposals``.
+"""Export orchestrator: drain the cluster export queue, persisting each drink's
+verb-frame recipe **relationally** (``recipegf_recipes`` + ``_ingredients`` +
+``_steps``) and parking anything the converter can't emit into
+``recipegf_proposals``.
 
-Kept separate from the CLI so it is exercisable against a real test DB in one
-call. Pure orchestration over a psycopg connection + the pure converter.
+The pin-2 bundle is a *projection* of those rows — generated on demand by
+:func:`ingredients.recipegf.db.generate_bundle` — not a stored blob. Kept
+separate from the CLI so it is exercisable against a real test DB in one call.
 """
 
 from __future__ import annotations
@@ -38,10 +40,12 @@ def run_export(
     """Process the export queue. Returns a Counter of outcomes: ``exported``,
     each Uncertain ``reason`` code, and ``files`` (bundles written to disk).
 
-    ``imported_at`` is the ISO-8601 stamp embedded in every bundle's meta
-    (injected so the caller controls it — real time from the CLI, a fixed value
-    from tests). ``dry_run`` suppresses all DB writes; ``out_dir`` (if set)
-    writes ``<slug>.json`` files even under dry-run, as a preview artifact.
+    Every ``Ok`` is validated + seam-checked (via :func:`build_bundle`) before
+    it is persisted, so an invalid recipe never lands. ``dry_run`` suppresses
+    all DB writes; ``out_dir`` writes ``<slug>.json`` — generated from the
+    stored rows when persisted, or from the in-memory bundle under ``dry_run``
+    (a preview; its ``imported_at`` is the passed value rather than the row's
+    ``exported_at``).
     """
     counts: Counter = Counter()
     out_path = Path(out_dir) if out_dir is not None else None
@@ -52,6 +56,7 @@ def run_export(
         conn, converter_version=CONVERTER_VERSION, site=site, limit=limit
     )
     for row in queue:
+        cluster_id = row["cluster_id"]
         source = export_db.build_source_recipe(conn, row)
         result = convert_recipe(source)
 
@@ -60,7 +65,7 @@ def run_export(
             if not dry_run:
                 enqueue_proposal(
                     conn,
-                    cluster_id=row["cluster_id"],
+                    cluster_id=cluster_id,
                     canonical_name=row["canonical_name"],
                     proposed_slug=None,
                     reason=result.reason,
@@ -70,7 +75,7 @@ def run_export(
                 )
                 export_db.park_uncertain(
                     conn,
-                    cluster_id=row["cluster_id"],
+                    cluster_id=cluster_id,
                     proposed_slug=None,
                     source=row["source_url"] or "",
                     converter_version=CONVERTER_VERSION,
@@ -79,7 +84,9 @@ def run_export(
             continue
 
         assert isinstance(result, Ok)
-        bundle = build_bundle(
+        # Validate + enforce the seam guarantees before persisting (raises on
+        # violation, so an invalid recipe can never be stored).
+        preview_bundle = build_bundle(
             result.recipe,
             verb_defs_for(result.spiritolo_verbs),
             slug=result.slug,
@@ -88,21 +95,26 @@ def run_export(
         )
         counts["exported"] += 1
 
-        if out_path is not None:
-            (out_path / f"{result.slug}.json").write_text(
-                json.dumps(bundle, indent=2) + "\n", encoding="utf-8"
-            )
-            counts["files"] += 1
-
+        bundle_for_file: dict[str, Any] = preview_bundle
         if not dry_run:
-            export_db.write_bundle(
+            export_db.write_recipe(
                 conn,
-                cluster_id=row["cluster_id"],
-                slug=result.slug,
-                bundle=bundle,
+                cluster_id=cluster_id,
+                result=result,
                 source=row["source_url"] or "",
                 converter_version=CONVERTER_VERSION,
             )
             conn.commit()
+            # Canonical path: the emitted bundle is generated from the stored
+            # relational rows, not the in-memory dict.
+            bundle_for_file = export_db.generate_bundle(
+                conn, cluster_id=cluster_id, converter_version=CONVERTER_VERSION
+            )
+
+        if out_path is not None:
+            (out_path / f"{result.slug}.json").write_text(
+                json.dumps(bundle_for_file, indent=2) + "\n", encoding="utf-8"
+            )
+            counts["files"] += 1
 
     return counts

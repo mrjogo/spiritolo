@@ -19,11 +19,11 @@ Run `cd scraper && uv run …` and `cd web && npm …` from the repo root.
 
 ## Local environment
 
-**Supabase runs on the Mac host, not the devcontainer** (DooD vs `supabase start`'s bind mounts). Host setup: `brew install supabase/tap/supabase && supabase start`. Studio at http://localhost:54323.
+**Supabase runs on the host, not inside the devcontainer** (DooD vs `supabase start`'s bind mounts). The host may be a Mac (`brew install supabase/tap/supabase && supabase start`) or a Linux box running the Supabase Docker stack directly — either way it's reachable at the configured `SUPABASE_DB_URL` (and `TEST_DB_URL`), so the DB-integration tests run wherever a Postgres is reachable, not only on a Mac. Studio at http://localhost:54323.
 
 Devcontainer `.env`: `SUPABASE_DB_URL=postgresql://postgres:postgres@host.docker.internal:54322/postgres`. App code (psycopg, JS clients, browser, the `psql` CLI) connects fine via this URL.
 
-**Run `supabase` CLI commands from the Mac host** (where `supabase start` lives) — no `--db-url` flag needed; the CLI auto-detects its local cluster:
+**Run `supabase` CLI commands from the host where the Supabase stack lives** (where `supabase start` / the Docker stack runs) — no `--db-url` flag needed; the CLI auto-detects its local cluster:
 
 ```bash
 supabase db reset --yes
@@ -288,7 +288,9 @@ cd ingredients && uv run python -m ingredients.cli recipegf-export --reset --exc
 
 The eval set is [recipegf/eval_set.py](ingredients/src/ingredients/recipegf/eval_set.py) —
 real cocktails as pure fixtures (the converter is pure, so `--review` needs no
-DB). Bundle storage is on `recipe_clusters` (`recipegf_*` columns); writes go to
+DB). The verb-frame recipe is stored **relationally** (`recipegf_recipes` +
+`recipegf_ingredients` + `recipegf_steps`), and the bundle is *generated on
+demand* from those rows by `db.generate_bundle` — not a stored blob. Writes go to
 whatever `SUPABASE_DB_URL` points at.
 
 ## Data flow

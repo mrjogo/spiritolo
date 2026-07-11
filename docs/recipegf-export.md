@@ -136,13 +136,32 @@ the overlay API (D2b: iterate verbs in-repo, no RecipeGF PR per verb):
 
 A bundle embeds only the defs its recipe actually uses.
 
-## Storage
+## Storage — relational, not a blob
 
-Per-cluster bundle + provenance is written onto `recipe_clusters` (columns added
-by [`20260711120000_recipegf_export.sql`](../supabase/migrations/20260711120000_recipegf_export.sql)):
-`recipegf_slug`, `recipegf_bundle` (jsonb), `recipegf_source`, `recipegf_version`,
-`recipegf_status` (`exported` | `uncertain`), `recipegf_exported_at`. The review
-queue is the `recipegf_proposals` table.
+The verb-frame recipe is stored **relationally** (mirroring how the parser
+stores `recipe_ingredients` as rows, not as an opaque JSON blob), added by
+[`20260711120000_recipegf_export.sql`](../supabase/migrations/20260711120000_recipegf_export.sql):
+
+- `recipegf_recipes` — one header row per `(cluster, converter_version)`:
+  `status` (`exported` | `uncertain`), `slug`, `recipe_id`, `title`, `technique`,
+  `equipment text[]`, `source_url`, `exported_at`. An `uncertain` row is a
+  parking marker (no children) that keeps the cluster off the queue and pairs
+  with a `recipegf_proposals` row.
+- `recipegf_ingredients` — the RecipeGF-projected ingredients as rows
+  (`position`, `name`, `amount`, `unit`).
+- `recipegf_steps` — the verb-frame steps as rows (`step_index`, `verb`,
+  `result`, `roles jsonb`, `modifiers jsonb`). The per-verb role map is genuinely
+  schemaless, so it lives in `roles` jsonb (consistent with Spiritolo's other
+  jsonb columns); `verb`/`result` are typed columns.
+
+**The pin-2 bundle is a projection, generated on demand** by
+`db.generate_bundle(cluster_id, converter_version)` — it reconstructs
+`{recipe, verbs, meta}` from these rows (`meta.imported_at` = the header's
+`exported_at`), byte-equivalent to what the converter produced (guaranteed by a
+roundtrip test). This is the read path a P3 pull-by-slug uses. The export work
+queue is "clusters with no `recipegf_recipes` row at the current
+`CONVERTER_VERSION`" — a `NOT EXISTS`, exactly like the parser's queue. The
+review queue is `recipegf_proposals`.
 
 ## CLI
 

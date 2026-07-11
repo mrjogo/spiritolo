@@ -1538,9 +1538,9 @@ def run_recipegf_export(args: argparse.Namespace) -> int:
                 )
                 return 2
             from ingredients.recipegf.db import (
-                clear_exported_rows, count_exported_rows,
+                clear_recipe_headers, count_recipe_headers,
             )
-            to_clear = count_exported_rows(
+            to_clear = count_recipe_headers(
                 db.conn, except_version=args.except_version,
                 older_than=args.older_than,
             )
@@ -1554,12 +1554,12 @@ def run_recipegf_export(args: argparse.Namespace) -> int:
                 log.error("reset aborted")
                 return 1
             if to_clear:
-                n = clear_exported_rows(
+                n = clear_recipe_headers(
                     db.conn, except_version=args.except_version,
                     older_than=args.older_than,
                 )
                 db.conn.commit()
-                log.info("cleared recipegf_* columns on %d clusters", n)
+                log.info("cleared %d recipegf_recipes headers", n)
             return 0
 
         imported_at = datetime.now(timezone.utc).isoformat()
