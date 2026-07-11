@@ -55,10 +55,17 @@ propose→review pattern:
    cluster's representative recipe (jsonld + parsed/roled `recipe_ingredients`,
    joined to `taxonomy_nodes.slug`) into a verb-frame `recipe`. Ingredient names
    are the **taxonomy slug** when the mapper resolved one (the Barbot
-   slug→object seam), else a kebab-slug of the parsed name. Units are validated
-   against RecipeGF's `UnitValidator` (with a small translation table:
-   `tbsp→Tbs`, `pint→pnt`, `quart→qt`, `gallon→gal`); anything with no faithful
-   RecipeGF unit → review.
+   slug→object seam), else a kebab-slug of the parsed name.
+   - **Single sources of truth, no re-derivation.** Unit *validity* is
+     RecipeGF's `UnitValidator` — the converter keeps no parallel unit table,
+     only a small parser→RecipeGF alias bridge (`tbsp→Tbs`, `pint→pnt`,
+     `quart→qt`, `gallon→gal`) for spellings RecipeGF doesn't alias; anything
+     with no faithful RecipeGF unit → review. Ingredient **bucketing**
+     (ice/garnish/body) trusts dedup's `role` tag rather than re-detecting it,
+     so a missing role → review (also a de-facto freshness guard, since export
+     runs after cluster compute). *(The parser's own `units.py` and dedup's
+     `_OZ_PER_UNIT` are separate pre-RecipeGF unit tables slated to collapse
+     onto RecipeGF in a later cross-stage pass — out of scope here.)*
 4. **Validate + bundle** —
    [`bundle.py`](../ingredients/src/ingredients/recipegf/bundle.py) assembles the
    pin-2 shape and enforces the seam guarantees. Every `Ok` recipe is validated
@@ -77,6 +84,7 @@ behind the same seam.
 | `no_slug` | canonical_name yields no valid kebab slug |
 | `no_technique` | no stir/shake/build/blend keyword in instructions |
 | `muddle_unsupported` | instructions mention muddling; v1 templates can't place a muddle step |
+| `missing_roles` | an ingredient has no dedup role (cluster compute hasn't tagged this recipe) |
 | `unresolved_ingredient` | a row has no taxonomy slug and no parseable name |
 | `unknown_unit` | a unit has no faithful RecipeGF equivalent (e.g. `part`) |
 | `missing_amount` | a body ingredient has a unit but no amount |

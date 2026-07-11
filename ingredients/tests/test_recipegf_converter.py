@@ -148,6 +148,17 @@ def test_no_body_ingredients_is_uncertain():
     assert isinstance(res, Uncertain) and res.reason == "no_body"
 
 
+def test_missing_role_is_uncertain():
+    # Bucketing is dedup's job; an untagged ingredient means cluster compute
+    # hasn't run, so export abstains rather than guessing (no name-heuristic).
+    src = _src("Untagged", "Stir and strain.", [
+        SourceIngredient(position=1, raw_text="2 oz gin", name="gin", slug="gin",
+                         amount=2, unit="oz", role=None),
+    ])
+    res = convert_recipe(src)
+    assert isinstance(res, Uncertain) and res.reason == "missing_roles"
+
+
 def test_missing_amount_on_body_is_uncertain():
     src = _src("Amountless", "Stir and strain.", [
         SourceIngredient(position=1, raw_text="gin", name="gin", slug="gin",

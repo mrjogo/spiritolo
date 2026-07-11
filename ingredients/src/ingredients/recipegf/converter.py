@@ -26,7 +26,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from recipegf import RecipeId, format_recipe_id, is_valid_recipe_id
+from recipegf import RecipeId, UnitValidator, format_recipe_id, is_valid_recipe_id
 
 from .slug import mint_slug, slugify
 from .technique import (
@@ -98,6 +98,7 @@ ConversionResult = Ok | Uncertain
 REASON_NO_SLUG = "no_slug"
 REASON_NO_TECHNIQUE = "no_technique"
 REASON_MUDDLE_UNSUPPORTED = "muddle_unsupported"
+REASON_MISSING_ROLES = "missing_roles"
 REASON_UNRESOLVED_INGREDIENT = "unresolved_ingredient"
 REASON_UNKNOWN_UNIT = "unknown_unit"
 REASON_MISSING_AMOUNT = "missing_amount"
@@ -110,9 +111,20 @@ REASON_VALIDATION_FAILED = "validation_failed"
 # Unit + ingredient normalization
 # ---------------------------------------------------------------------------
 
-# Parser-canonical units that RecipeGF's UnitValidator rejects but that map
-# cleanly onto a RecipeGF-valid unit. Everything the validator already accepts
-# passes through untouched; anything neither accepted nor here → uncertain.
+# RecipeGF's UnitValidator is the single authority for unit *validity* — we do
+# not keep a parallel unit table here. The only local unit knowledge is the
+# bridge below: parser-canonical spellings RecipeGF doesn't already alias.
+#
+# NOTE (consolidation): Spiritolo still has two *other* unit tables that predate
+# RecipeGF — the parser's ``units.py`` and dedup's role-classifier
+# ``_OZ_PER_UNIT``. Those should collapse onto RecipeGF too (the parser would
+# emit RecipeGF-valid units directly, retiring this bridge). That's the bigger
+# cross-stage pass; out of scope for P2, which just refuses to duplicate.
+_UNITS = UnitValidator()
+
+# Parser-canonical units RecipeGF rejects but that map cleanly onto a
+# RecipeGF-valid unit. Anything the validator accepts passes through untouched;
+# anything neither accepted nor here → uncertain.
 _UNIT_TRANSLATE = {"tbsp": "Tbs", "pint": "pnt", "quart": "qt", "gallon": "gal"}
 
 # Count units where a missing amount defaults to 1 (a single piece).
@@ -121,24 +133,14 @@ _COUNT_UNITS = {"each", "cube", "piece", "slice", "wedge", "wheel", "sprig", "tw
 # Roles whose missing amount we default to 1 (a garnish/dash accent).
 _DEFAULT_ONE_ROLES = {"garnish", "bitters"}
 
-# Name/raw tokens that mark a garnish when dedup roles are absent.
-_GARNISH_HINTS = (
-    "twist", "peel", "zest", "wheel", "wedge", "slice", "cherry", "mint",
-    "olive", "sprig", "garnish", "rind", "leaf",
-)
-
-_ICE_NAMES = {"ice", "crushed-ice", "cracked-ice", "ice-cube", "ice-cubes"}
-
 
 def _recipegf_unit(unit: str | None) -> str | None:
     """Translate a parser unit to a RecipeGF-valid unit, or ``None`` if it has
     no faithful RecipeGF equivalent (relative units like ``part``, exotic
-    count nouns like ``leaf``)."""
-    from recipegf import UnitValidator
-
+    count nouns like ``leaf``). Validity is RecipeGF's call, not ours."""
     if not unit:
         return None
-    if UnitValidator().is_valid(unit):
+    if _UNITS.is_valid(unit):
         return unit
     return _UNIT_TRANSLATE.get(unit)
 
@@ -155,20 +157,11 @@ def _ingredient_name(ing: SourceIngredient) -> str | None:
     return None
 
 
-def _is_ice(ing: SourceIngredient, name: str) -> bool:
-    return ing.role == "ice" or name in _ICE_NAMES
-
-
-def _is_garnish(ing: SourceIngredient, name: str) -> bool:
-    if ing.role == "garnish":
-        return True
-    if ing.role is not None:
-        return False  # a non-garnish role is authoritative
-    hay = f"{name} {ing.raw_text}".lower()
-    return any(h in hay for h in _GARNISH_HINTS)
-
-
 def _is_topper(name: str, ing: SourceIngredient) -> bool:
+    # "Topper" is a technique-level distinction (build + effervescent pour), not
+    # a dedup role — the role vocabulary has no such concept — so this stays a
+    # local name/text heuristic. Bucketing (ice/garnish/body), by contrast, is
+    # dedup's call: see _prepare_ingredients.
     hay = f"{name} {ing.raw_text}".lower()
     return any(h in hay for h in TOPPER_HINTS)
 
@@ -205,11 +198,16 @@ def _prepare_ingredients(
                 f"(raw={ing.raw_text!r})",
             )
 
-        bucket = "body"
-        if _is_ice(ing, name):
-            bucket = "ice"
-        elif _is_garnish(ing, name):
-            bucket = "garnish"
+        # Bucketing (ice / garnish / body) is dedup's call — it owns the role
+        # vocabulary. We trust the tag rather than re-deriving it, so a missing
+        # role means dedup hasn't tagged this recipe and export must not guess
+        # (also a de-facto freshness guard: export runs after cluster compute).
+        if ing.role is None:
+            return Uncertain(
+                REASON_MISSING_ROLES,
+                f"ingredient {name!r} has no dedup role (run cluster compute first)",
+            )
+        bucket = {"ice": "ice", "garnish": "garnish"}.get(ing.role, "body")
 
         rgf_unit = _recipegf_unit(ing.unit)
         amount = ing.amount
