@@ -105,13 +105,18 @@ def test_db_url() -> str:
 
 @pytest.fixture(scope="session", autouse=True)
 def _ensure_test_db_migrated() -> None:
-    """Create the test DB if missing; apply any new migrations.
+    """Create the test DB if missing; apply any new migrations; truncate all
+    data so each session starts clean.
 
     Runs once per pytest session. Re-applies only migration files not yet
     recorded in the ``_test_db_migrations`` manifest table — so adding a
-    new migration just causes the next test run to pick it up. Replacing
-    or editing an existing migration is *not* detected; if you need a
-    clean rebuild, drop the test DB and re-run pytest.
+    new migration just causes the next test run to pick it up. Then truncates
+    every public table (except the migration ledger) with RESTART IDENTITY, so
+    state cannot accumulate across runs of the persistent test DB.
+
+    Replacing or editing an existing migration's *SQL* is still not detected
+    (only its data is wiped, not its schema); for a schema rebuild after editing
+    a migration in place, drop the test DB and re-run pytest.
     """
     test_url = _validate_test_db_url()
     if test_url is None:
@@ -174,6 +179,26 @@ def _ensure_test_db_migrated() -> None:
                     "insert into _test_db_migrations (filename) values (%s)",
                     (path.name,),
                 )
+
+        # Start every session from a clean slate. The test DB is persistent
+        # (created once, migrations applied incrementally), so without this,
+        # data written by one run leaks into the next — a fixture that inserts
+        # explicit ids then collides with leftovers, etc. Truncating all public
+        # tables (except the migration ledger) with RESTART IDENTITY resets both
+        # rows and sequences, so runs can't accumulate state. Per-test fixtures
+        # still handle within-run isolation.
+        data_tables = [
+            row[0] for row in conn.execute(
+                "select tablename from pg_tables "
+                "where schemaname = 'public' and tablename <> '_test_db_migrations'"
+            ).fetchall()
+        ]
+        if data_tables:
+            conn.execute(
+                "truncate table "
+                + ", ".join(f'public."{t}"' for t in data_tables)
+                + " restart identity cascade"
+            )
 
 
 @pytest.fixture
