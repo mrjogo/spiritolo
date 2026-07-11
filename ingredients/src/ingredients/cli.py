@@ -105,6 +105,21 @@ def _add_cluster_args(p: argparse.ArgumentParser) -> None:
     add_reset_args(p, stage="recipes (cluster_id, variant_key, dedup_version)")
 
 
+def _add_recipegf_export_args(p: argparse.ArgumentParser) -> None:
+    p.add_argument("--review", action="store_true",
+                   help="Run the recipegf export eval set; do not touch the database.")
+    p.add_argument("--site", default=None,
+                   help="Restrict to clusters whose representative recipe is from one site.")
+    p.add_argument("--limit", type=int, default=None,
+                   help="Process at most N clusters.")
+    p.add_argument("--dry-run", action="store_true",
+                   help="Convert + validate; do not write bundles or proposals to the DB.")
+    p.add_argument("--out", default=None, metavar="DIR",
+                   help="Also write each emitted bundle as <slug>.json into DIR "
+                        "(written even under --dry-run, as a preview artifact).")
+    add_reset_args(p, stage="recipe_clusters (recipegf_* columns)")
+
+
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="parse_ingredients",
@@ -278,6 +293,22 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p_all = sub.add_parser("dedup-all",
                            help="Run normalize-names (phase 1) then cluster, in order.")
     _add_cluster_args(p_all)
+
+    # recipegf-export: convert clusters to validated RecipeGF pin-2 bundles.
+    p_export = sub.add_parser(
+        "recipegf-export",
+        help="Emit validated RecipeGF pin-2 bundles from clusters (P2).",
+    )
+    _add_recipegf_export_args(p_export)
+    export_sub = p_export.add_subparsers(dest="recipegf_cmd")
+    p_export_review = export_sub.add_parser(
+        "review-proposals",
+        help="Walk the recipegf_proposals queue interactively.",
+    )
+    p_export_review.add_argument(
+        "--decided-by", default=os.environ.get("USER", "operator"),
+        help="Name recorded on each decision.",
+    )
 
     return parser
 
@@ -1440,6 +1471,112 @@ def run_dedup_all(args: argparse.Namespace) -> int:
         db.close()
 
 
+def run_recipegf_export_review_proposals(args: argparse.Namespace) -> int:
+    from ingredients.recipegf.proposals import fetch_pending_proposals, mark_decided
+
+    db = IngredientsDatabase()
+    try:
+        pending = fetch_pending_proposals(db.conn)
+        if not pending:
+            log.info("no pending recipegf proposals")
+            return 0
+        for p in pending:
+            print()
+            print(f"proposal #{p['id']}  cluster={p['cluster_id']}  "
+                  f"{p['canonical_name']!r}")
+            print(f"  reason:  {p['reason']}")
+            print(f"  detail:  {p['detail']}")
+            print(f"  source:  {p['source_url']}")
+            answer = input("[r]esolved / re[j]ected / [s]kip: ").strip().lower()
+            if answer == "r":
+                mark_decided(db.conn, proposal_id=p["id"], status="resolved",
+                             decided_by=args.decided_by)
+                log.info("marked #%s resolved (re-run recipegf-export --reset to retry)", p["id"])
+            elif answer == "j":
+                mark_decided(db.conn, proposal_id=p["id"], status="rejected",
+                             decided_by=args.decided_by)
+                log.info("marked #%s rejected", p["id"])
+            else:
+                continue
+        return 0
+    finally:
+        db.close()
+
+
+def run_recipegf_export(args: argparse.Namespace) -> int:
+    from datetime import datetime, timezone
+
+    from ingredients.recipegf.export import run_export
+    from ingredients.recipegf.version import CONVERTER_VERSION
+
+    if getattr(args, "recipegf_cmd", None) == "review-proposals":
+        return run_recipegf_export_review_proposals(args)
+
+    if args.review:
+        # The converter is pure (no DB) — the eval runs against in-repo real
+        # recipe fixtures, so unlike map/dedup --review it needs no TEST_DB_URL.
+        from ingredients.recipegf.eval_set import run_eval
+        report = run_eval()
+        print("--- RecipeGF export eval ---")
+        print(f"  passed: {report['passed']}")
+        print(f"  failed: {report['failed']}")
+        if report["failed"]:
+            for c in report["cases"]:
+                if not c["ok"]:
+                    print(f"  {c['name']!r}: {c['detail']}")
+            return 1
+        return 0
+
+    db = IngredientsDatabase()
+    try:
+        if args.reset:
+            if args.site:
+                log.error(
+                    "recipegf-export --reset does not support --site scoping: "
+                    "recipe_clusters is shared across sites. Reset globally "
+                    "(omit --site) or clear the columns manually."
+                )
+                return 2
+            from ingredients.recipegf.db import (
+                clear_exported_rows, count_exported_rows,
+            )
+            to_clear = count_exported_rows(
+                db.conn, except_version=args.except_version,
+                older_than=args.older_than,
+            )
+            scope = describe_reset_scope(
+                site=None, except_version=args.except_version,
+                older_than=args.older_than,
+            )
+            if not confirm_reset(
+                row_count=to_clear, scope_desc=scope, assume_yes=args.yes,
+            ):
+                log.error("reset aborted")
+                return 1
+            if to_clear:
+                n = clear_exported_rows(
+                    db.conn, except_version=args.except_version,
+                    older_than=args.older_than,
+                )
+                db.conn.commit()
+                log.info("cleared recipegf_* columns on %d clusters", n)
+            return 0
+
+        imported_at = datetime.now(timezone.utc).isoformat()
+        counts = run_export(
+            db.conn, imported_at=imported_at, site=args.site, limit=args.limit,
+            dry_run=args.dry_run, out_dir=args.out,
+        )
+        mode = "dry-run" if args.dry_run else "applied"
+        print_summary(
+            f"RecipeGF export ({CONVERTER_VERSION})",
+            {"all": Counter(counts)}, mode=mode,
+        )
+        return 0
+    finally:
+        db.close()
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     parser = build_arg_parser()
@@ -1449,7 +1586,7 @@ def main() -> int:
     argv = sys.argv[1:]
     _top_level_cmds = (
         "parse", "map", "normalize-names", "cluster",
-        "promote-substances", "dedup-all", "--help", "-h",
+        "promote-substances", "dedup-all", "recipegf-export", "--help", "-h",
     )
     if argv and argv[0] not in _top_level_cmds:
         argv = ["parse"] + argv
@@ -1471,6 +1608,8 @@ def main() -> int:
         return run_promote_substances(args)
     if cmd == "dedup-all":
         return run_dedup_all(args)
+    if cmd == "recipegf-export":
+        return run_recipegf_export(args)
     parser.error(f"unknown command {cmd!r}")
     return 2
 
