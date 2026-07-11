@@ -19,11 +19,11 @@ Run `cd scraper && uv run …` and `cd web && npm …` from the repo root.
 
 ## Local environment
 
-**Supabase runs on the Mac host, not the devcontainer** (DooD vs `supabase start`'s bind mounts). Host setup: `brew install supabase/tap/supabase && supabase start`. Studio at http://localhost:54323.
+**Supabase runs on the host, not inside the devcontainer** (DooD vs `supabase start`'s bind mounts). The host may be a Mac (`brew install supabase/tap/supabase && supabase start`) or a Linux box running the Supabase Docker stack directly — either way it's reachable at the configured `SUPABASE_DB_URL` (and `TEST_DB_URL`), so the DB-integration tests run wherever a Postgres is reachable, not only on a Mac. Studio at http://localhost:54323.
 
 Devcontainer `.env`: `SUPABASE_DB_URL=postgresql://postgres:postgres@host.docker.internal:54322/postgres`. App code (psycopg, JS clients, browser, the `psql` CLI) connects fine via this URL.
 
-**Run `supabase` CLI commands from the Mac host** (where `supabase start` lives) — no `--db-url` flag needed; the CLI auto-detects its local cluster:
+**Run `supabase` CLI commands from the host where the Supabase stack lives** (where `supabase start` / the Docker stack runs) — no `--db-url` flag needed; the CLI auto-detects its local cluster:
 
 ```bash
 supabase db reset --yes
@@ -68,6 +68,7 @@ Stage CLIs (`fetch`, `classify`, `validate`, `extract`) share `--site` / `--limi
 | Drink scoring | `SCORER_VERSION` | [classify_drink.py](scraper/src/scraper/classify_drink.py) |
 | JSON-LD extraction | `EXTRACTOR_VERSION` | [extract.py](scraper/src/scraper/extract.py) |
 | Ingredient → taxonomy mapping | `MAPPER_VERSION` | [mapping/mapper.py](ingredients/src/ingredients/mapping/mapper.py) |
+| RecipeGF export conversion | `CONVERTER_VERSION` | [recipegf/version.py](ingredients/src/ingredients/recipegf/version.py) |
 
 ## Pipeline stages
 
@@ -250,6 +251,47 @@ The canonical-name pool grows bottom-up on staging: ~20 well-known cocktails are
 The eval set is [dedup/eval_set.py](ingredients/src/ingredients/dedup/eval_set.py), run against the fixture taxonomy in [dedup/eval_fixture.py](ingredients/src/ingredients/dedup/eval_fixture.py) so eval results don't drift with seed changes.
 
 Writes go to whatever `SUPABASE_DB_URL` points at. Bulk runs use the local-restore-then-upload flow — see [docs/upload.md](docs/upload.md).
+
+## RecipeGF Export
+
+Spiritolo emits validated **RecipeGF pin-2 bundles** — one per drink
+(`recipe_clusters` row) — so Barbot can import self-contained recipe docs with
+no runtime dependency on Spiritolo. This is the P2 half of the cross-repo
+recipe-identity design; **read [docs/recipegf-export.md](docs/recipegf-export.md)**
+for the full treatment. Depends on the pinned `recipegf` v0.3.0 library (P1).
+
+The bundle is `{recipe, verbs:[<spiritolo/ defs used>], meta:{slug, source, imported_at}}`.
+Non-obvious invariants worth surfacing:
+
+- **Recipe ids are reverse-DNS `com.spiritolo/<slug>:v1`.** A bare
+  `spiritolo/<slug>` recipe id is rejected — the `spiritolo` namespace is for
+  VERBS, not recipe authorities. `meta.slug` always equals
+  `parse_recipe_id(id).slug` (via RecipeGF's parser).
+- **Bundles are self-contained**: each carries the `spiritolo/` extension
+  verb-defs its steps reference, so a consumer validates against
+  `core ∪ spiritolo/` with no external lookup. Extension verbs live as
+  self-describing YAML in [recipegf/verbs/](ingredients/src/ingredients/recipegf/verbs)
+  (`spiritolo/blend`, `spiritolo/top`), loaded via RecipeGF's overlay API — D2b:
+  iterate verbs in-repo, no RecipeGF PR per verb.
+- **Deterministic Phase-1 converter** (technique keyword scan → step template).
+  Anything uncertain (no technique, muddle, untranslatable unit, unresolved
+  ingredient, …) routes to propose→review in `recipegf_proposals`, mirroring
+  `taxonomy_proposals`; the cluster parks at the current `CONVERTER_VERSION`.
+
+```bash
+cd ingredients && uv run python -m ingredients.cli recipegf-export            # convert queue
+cd ingredients && uv run python -m ingredients.cli recipegf-export --out data/recipegf
+cd ingredients && uv run python -m ingredients.cli recipegf-export --review   # eval set (no DB)
+cd ingredients && uv run python -m ingredients.cli recipegf-export review-proposals
+cd ingredients && uv run python -m ingredients.cli recipegf-export --reset --except-version v1 --yes
+```
+
+The eval set is [recipegf/eval_set.py](ingredients/src/ingredients/recipegf/eval_set.py) —
+real cocktails as pure fixtures (the converter is pure, so `--review` needs no
+DB). The verb-frame recipe is stored **relationally** (`recipegf_recipes` +
+`recipegf_ingredients` + `recipegf_steps`), and the bundle is *generated on
+demand* from those rows by `db.generate_bundle` — not a stored blob. Writes go to
+whatever `SUPABASE_DB_URL` points at.
 
 ## Data flow
 

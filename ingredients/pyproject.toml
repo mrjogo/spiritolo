@@ -6,6 +6,7 @@ dependencies = [
     "spiritolo-common",
     "psycopg[binary]>=3.2",
     "python-dotenv>=1.0",
+    "recipegf",
 ]
 
 [project.optional-dependencies]
@@ -25,3 +26,7 @@ testpaths = ["tests"]
 
 [tool.uv.sources]
 spiritolo-common = { workspace = true }
+# RecipeGF P1 (v0.3.0): id grammar, RecipeValidator, VerbRegistry overlay API,
+# namespace registry. The pip-installable package lives in the repo's python/
+# subdirectory. Pinned to the v0.3.0 tag — bump deliberately (see P2 spike).
+recipegf = { git = "https://github.com/mrjogo/RecipeGF.git", tag = "v0.3.0", subdirectory = "python" }
