@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import type { TaxonomyNode } from './shapeData';
 import { TX_BROWN_INK, TX_BROWN_MID, TX_FRAME_EDGE } from './palette';
 import { supabase } from '../../supabase';
-import { EditableField } from './EditableField';
+import { EditableField } from '../../ui/EditableField';
 import { AliasChipEditor } from './AliasChipEditor';
 import { NODE_KIND_OPTIONS, DEFAULT_ROLE_OPTIONS } from './schemas';
 

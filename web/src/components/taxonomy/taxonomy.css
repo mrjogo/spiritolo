@@ -22,9 +22,12 @@
   /* ── Form kit ──────────────────────────────────────────────────────────
      One height, one border colour, one focus colour. Inputs, selects,
      toggles, and buttons all consume these tokens so a row of mixed
-     controls reads as a single band. */
-  --tx-form-h: 36px;
-  --tx-form-radius: 3px;
+     controls reads as a single band.
+     --tx-form-h/--tx-form-radius are NOT redeclared here — they're plain
+     defaults (36px / 3px) now lifted to :root in ui/tokens.css, and
+     .taxonomy-page doesn't need a different value. Everything below IS a
+     deco override (gold/walnut instead of the generic ops palette) and
+     stays local to this page. */
   --tx-form-border: var(--tx-frame-edge);          /* #8a6a35 */
   --tx-form-border-focus: var(--tx-gold);          /* #c9a449 */
   --tx-form-bg: rgba(255, 252, 244, 0.92);

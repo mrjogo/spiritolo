@@ -26,7 +26,7 @@ import {
 import { updateTaxonomyNode, createTaxonomyNode, setNodeParents, deleteTaxonomyNode, getTaxonomyNodeBlockers } from '../components/taxonomy/rpcs';
 import { EditParentsModal } from '../components/taxonomy/EditParentsModal';
 import { DeleteNodeModal } from '../components/taxonomy/DeleteNodeModal';
-import { Toast } from '../components/taxonomy/Toast';
+import { Toast } from '../ui/Toast';
 import { PlusButton } from '../components/taxonomy/PlusButton';
 import { CreateChildModal } from '../components/taxonomy/CreateChildModal';
 import { HighlightPulse } from '../components/taxonomy/HighlightPulse';
