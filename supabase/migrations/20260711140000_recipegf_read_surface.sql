@@ -22,9 +22,23 @@
 ------------------------------------------------------------------------
 -- 1. slug uniqueness (per converter_version, exported rows only)
 ------------------------------------------------------------------------
+-- Self-heal first: if the DB already holds >1 exported row for the same
+-- (slug, converter_version) — two distinct clusters minting the same identity,
+-- a real conflict — keep the lowest cluster_id and delete the rest so the
+-- unique index below can always build (the deploy can't fail on pre-existing
+-- data). Deleting a header cascades its ingredient/step rows; the affected
+-- clusters simply re-queue. The export stage's mint-time guard
+-- (db.slug_claimed_by_other_cluster) then parks them into recipegf_proposals
+-- for human dedup, so the conflict is surfaced, not silently dropped.
+delete from recipegf_recipes r
+using recipegf_recipes keep
+where r.status = 'exported'
+  and keep.status = 'exported'
+  and r.slug = keep.slug
+  and r.converter_version = keep.converter_version
+  and r.cluster_id > keep.cluster_id;
+
 -- Partial: 'uncertain' parking rows have slug null and must not collide.
--- (If staging ever holds two exported clusters that mint the same slug, this
--- index creation fails loudly — the correct signal to dedup at mint time.)
 create unique index recipegf_recipes_slug_version_uidx
   on recipegf_recipes (slug, converter_version)
   where status = 'exported';

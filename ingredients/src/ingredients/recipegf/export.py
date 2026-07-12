@@ -20,7 +20,7 @@ import psycopg
 
 from . import db as export_db
 from .bundle import build_bundle
-from .converter import Ok, Uncertain, convert_recipe
+from .converter import REASON_SLUG_COLLISION, Ok, Uncertain, convert_recipe
 from .proposals import enqueue_proposal
 from .verbs import verb_defs_for
 from .version import CONVERTER_VERSION
@@ -91,6 +91,40 @@ def run_export(
             continue
 
         assert isinstance(result, Ok)
+
+        # Slug-collision guard (mint-time dedup): two distinct clusters minting
+        # the same slug at one version is a real identity conflict — park the
+        # second for human review rather than letting it collide on the
+        # (slug, converter_version) unique index. Checked against committed rows,
+        # so it needs the DB; dry-run writes nothing and is skipped.
+        if not dry_run:
+            claimed_by = export_db.slug_claimed_by_other_cluster(
+                conn, slug=result.slug, converter_version=CONVERTER_VERSION,
+                cluster_id=cluster_id,
+            )
+            if claimed_by is not None:
+                counts[REASON_SLUG_COLLISION] += 1
+                enqueue_proposal(
+                    conn,
+                    cluster_id=cluster_id,
+                    canonical_name=row["canonical_name"],
+                    proposed_slug=result.slug,
+                    reason=REASON_SLUG_COLLISION,
+                    detail=(f"slug {result.slug!r} already exported by cluster "
+                            f"{claimed_by}; rename one canonical_name to dedup"),
+                    source_url=row["source_url"],
+                    converter_version=CONVERTER_VERSION,
+                )
+                export_db.park_uncertain(
+                    conn,
+                    cluster_id=cluster_id,
+                    proposed_slug=None,
+                    source=row["source_url"] or "",
+                    converter_version=CONVERTER_VERSION,
+                )
+                conn.commit()
+                continue
+
         # Validate + enforce the seam guarantees before persisting (raises on
         # violation, so an invalid recipe can never be stored).
         preview_bundle = build_bundle(

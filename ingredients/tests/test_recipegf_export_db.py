@@ -8,6 +8,7 @@ what the converter produced (the "store, then project" contract).
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime
 
 import psycopg
@@ -342,6 +343,40 @@ def test_rpc_bundle_matches_python_projection(export_scenario):
         assert rpc["meta"]["source"] == py["meta"]["source"]
         assert datetime.fromisoformat(rpc["meta"]["imported_at"]) == \
             datetime.fromisoformat(py["meta"]["imported_at"])
+
+
+def test_slug_collision_parks_second_cluster(export_scenario):
+    """Two clusters minting the same slug: the first exports, the second is
+    parked (slug_collision) rather than colliding on the unique index."""
+    conn, of_cluster, _moj = export_scenario
+    # A second, distinct cluster with the same canonical_name → same slug
+    # (distinct source_url — recipes.source_url is unique).
+    dup_src = replace(_OF, source_url="https://ex/of-dup")
+    dup_rid = _insert_recipe(conn, dup_src)
+    dup_cluster = _insert_cluster(conn, key="k-of2", name=dup_src.canonical_name, rep_id=dup_rid)
+
+    counts = _run(conn)
+    assert counts["exported"] == 1
+    assert counts["slug_collision"] == 1
+
+    # Lower cluster id wins the slug; the higher is parked with a proposal.
+    winner, loser = sorted([of_cluster, dup_cluster])
+    assert conn.execute(
+        "select status from recipegf_recipes where cluster_id = %s", (winner,)
+    ).fetchone()[0] == "exported"
+    loser_row = conn.execute(
+        "select status, slug from recipegf_recipes where cluster_id = %s", (loser,)
+    ).fetchone()
+    assert loser_row == ("uncertain", None)
+    assert conn.execute(
+        "select reason from recipegf_proposals where cluster_id = %s", (loser,)
+    ).fetchone()[0] == "slug_collision"
+
+    # Exactly one exported row owns the slug — the invariant the index enforces.
+    assert conn.execute(
+        "select count(*) from recipegf_recipes "
+        "where slug = 'old-fashioned' and status = 'exported'"
+    ).fetchone()[0] == 1
 
 
 def test_rpc_bundle_unknown_slug_is_null(export_scenario):

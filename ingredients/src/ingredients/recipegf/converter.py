@@ -106,6 +106,10 @@ REASON_MISSING_AMOUNT = "missing_amount"
 REASON_DUPLICATE_INGREDIENT = "duplicate_ingredient"
 REASON_NO_BODY = "no_body"
 REASON_VALIDATION_FAILED = "validation_failed"
+# Raised by the export orchestrator (not convert_recipe): two distinct clusters
+# minted the same slug at one converter_version — a real identity conflict, so
+# the second is parked for human dedup rather than colliding on the unique index.
+REASON_SLUG_COLLISION = "slug_collision"
 
 
 # ---------------------------------------------------------------------------

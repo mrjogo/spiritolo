@@ -163,6 +163,30 @@ def write_recipe(
     return header_id
 
 
+def slug_claimed_by_other_cluster(
+    conn: psycopg.Connection,
+    *,
+    slug: str,
+    converter_version: str,
+    cluster_id: int,
+) -> int | None:
+    """The cluster id of an existing ``exported`` row that already owns ``slug``
+    at ``converter_version`` and is *not* ``cluster_id``, or ``None``.
+
+    The export orchestrator calls this before persisting an ``Ok`` so a second
+    cluster minting the same slug is parked for review instead of hitting the
+    ``(slug, converter_version)`` unique index. Since each cluster is committed
+    before the next is processed, this catches both cross-run and within-run
+    collisions."""
+    row = conn.execute(
+        "select cluster_id from recipegf_recipes "
+        "where slug = %s and converter_version = %s and status = 'exported' "
+        "and cluster_id <> %s limit 1",
+        (slug, converter_version, cluster_id),
+    ).fetchone()
+    return row[0] if row is not None else None
+
+
 def park_uncertain(
     conn: psycopg.Connection,
     *,

@@ -69,6 +69,8 @@ def wired(monkeypatch):
 
     monkeypatch.setattr(export_mod.export_db, "sync_verb_defs",
                         lambda conn: calls.setdefault("sync", []).append(True) or 0)
+    monkeypatch.setattr(export_mod.export_db, "slug_claimed_by_other_cluster",
+                        lambda conn, **kw: None)
     monkeypatch.setattr(export_mod.export_db, "fetch_export_queue",
                         lambda conn, **kw: queue)
     monkeypatch.setattr(export_mod.export_db, "build_source_recipe",
