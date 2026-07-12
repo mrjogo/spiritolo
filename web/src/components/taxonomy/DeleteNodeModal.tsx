@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ModalShell } from './CreateChildModal';
+import { ModalShell } from '../../ui/Modal';
 import type { TaxonomyBlockers } from './rpcs';
 
 interface Props {
