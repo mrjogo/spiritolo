@@ -20,7 +20,7 @@ export class RpcError extends Error {
   }
 }
 
-function unwrap<T>(data: T | null, error: { message: string } | null, op: string): T {
+export function unwrap<T>(data: T | null, error: { message: string } | null, op: string): T {
   if (error) throw new RpcError(`${op}: ${error.message}`, error);
   if (data === null) throw new RpcError(`${op}: empty response`, null);
   return data;

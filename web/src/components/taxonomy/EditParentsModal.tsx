@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
 import type { TaxonomyViewRow } from './shapeData';
 import { descendantsOf } from './cycle';
-import { ModalShell } from './CreateChildModal';
+import { ModalShell } from '../../ui/Modal';
 
 interface Props {
   node: TaxonomyViewRow;
