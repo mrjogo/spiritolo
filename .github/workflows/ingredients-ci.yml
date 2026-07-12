@@ -30,6 +30,11 @@ on:
 permissions:
   contents: read
 
+# Cancel a superseded run when new commits land on the same PR.
+concurrency:
+  group: ingredients-ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ingredients:
     runs-on: ubuntu-latest
@@ -54,6 +59,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
+
+      # Cache uv's downloaded/built wheels + the recipegf git checkout so repeat
+      # runs skip re-fetching. Keyed on the lockfile; loosely restored otherwise.
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
 
       - name: Install uv
         run: |
