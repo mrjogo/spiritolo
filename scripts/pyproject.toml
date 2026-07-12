@@ -6,6 +6,7 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "jsonschema>=4",
     "python-dotenv>=1.0",
+    "boto3>=1.43.46",
 ]
 
 [project.optional-dependencies]
