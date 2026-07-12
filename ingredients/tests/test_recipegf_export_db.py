@@ -292,6 +292,37 @@ def test_verb_defs_synced_from_repo(export_scenario):
     assert synced == spiritolo_verb_defs()
 
 
+def test_sync_verb_defs_prunes_removed_defs(db_conn, monkeypatch):
+    """A verb-def removed/renamed in the in-repo YAML must disappear from the
+    cache on the next sync — sync reconciles to the YAML set, it doesn't just
+    accumulate. Simulate the removal by shrinking the def set the second sync
+    sees; the first sync's now-orphaned row must be pruned."""
+    from ingredients.recipegf.verbs import spiritolo_verb_defs
+
+    conn = db_conn
+    conn.execute("truncate table recipegf_verb_defs")
+
+    full = spiritolo_verb_defs()
+    assert len(full) >= 2  # need at least one def to remove and one to keep
+
+    export_db.sync_verb_defs(conn)
+    assert {r[0] for r in conn.execute(
+        "select verb from recipegf_verb_defs"
+    ).fetchall()} == set(full)
+
+    # Drop one def, as if its YAML file were deleted from the repo, then re-sync.
+    victim = sorted(full)[0]
+    reduced = {v: d for v, d in full.items() if v != victim}
+    monkeypatch.setattr(export_db, "spiritolo_verb_defs", lambda: reduced)
+
+    export_db.sync_verb_defs(conn)
+    after = {r[0] for r in conn.execute(
+        "select verb from recipegf_verb_defs"
+    ).fetchall()}
+    assert after == set(reduced)
+    assert victim not in after  # the orphan was pruned, not left behind
+
+
 def test_rpc_catalog_lists_only_exported(export_scenario):
     conn, _of, _moj = export_scenario
     of_rid = _insert_recipe(conn, _FD)
@@ -315,9 +346,19 @@ def test_rpc_catalog_lists_only_exported(export_scenario):
 
 
 def test_rpc_bundle_matches_python_projection(export_scenario):
-    """The recipegf_bundle RPC (SQL) and generate_bundle_by_slug (Python) are
-    two projections of the same rows — they must agree byte-for-byte (modulo the
-    imported_at timestamp rendering, which is instant-equal)."""
+    """The recipegf_bundle RPC (SQL) and generate_bundle_by_slug (Python) are two
+    projections of the same rows. Contract, made explicit here:
+
+      - recipe, verbs, meta.slug, meta.source are **byte-identical**;
+      - meta.imported_at is the **same instant** but not necessarily the same
+        string — to_jsonb(timestamptz) and datetime.isoformat() render one instant
+        with different fractional-second/offset forms.
+
+    Instant-equality (not byte-equality) is the contract for imported_at because
+    nothing content-hashes a bundle across the two ingress paths: it is stored as
+    JSONB and validated structurally, never compared byte-for-byte between the RPC
+    and the Python projection.
+    """
     conn, _of, _moj = export_scenario
     fd_rid = _insert_recipe(conn, _FD)
     _insert_cluster(conn, key="k-fd", name=_FD.canonical_name, rep_id=fd_rid)
@@ -336,13 +377,17 @@ def test_rpc_bundle_matches_python_projection(export_scenario):
         assert validate_bundle(rpc).valid
         assert [d["verb"] for d in rpc["verbs"]] == expect_verbs
 
-        # recipe + verbs + meta.slug/source identical; imported_at same instant.
+        # Everything except the timestamp is byte-identical between the two paths.
         assert rpc["recipe"] == py["recipe"]
         assert rpc["verbs"] == py["verbs"]
         assert rpc["meta"]["slug"] == py["meta"]["slug"]
         assert rpc["meta"]["source"] == py["meta"]["source"]
-        assert datetime.fromisoformat(rpc["meta"]["imported_at"]) == \
-            datetime.fromisoformat(py["meta"]["imported_at"])
+        assert {k for k in rpc["meta"] if k != "imported_at"} == {"slug", "source"}
+
+        # imported_at: same instant, rendering allowed to differ (see docstring).
+        assert datetime.fromisoformat(rpc["meta"]["imported_at"]) == datetime.fromisoformat(
+            py["meta"]["imported_at"]
+        )
 
 
 def test_slug_collision_parks_second_cluster(export_scenario):
@@ -385,3 +430,38 @@ def test_rpc_bundle_unknown_slug_is_null(export_scenario):
     assert conn.execute(
         "select recipegf_bundle('nope', %s)", (CONVERTER_VERSION,)
     ).fetchone()[0] is None
+
+
+def test_read_surface_rpcs_are_service_role_only(export_scenario):
+    """EXECUTE on the read-surface RPCs is granted to service_role only and
+    revoked from public, so anon/authenticated are denied while service_role (the
+    role Barbot's live adapter connects as) is allowed. Every other RPC test runs
+    as the DB owner, who bypasses the grant — this is the only test that exercises
+    the GRANT/REVOKE boundary the migration declares.
+
+    The connection is autocommit, so ``set role`` persists across statements and a
+    permission error doesn't poison a transaction; each block resets the role.
+    """
+    conn, _of, _moj = export_scenario
+    _run(conn)  # so the service_role bundle pull below returns real data
+
+    catalog = ("select recipegf_catalog(%s)", (CONVERTER_VERSION,))
+    bundle = ("select recipegf_bundle(%s, %s)", ("old-fashioned", CONVERTER_VERSION))
+
+    # Public-facing roles: denied (SQLSTATE 42501, insufficient_privilege).
+    for role in ("anon", "authenticated"):
+        for sql, params in (catalog, bundle):
+            conn.execute(f"set role {role}")  # role names are fixed literals
+            try:
+                with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                    conn.execute(sql, params).fetchone()
+            finally:
+                conn.execute("reset role")
+
+    # service_role: allowed, and it actually reads through (SECURITY DEFINER).
+    conn.execute("set role service_role")
+    try:
+        assert conn.execute(*catalog).fetchall()  # lists the exported drinks
+        assert conn.execute(*bundle).fetchone()[0] is not None  # a real bundle
+    finally:
+        conn.execute("reset role")
