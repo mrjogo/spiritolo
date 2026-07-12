@@ -17,7 +17,13 @@
 -- Nothing here changes what the converter emits or how bundles are generated:
 -- the recipegf_* relational rows stay the source of truth and db.generate_bundle
 -- stays the canonical (Python) projection. The bundle RPC is a second projection
--- of the SAME rows; a DB parity test pins the two byte-for-byte equal.
+-- of the SAME rows; a DB parity test pins the two equal on recipe/verbs/
+-- meta.slug/meta.source (byte-for-byte) and on meta.imported_at as the same
+-- instant. imported_at is the ONLY field not byte-identical: to_jsonb(timestamptz)
+-- and Python datetime.isoformat() render one instant slightly differently
+-- (fractional-second / offset form). That is safe because nothing content-hashes
+-- a bundle across the two ingress paths — the bundle is stored as JSONB and
+-- validated structurally, never compared byte-for-byte between RPC and Python.
 
 ------------------------------------------------------------------------
 -- 1. slug uniqueness (per converter_version, exported rows only)
@@ -89,8 +95,10 @@ $$;
 -- 3b. recipegf_bundle(slug, converter_version) — the self-contained bundle
 ------------------------------------------------------------------------
 -- Reconstructs the pin-2 bundle {recipe, verbs, meta} from the relational rows
--- (+ the verb-def cache), byte-equivalent to db.generate_bundle. Returns null
--- when no exported row matches. This is the SQL twin of db.generate_bundle_by_slug;
+-- (+ the verb-def cache). Equivalent to db.generate_bundle: byte-identical on
+-- recipe/verbs/meta.slug/meta.source, and the same instant on meta.imported_at
+-- (the timestamp's rendering differs — see the header note). Returns null when
+-- no exported row matches. This is the SQL twin of db.generate_bundle_by_slug;
 -- a parity test asserts they agree, so the shape lives in one behavior even
 -- though it has two implementations.
 create or replace function public.recipegf_bundle(
@@ -158,6 +166,9 @@ as $$
     'meta', jsonb_build_object(
       'slug', hdr.slug,
       'source', coalesce(hdr.source_url, ''),
+      -- Same instant as the Python projection's exported_at.isoformat(); the ISO
+      -- string form may differ (fractional-second/offset). Instant-equal is the
+      -- contract — see the header note and the parity test.
       'imported_at', to_jsonb(hdr.exported_at)
     )
   )
