@@ -15,7 +15,7 @@ from typing import Any
 import psycopg
 
 from .converter import Ok, SourceIngredient, SourceRecipe
-from .verbs import is_spiritolo_verb, verb_defs_for
+from .verbs import is_spiritolo_verb, spiritolo_verb_defs, verb_defs_for
 from .version import RECIPE_SCHEMA
 
 _RESERVED_STEP_KEYS = {"verb", "result", "modifiers"}
@@ -163,6 +163,30 @@ def write_recipe(
     return header_id
 
 
+def slug_claimed_by_other_cluster(
+    conn: psycopg.Connection,
+    *,
+    slug: str,
+    converter_version: str,
+    cluster_id: int,
+) -> int | None:
+    """The cluster id of an existing ``exported`` row that already owns ``slug``
+    at ``converter_version`` and is *not* ``cluster_id``, or ``None``.
+
+    The export orchestrator calls this before persisting an ``Ok`` so a second
+    cluster minting the same slug is parked for review instead of hitting the
+    ``(slug, converter_version)`` unique index. Since each cluster is committed
+    before the next is processed, this catches both cross-run and within-run
+    collisions."""
+    row = conn.execute(
+        "select cluster_id from recipegf_recipes "
+        "where slug = %s and converter_version = %s and status = 'exported' "
+        "and cluster_id <> %s limit 1",
+        (slug, converter_version, cluster_id),
+    ).fetchone()
+    return row[0] if row is not None else None
+
+
 def park_uncertain(
     conn: psycopg.Connection,
     *,
@@ -186,6 +210,31 @@ def park_uncertain(
         """,
         (cluster_id, proposed_slug, source, converter_version),
     )
+
+
+# --------------------------------------------------------------------------
+# Verb-def cache: keep the DB copy of the in-repo spiritolo/ verb-defs fresh
+# --------------------------------------------------------------------------
+
+
+def sync_verb_defs(conn: psycopg.Connection) -> int:
+    """Refresh ``recipegf_verb_defs`` from the in-repo YAML (the source of
+    truth) so the ``recipegf_bundle`` RPC can return a self-contained bundle.
+
+    Idempotent upsert of every ``spiritolo/`` verb-def. Called at the start of
+    an export run (see ``export.run_export``), so a bundle row and the verb-defs
+    its steps reference are always written together — no drift, no manual sync.
+    Caller commits. Returns the number of verb-defs written."""
+    defs = spiritolo_verb_defs()
+    for verb, definition in defs.items():
+        conn.execute(
+            "insert into recipegf_verb_defs (verb, definition, updated_at) "
+            "values (%s, %s::jsonb, now()) "
+            "on conflict (verb) do update "
+            "set definition = excluded.definition, updated_at = now()",
+            (verb, json.dumps(definition)),
+        )
+    return len(defs)
 
 
 # --------------------------------------------------------------------------
@@ -255,6 +304,31 @@ def generate_bundle(
             "imported_at": exported_at.isoformat(),
         },
     }
+
+
+def generate_bundle_by_slug(
+    conn: psycopg.Connection, *, slug: str, converter_version: str
+) -> dict[str, Any] | None:
+    """Slug-keyed pull: resolve ``slug`` → ``cluster_id`` (among ``exported``
+    rows at ``converter_version``) then reconstruct the bundle via
+    :func:`generate_bundle`. Returns ``None`` when no exported row matches.
+
+    This is the read path Barbot's P3 import uses to fetch a drink by its
+    Spiritolo slug (the sync key), rather than by cluster id. It is the Python
+    twin of the ``recipegf_bundle(slug, converter_version)`` RPC — both project
+    the same relational rows; a DB parity test pins them equal.
+    """
+    row = conn.execute(
+        "select cluster_id from recipegf_recipes "
+        "where slug = %s and converter_version = %s and status = 'exported' "
+        "limit 1",
+        (slug, converter_version),
+    ).fetchone()
+    if row is None:
+        return None
+    return generate_bundle(
+        conn, cluster_id=row[0], converter_version=converter_version
+    )
 
 
 # --------------------------------------------------------------------------

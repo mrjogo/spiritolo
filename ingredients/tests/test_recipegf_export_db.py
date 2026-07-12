@@ -8,8 +8,10 @@ what the converter produced (the "store, then project" contract).
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from datetime import datetime
 
+import psycopg
 import pytest
 
 from ingredients.recipegf import db as export_db
@@ -27,18 +29,21 @@ _IMPORTED_AT = "2026-07-11T00:00:00+00:00"
 
 # The exportable drink, as a SourceRecipe — we both seed the DB from it and
 # convert it in-memory, so the stored rows and the "expected" bundle share one
-# source of truth (slug=None everywhere → the converter slugifies the name).
+# source of truth. Ingredients carry *registered* taxonomy slugs (bourbon / ice
+# / orange): D6 governance means the converter never slugifies a parsed name,
+# so an exportable fixture must supply resolved slugs (a null-slug ingredient
+# would abstain, like _MOJ's muddle does for a different reason).
 _OF = SourceRecipe(
     canonical_name="Old Fashioned", source_url="https://ex/of",
     jsonld={"recipeInstructions": "Stir with ice and strain over a large cube. "
                                   "Garnish with an orange twist."},
     ingredients=[
         SourceIngredient(position=0, raw_text="2 oz bourbon", name="bourbon",
-                         slug=None, amount=2, unit="oz", role="base_spirit"),
+                         slug="bourbon", amount=2, unit="oz", role="base_spirit"),
         SourceIngredient(position=1, raw_text="1 cube ice", name="ice",
-                         slug=None, amount=1, unit="cube", role="ice"),
+                         slug="ice", amount=1, unit="cube", role="ice"),
         SourceIngredient(position=2, raw_text="orange twist", name="orange twist",
-                         slug=None, amount=None, unit=None, role="garnish"),
+                         slug="orange", amount=None, unit=None, role="garnish"),
     ],
 )
 
@@ -51,6 +56,38 @@ _MOJ = SourceRecipe(
     ],
 )
 
+# A blend drink — exercises the spiritolo/blend extension verb, so its bundle's
+# `verbs` array is non-empty (the RPC's verb-def-from-cache path).
+_FD = SourceRecipe(
+    canonical_name="Frozen Daiquiri", source_url="https://ex/fd",
+    jsonld={"recipeInstructions": "Combine rum, lime juice, simple syrup and ice "
+                                  "in a blender. Blend until smooth."},
+    ingredients=[
+        SourceIngredient(position=0, raw_text="2 oz white rum", name="white rum",
+                         slug="white-rum", amount=2, unit="oz", role="base_spirit"),
+        SourceIngredient(position=1, raw_text="1 oz lime juice", name="lime juice",
+                         slug="lime-juice", amount=1, unit="oz", role="citrus"),
+        SourceIngredient(position=2, raw_text="0.5 oz simple syrup", name="simple syrup",
+                         slug="simple-syrup", amount=0.5, unit="oz", role="sweetener"),
+        SourceIngredient(position=3, raw_text="1 cup ice", name="ice",
+                         slug="ice", amount=1, unit="cup", role="ice"),
+    ],
+)
+
+
+def _ensure_node(conn, slug: str) -> int:
+    """Register a taxonomy node for ``slug`` (idempotent), returning its id.
+
+    The converter reads the *registered* slug via the taxonomy_nodes join in
+    ``fetch_source_ingredients`` — there is no name-slugify fallback — so an
+    exportable seed must actually register its ingredient slugs here."""
+    row = conn.execute(
+        "insert into taxonomy_nodes (slug, display_name) values (%s, %s) "
+        "on conflict (slug) do update set slug = excluded.slug returning id",
+        (slug, slug),
+    ).fetchone()
+    return row[0]
+
 
 def _insert_recipe(conn, src: SourceRecipe) -> int:
     rid = conn.execute(
@@ -59,12 +96,14 @@ def _insert_recipe(conn, src: SourceRecipe) -> int:
         (src.source_url, json.dumps(src.jsonld)),
     ).fetchone()[0]
     for ing in src.ingredients:
+        node_id = _ensure_node(conn, ing.slug) if ing.slug else None
         conn.execute(
             "insert into recipe_ingredients "
             "(recipe_id, position, raw_text, name, amount, unit, role, "
-            " parse_status, parser_version) "
-            "values (%s,%s,%s,%s,%s,%s,%s,'parsed','v1')",
-            (rid, ing.position, ing.raw_text, ing.name, ing.amount, ing.unit, ing.role),
+            " taxonomy_node_id, parse_status, parser_version) "
+            "values (%s,%s,%s,%s,%s,%s,%s,%s,'parsed','v1')",
+            (rid, ing.position, ing.raw_text, ing.name, ing.amount, ing.unit,
+             ing.role, node_id),
         )
     return rid
 
@@ -83,8 +122,9 @@ def _insert_cluster(conn, *, key, name, rep_id) -> int:
 def export_scenario(db_conn):
     conn = db_conn
     conn.execute(
-        "truncate table recipegf_proposals, recipegf_recipes, recipe_clusters, "
-        "recipe_ingredients, recipes restart identity cascade"
+        "truncate table recipegf_proposals, recipegf_recipes, recipegf_verb_defs, "
+        "recipe_clusters, recipe_ingredients, recipes, taxonomy_nodes "
+        "restart identity cascade"
     )
     of_rid = _insert_recipe(conn, _OF)
     of_cluster = _insert_cluster(conn, key="k-of", name=_OF.canonical_name, rep_id=of_rid)
@@ -192,3 +232,156 @@ def test_dry_run_does_not_write(export_scenario):
 def _run(conn, **kw):
     from ingredients.recipegf.export import run_export
     return run_export(conn, imported_at=_IMPORTED_AT, **kw)
+
+
+# --------------------------------------------------------------------------
+# P3 read surface: slug-keyed pull, verb-def sync, catalog + bundle RPCs
+# --------------------------------------------------------------------------
+
+
+def test_generate_bundle_by_slug_matches_cluster_pull(export_scenario):
+    conn, of_cluster, _moj = export_scenario
+    _run(conn)
+
+    by_slug = export_db.generate_bundle_by_slug(
+        conn, slug="old-fashioned", converter_version=CONVERTER_VERSION
+    )
+    by_cluster = export_db.generate_bundle(
+        conn, cluster_id=of_cluster, converter_version=CONVERTER_VERSION
+    )
+    assert by_slug is not None
+    assert by_slug == by_cluster
+    assert validate_bundle(by_slug).valid
+
+
+def test_generate_bundle_by_slug_unknown_is_none(export_scenario):
+    conn, _of, _moj = export_scenario
+    _run(conn)
+    assert export_db.generate_bundle_by_slug(
+        conn, slug="does-not-exist", converter_version=CONVERTER_VERSION
+    ) is None
+    # A parked-uncertain drink has no exported row → no slug-keyed bundle.
+    assert export_db.generate_bundle_by_slug(
+        conn, slug="mojito", converter_version=CONVERTER_VERSION
+    ) is None
+
+
+def test_slug_is_unique_per_converter_version(export_scenario):
+    conn, of_cluster, _moj = export_scenario
+    _run(conn)
+    # A second exported row with the same (slug, converter_version) is rejected
+    # by the partial unique index — the guarantee Barbot's slug join relies on.
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        conn.execute(
+            "insert into recipegf_recipes "
+            "(cluster_id, status, slug, recipe_id, converter_version) "
+            "values (%s, 'exported', 'old-fashioned', 'com.spiritolo/old-fashioned:v1', %s)",
+            (of_cluster, CONVERTER_VERSION),
+        )
+
+
+def test_verb_defs_synced_from_repo(export_scenario):
+    from ingredients.recipegf.verbs import spiritolo_verb_defs
+
+    conn, _of, _moj = export_scenario
+    _run(conn)
+    rows = conn.execute(
+        "select verb, definition from recipegf_verb_defs order by verb"
+    ).fetchall()
+    synced = {verb: definition for verb, definition in rows}
+    assert synced == spiritolo_verb_defs()
+
+
+def test_rpc_catalog_lists_only_exported(export_scenario):
+    conn, _of, _moj = export_scenario
+    of_rid = _insert_recipe(conn, _FD)
+    _insert_cluster(conn, key="k-fd", name=_FD.canonical_name, rep_id=of_rid)
+    _run(conn)
+
+    rows = conn.execute(
+        "select slug, title, technique from recipegf_catalog(%s) order by slug",
+        (CONVERTER_VERSION,),
+    ).fetchall()
+    slugs = [r[0] for r in rows]
+    assert slugs == ["frozen-daiquiri", "old-fashioned"]   # sorted; mojito parked-out
+    by_slug = {r[0]: (r[1], r[2]) for r in rows}
+    assert by_slug["old-fashioned"] == ("Old Fashioned", "stir")
+    assert by_slug["frozen-daiquiri"] == ("Frozen Daiquiri", "blend")
+
+    # Version filter: a bogus version yields nothing.
+    assert conn.execute(
+        "select count(*) from recipegf_catalog('vX')"
+    ).fetchone()[0] == 0
+
+
+def test_rpc_bundle_matches_python_projection(export_scenario):
+    """The recipegf_bundle RPC (SQL) and generate_bundle_by_slug (Python) are
+    two projections of the same rows — they must agree byte-for-byte (modulo the
+    imported_at timestamp rendering, which is instant-equal)."""
+    conn, _of, _moj = export_scenario
+    fd_rid = _insert_recipe(conn, _FD)
+    _insert_cluster(conn, key="k-fd", name=_FD.canonical_name, rep_id=fd_rid)
+    _run(conn)
+
+    for slug, expect_verbs in [("old-fashioned", []), ("frozen-daiquiri", ["spiritolo/blend"])]:
+        rpc = conn.execute(
+            "select recipegf_bundle(%s, %s)", (slug, CONVERTER_VERSION)
+        ).fetchone()[0]
+        py = export_db.generate_bundle_by_slug(
+            conn, slug=slug, converter_version=CONVERTER_VERSION
+        )
+        assert rpc is not None and py is not None
+
+        # The RPC bundle is self-contained + valid exactly as Barbot validates it.
+        assert validate_bundle(rpc).valid
+        assert [d["verb"] for d in rpc["verbs"]] == expect_verbs
+
+        # recipe + verbs + meta.slug/source identical; imported_at same instant.
+        assert rpc["recipe"] == py["recipe"]
+        assert rpc["verbs"] == py["verbs"]
+        assert rpc["meta"]["slug"] == py["meta"]["slug"]
+        assert rpc["meta"]["source"] == py["meta"]["source"]
+        assert datetime.fromisoformat(rpc["meta"]["imported_at"]) == \
+            datetime.fromisoformat(py["meta"]["imported_at"])
+
+
+def test_slug_collision_parks_second_cluster(export_scenario):
+    """Two clusters minting the same slug: the first exports, the second is
+    parked (slug_collision) rather than colliding on the unique index."""
+    conn, of_cluster, _moj = export_scenario
+    # A second, distinct cluster with the same canonical_name → same slug
+    # (distinct source_url — recipes.source_url is unique).
+    dup_src = replace(_OF, source_url="https://ex/of-dup")
+    dup_rid = _insert_recipe(conn, dup_src)
+    dup_cluster = _insert_cluster(conn, key="k-of2", name=dup_src.canonical_name, rep_id=dup_rid)
+
+    counts = _run(conn)
+    assert counts["exported"] == 1
+    assert counts["slug_collision"] == 1
+
+    # Lower cluster id wins the slug; the higher is parked with a proposal.
+    winner, loser = sorted([of_cluster, dup_cluster])
+    assert conn.execute(
+        "select status from recipegf_recipes where cluster_id = %s", (winner,)
+    ).fetchone()[0] == "exported"
+    loser_row = conn.execute(
+        "select status, slug from recipegf_recipes where cluster_id = %s", (loser,)
+    ).fetchone()
+    assert loser_row == ("uncertain", None)
+    assert conn.execute(
+        "select reason from recipegf_proposals where cluster_id = %s", (loser,)
+    ).fetchone()[0] == "slug_collision"
+
+    # Exactly one exported row owns the slug — the invariant the index enforces.
+    assert conn.execute(
+        "select count(*) from recipegf_recipes "
+        "where slug = 'old-fashioned' and status = 'exported'"
+    ).fetchone()[0] == 1
+
+
+def test_rpc_bundle_unknown_slug_is_null(export_scenario):
+    conn, _of, _moj = export_scenario
+    _run(conn)
+    assert conn.execute(
+        "select recipegf_bundle('nope', %s)", (CONVERTER_VERSION,)
+    ).fetchone()[0] is None
