@@ -61,6 +61,24 @@ jobs:
           curl -LsSf https://astral.sh/uv/install.sh | sh
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Authenticate git for the recipegf dependency
+        # recipegf is a git dependency on the (private) mrjogo/RecipeGF repo, which
+        # the default GITHUB_TOKEN can't reach. Provide a RECIPEGF_TOKEN secret (a
+        # read-only token for that repo) to authenticate the clone; if RecipeGF is
+        # public instead, no secret is needed and this is a no-op.
+        env:
+          RECIPEGF_TOKEN: ${{ secrets.RECIPEGF_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${RECIPEGF_TOKEN:-}" ]; then
+            git config --global \
+              url."https://x-access-token:${RECIPEGF_TOKEN}@github.com/".insteadOf \
+              "https://github.com/"
+            echo "Configured authenticated GitHub access for the recipegf git dependency."
+          else
+            echo "RECIPEGF_TOKEN not set — assuming mrjogo/RecipeGF is reachable anonymously."
+          fi
+
       - name: Run ingredients suite (pure + DB, incl. recipegf export/RPC)
         run: |
           set -euo pipefail
