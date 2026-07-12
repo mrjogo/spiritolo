@@ -72,23 +72,25 @@ model.
 frozen and the `v0.4.0` tag cut (A5) before Spiritolo can pin it (A6/B1) and
 freeze the doc-schema (B3). **Everything else in B can start immediately** (§5).
 
-## 3. Decisions to ratify
+## 3. Decisions (ratified)
 
-Two places where the design shorthand doesn't match RecipeGF's actual grammar.
-Both are flagged in the Tract-A workstreams; pick deliberately **before A2/A3
-land**:
-
-1. **Ingredient `ref` is reverse-DNS.** The `ref` grammar = recipe-id minus
-   `:vN`, whose authority must be reverse-DNS (≥2 dot-labels). So
-   **`com.spiritolo/campari` is valid; bare `spiritolo/campari` is NOT** (the
-   bare `spiritolo` namespace is reserved for *verbs*). Some sketches wrote
-   `spiritolo/campari`. **Recommendation: keep reverse-DNS** and have Spiritolo
-   emit `com.spiritolo/<slug>`. Allowing bare single-label authorities would be a
-   deliberate grammar widening in A2.
-2. **`ingredient.modifiers` is a freeform object.** It mirrors `step.modifiers`,
-   which is an `object` (`additionalProperties:true`, never validated) — **not**
-   the `["chilled"]` array in some `_x` sketches. **Recommendation: mirror the
-   object.** An array is a different, non-mirroring shape — decide in A3.
+1. **Ingredient `ref` is reverse-DNS — RATIFIED.** `ref` = `com.spiritolo/<slug>`;
+   bare `spiritolo/...` stays verbs-only. Grammar = recipe-id minus `:vN`
+   (authority ≥2 dot-labels). Spiritolo emits `com.spiritolo/<slug>`.
+2. **`modifiers` is `string[]`, the SAME shape on steps and ingredients —
+   RATIFIED.** A modifier value is an array of freeform, unlabeled human notes,
+   never validated. Rationale: modifiers are just multiple notes; an *object*
+   presumes note-categories we can't reliably assign, and an object-of-arrays is
+   overkill.
+   - **Consequence — A3 grows.** RecipeGF `step.modifiers` is an *object* today, so
+     standardizing on array **also changes the step shape** (`{note:"x"}` →
+     `["x"]`). This is a breaking change to a never-validated field — cheap
+     pre-release (Spiritolo is the only consumer; v0.4.0 is being cut anyway).
+     A3 now: (a) flip `step.modifiers` object→array in the schema, `models.py`,
+     `types.ts`, `examples/*.yaml`, and conformance fixtures; (b) add an identical
+     `ingredient.modifiers` array; (c) update Spiritolo's converter and the
+     `recipegf_steps.modifiers` storage/tests to arrays. Contents-standardization
+     (a note vocabulary) stays deferred.
 
 ## 4. Reconciliation notes
 
@@ -2144,7 +2146,20 @@ Structural note: A1/A2/A3 all edit the single schema JSON (spec/schema/recipegf-
     - Do NOT relax the authority to single-label to match the shorthand 'spiritolo/x' in the architecture doc's examples — the grammar is recipe-id-minus-:vN (reverse-DNS), so Spiritolo emits 'com.spiritolo/<slug>'. Flag, don't silently widen.
     - No separate ingredient-ref schema file or $ref indirection — inline the pattern on definitions.ingredient.properties.ref, mirroring how id.pattern lives inline.
 
-### WS-A3 — Add ingredient.modifiers freeform object (mirrors step.modifiers)  [recipegf]
+### WS-A3 — Standardize `modifiers` as `string[]` on steps AND ingredients  [recipegf]
+
+> **RATIFIED UPDATE (supersedes the "freeform object" guidance in this block — see §3.2).**
+> `modifiers` is an **array of freeform strings**, identical on `step` and
+> `ingredient`. This means A3 also **flips the existing `step.modifiers` from
+> object → array** (`{note:"x"}` → `["x"]`) across the schema, `models.py`,
+> `types.ts`, `examples/*.yaml`, and conformance fixtures — a breaking change to a
+> never-validated field, acceptable pre-release — plus adds the identical
+> `ingredient.modifiers` array and updates Spiritolo's converter +
+> `recipegf_steps.modifiers` to arrays (that Spiritolo change moves to A6/B1's
+> pin-bump PR). RED tests assert both shapes are `string[]` and that an old
+> object-form `modifiers` now fails validation. The block below is the original
+> object-mirroring draft, kept for context only.
+
 - depends_on: ['WS-A1', 'WS-A2']
 - parallelism: serialize-after WS-A2 (shares spec/schema/recipegf-cocktail-v1.json, models.py, types.ts, manifest.yaml). Smallest of the three seams; purely declarative, no validator behavior.
 - goal: An ingredient may carry an optional freeform modifiers object for human nuance, mirroring step.modifiers exactly (additionalProperties:true, never validated). Optional-additive; schema const unchanged.
