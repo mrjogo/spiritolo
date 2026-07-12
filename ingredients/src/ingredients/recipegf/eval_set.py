@@ -134,9 +134,12 @@ _GIN_AND_TONIC = _recipe(
     ],
 )
 
-# Slug fallback when the mapper abstained (no taxonomy slug): the parsed name is
-# kebab-slugified. Also exercises tbsp→Tbs unit translation.
-_WHISKEY_HIGHBALL = _recipe(
+# ---- should-abstain --------------------------------------------------------
+
+# D6 governance: an ingredient the mapper couldn't resolve to a *registered*
+# taxonomy slug (slug=None) does NOT fall back to a kebab-slug of the parsed
+# name — that would emit an ungoverned token. It abstains → propose→review.
+_UNRESOLVED_INGREDIENT = _recipe(
     "Whiskey Highball", "https://example.com/whiskey-highball",
     "Build over ice in a highball glass: add the whiskey, then top with soda "
     "water.",
@@ -146,8 +149,6 @@ _WHISKEY_HIGHBALL = _recipe(
         _ing(3, "ice", "ice", None, None, None, "ice"),
     ],
 )
-
-# ---- should-abstain --------------------------------------------------------
 
 _MOJITO = _recipe(
     "Mojito", "https://example.com/mojito",
@@ -187,8 +188,7 @@ CASES: list[EvalCase] = [
              expect_spiritolo_verbs=["spiritolo/blend"]),
     EvalCase(_GIN_AND_TONIC, expect_slug="gin-and-tonic",
              expect_spiritolo_verbs=["spiritolo/top"]),
-    EvalCase(_WHISKEY_HIGHBALL, expect_slug="whiskey-highball",
-             expect_spiritolo_verbs=["spiritolo/top"]),
+    EvalCase(_UNRESOLVED_INGREDIENT, expect_uncertain_reason="unresolved_ingredient"),
     EvalCase(_MOJITO, expect_uncertain_reason="muddle_unsupported"),
     EvalCase(_NO_TECHNIQUE, expect_uncertain_reason="no_technique"),
     EvalCase(_UNTRANSLATABLE_UNIT, expect_uncertain_reason="unknown_unit"),

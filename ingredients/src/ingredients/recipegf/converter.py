@@ -28,7 +28,7 @@ from typing import Any
 
 from recipegf import RecipeId, UnitValidator, format_recipe_id, is_valid_recipe_id
 
-from .slug import mint_slug, slugify
+from .slug import mint_slug
 from .technique import (
     TOPPER_HINTS,
     Technique,
@@ -150,15 +150,18 @@ def _recipegf_unit(unit: str | None) -> str | None:
 
 
 def _ingredient_name(ing: SourceIngredient) -> str | None:
-    """The RecipeGF ingredient name for a row: the taxonomy slug when the
-    mapper resolved one (the Barbot slug→object seam), else a kebab-slug of
-    the parsed name. ``None`` when neither is usable."""
-    if ing.slug:
-        return ing.slug
-    if ing.name:
-        slug = slugify(ing.name)
-        return slug or None
-    return None
+    """The RecipeGF ingredient name for a row: the **registered** taxonomy slug
+    the mapper resolved (the Barbot slug→object seam), or ``None``.
+
+    D6 identity governance: an ingredient token is an *identity*, so it must be
+    a canonical slug registered in Spiritolo's taxonomy — never client-side
+    slugified from free text (slugifying can collide and emits an ungoverned
+    token). So there is **no** ``slugify(name)`` fallback: an ingredient the
+    mapper couldn't resolve makes the recipe :class:`Uncertain`
+    (``REASON_UNRESOLVED_INGREDIENT``) and routes its name to the proposal
+    queue, rather than exporting a made-up slug. (Verbs are exempt — they come
+    from the closed RecipeGF vocab, so they're safe to use as-is.)"""
+    return ing.slug or None
 
 
 def _is_topper(name: str, ing: SourceIngredient) -> bool:

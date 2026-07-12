@@ -52,6 +52,13 @@ def run_export(
     if out_path is not None:
         out_path.mkdir(parents=True, exist_ok=True)
 
+    # Keep the DB copy of the in-repo spiritolo/ verb-defs fresh, so the
+    # recipegf_bundle RPC returns a self-contained bundle. Refresh before
+    # draining the queue so any exported row's verbs are already present.
+    if not dry_run:
+        export_db.sync_verb_defs(conn)
+        conn.commit()
+
     queue = export_db.fetch_export_queue(
         conn, converter_version=CONVERTER_VERSION, site=site, limit=limit
     )

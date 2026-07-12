@@ -54,8 +54,12 @@ propose→review pattern:
    [`converter.py`](../ingredients/src/ingredients/recipegf/converter.py) turns the
    cluster's representative recipe (jsonld + parsed/roled `recipe_ingredients`,
    joined to `taxonomy_nodes.slug`) into a verb-frame `recipe`. Ingredient names
-   are the **taxonomy slug** when the mapper resolved one (the Barbot
-   slug→object seam), else a kebab-slug of the parsed name.
+   are the **registered taxonomy slug** the mapper resolved (the Barbot
+   slug→object seam). D6 identity governance: there is **no** slugify-the-parsed-
+   name fallback — an ingredient token is an identity, so it must be a slug
+   registered in Spiritolo's taxonomy, never client-side slugified (which can
+   collide / emit an ungoverned token). An unresolved ingredient → review
+   (`unresolved_ingredient`). Verbs are exempt (closed RecipeGF vocab).
    - **Single sources of truth, no re-derivation.** Unit *validity* is
      RecipeGF's `UnitValidator` — the converter keeps no parallel unit table,
      only a small parser→RecipeGF alias bridge (`tbsp→Tbs`, `pint→pnt`,
@@ -158,10 +162,34 @@ stores `recipe_ingredients` as rows, not as an opaque JSON blob), added by
 `db.generate_bundle(cluster_id, converter_version)` — it reconstructs
 `{recipe, verbs, meta}` from these rows (`meta.imported_at` = the header's
 `exported_at`), byte-equivalent to what the converter produced (guaranteed by a
-roundtrip test). This is the read path a P3 pull-by-slug uses. The export work
+roundtrip test). The export work
 queue is "clusters with no `recipegf_recipes` row at the current
 `CONVERTER_VERSION`" — a `NOT EXISTS`, exactly like the parser's queue. The
 review queue is `recipegf_proposals`.
+
+## Read surface — Barbot's P3 pull-by-slug
+
+Barbot's menu-build import pulls each drink's bundle by its **slug** (the
+Spiritolo-owned join/sync key, D1). Hardened by
+[`20260711140000_recipegf_read_surface.sql`](../supabase/migrations/20260711140000_recipegf_read_surface.sql):
+
+- **`slug` is unique per `converter_version`** among `exported` rows (a partial
+  unique index; parked `uncertain` rows have null slug and are excluded), so a
+  slug is a safe join key.
+- **Slug-keyed pull** — `db.generate_bundle_by_slug(slug, converter_version)`
+  resolves `slug → cluster_id` then reuses `generate_bundle`. The offline path
+  (`--out` `<slug>.json` drop) and this live path project the same rows.
+- **Service-role RPCs** (SECURITY DEFINER, granted to `service_role` only — no
+  public/anon surface) give the live adapter a clean PostgREST read path:
+  - `recipegf_catalog(p_converter_version)` → the exported drinks
+    (`slug, title, technique, converter_version, exported_at`).
+  - `recipegf_bundle(slug, converter_version)` → the self-contained pin-2
+    bundle, assembled in SQL from the same relational rows **plus the
+    `recipegf_verb_defs` cache** (a copy of the in-repo `spiritolo/` verb-def
+    YAML, refreshed from it on every export by `db.sync_verb_defs`, so the
+    bundle stays self-contained with no drift). A DB parity test pins the RPC's
+    output equal to `generate_bundle_by_slug`, so the two projections never
+    diverge.
 
 ## CLI
 
