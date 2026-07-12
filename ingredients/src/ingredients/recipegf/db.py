@@ -218,10 +218,12 @@ def park_uncertain(
 
 
 def sync_verb_defs(conn: psycopg.Connection) -> int:
-    """Refresh ``recipegf_verb_defs`` from the in-repo YAML (the source of
+    """Reconcile ``recipegf_verb_defs`` to the in-repo YAML (the source of
     truth) so the ``recipegf_bundle`` RPC can return a self-contained bundle.
 
-    Idempotent upsert of every ``spiritolo/`` verb-def. Called at the start of
+    Upserts every current ``spiritolo/`` verb-def, then **prunes** any cache row
+    whose verb is no longer defined in the YAML — so a verb-def removed or
+    renamed in-repo doesn't leave an orphaned row behind. Called at the start of
     an export run (see ``export.run_export``), so a bundle row and the verb-defs
     its steps reference are always written together — no drift, no manual sync.
     Caller commits. Returns the number of verb-defs written."""
@@ -234,6 +236,13 @@ def sync_verb_defs(conn: psycopg.Connection) -> int:
             "set definition = excluded.definition, updated_at = now()",
             (verb, json.dumps(definition)),
         )
+    # Prune orphans: rows for verbs the YAML no longer defines. Surgical (leaves
+    # unchanged rows and their updated_at untouched); ``<> all(...)`` deletes
+    # everything cleanly when there are no defs at all.
+    conn.execute(
+        "delete from recipegf_verb_defs where verb <> all(%s::text[])",
+        (list(defs.keys()),),
+    )
     return len(defs)
 
 
@@ -301,6 +310,10 @@ def generate_bundle(
         "meta": {
             "slug": slug,
             "source": source_url or "",
+            # Same instant as the recipegf_bundle RPC's to_jsonb(exported_at); the
+            # two ISO renderings may differ byte-wise (fractional-second/offset),
+            # which is fine — the parity contract is instant-equal, and nothing
+            # content-hashes a bundle across the RPC/offline paths.
             "imported_at": exported_at.isoformat(),
         },
     }

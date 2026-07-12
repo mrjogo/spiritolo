@@ -159,6 +159,30 @@ def _ensure_test_db_migrated() -> None:
             admin.execute(f'create database "{name}"')
 
     with psycopg.connect(test_url, autocommit=True) as conn:
+        # Stub the Supabase role surface our migrations reference. On a real
+        # Supabase cluster these roles are cluster-global and already exist (so
+        # this is a no-op there); on a bare Postgres (CI) they don't, and the
+        # migrations' `grant ... to anon/authenticated/service_role` would fail
+        # without them. service_role gets BYPASSRLS + USAGE on public to mirror
+        # Supabase, so the read-surface EXECUTE boundary tests deny/allow at the
+        # function-grant level, not incidentally at the schema level.
+        conn.execute(
+            """
+            do $$
+            begin
+                if not exists (select from pg_roles where rolname = 'anon')
+                    then create role anon nologin; end if;
+                if not exists (select from pg_roles where rolname = 'authenticated')
+                    then create role authenticated nologin; end if;
+                if not exists (select from pg_roles where rolname = 'service_role')
+                    then create role service_role nologin bypassrls; end if;
+            end $$
+            """
+        )
+        conn.execute(
+            "grant usage on schema public to anon, authenticated, service_role"
+        )
+
         # Stub the Supabase auth surface our migrations reference. The
         # real auth schema is provisioned by GoTrue (cloud) or by
         # `supabase start` (host); the test DB is bare Postgres, so we
@@ -183,6 +207,15 @@ def _ensure_test_db_migrated() -> None:
         # locally so migrations that move extensions into it
         # (`alter extension ... set schema extensions`) succeed.
         conn.execute("create schema if not exists extensions")
+        # Supabase also keeps `extensions` on the database search_path, so
+        # unqualified pg_trgm calls (similarity(), the mapping/dedup lexical
+        # layers) resolve after a security-lint migration relocates pg_trgm out
+        # of `public`. Mirror that database-level default here — new connections
+        # (the per-test fixtures) pick it up — else those tests fail on a bare
+        # Postgres with "function similarity(text, ...) does not exist".
+        conn.execute(
+            f'alter database "{name}" set search_path to "$user", public, extensions'
+        )
 
         conn.execute(
             """
