@@ -13,6 +13,21 @@ export function OpsLayout() {
               Dashboard
             </NavLink>
           </li>
+          <li>
+            <NavLink to="/ops/recipes">Recipes</NavLink>
+          </li>
+          <li>
+            <NavLink to="/ops/stage-runs">Stage runs</NavLink>
+          </li>
+          <li>
+            <NavLink to="/ops/audit-log">Audit log</NavLink>
+          </li>
+          <li>
+            <NavLink to="/ops/clusters">Clusters</NavLink>
+          </li>
+          <li>
+            <NavLink to="/ops/exports">Exports</NavLink>
+          </li>
         </ul>
       </nav>
       <Outlet />
