@@ -13,9 +13,11 @@ vi.mock('../../ui/TriggerBar', () => ({
 }));
 
 const fromMock = vi.fn();
+const rpcMock = vi.fn();
 vi.mock('../../supabase', () => ({
   supabase: {
     from: (table: string) => fromMock(table),
+    rpc: (fn: string) => rpcMock(fn),
     channel: vi.fn(() => {
       const chan = { on: () => chan, subscribe: (cb: (s: string) => void) => { cb('SUBSCRIBED'); return chan; } };
       return chan;
@@ -28,8 +30,9 @@ import { StageCard } from './StageCard';
 
 interface OutcomeRow { outcome: string; run_count: number; cost_cents: number | null }
 interface JobRow { id: number; stage: string; state: string }
+interface QueueRow { stage: string; queue_depth: number }
 
-function mockTables(outcomeRows: OutcomeRow[], jobRows: JobRow[]) {
+function mockTables(outcomeRows: OutcomeRow[], jobRows: JobRow[], queueRows: QueueRow[] = []) {
   fromMock.mockImplementation((table: string) => {
     if (table === 'stage_run_outcome_counts') {
       const range = vi.fn().mockResolvedValue({ data: outcomeRows, count: outcomeRows.length, error: null });
@@ -41,6 +44,12 @@ function mockTables(outcomeRows: OutcomeRow[], jobRows: JobRow[]) {
       return { select: vi.fn(() => ({ eq })) };
     }
     throw new Error(`unexpected table ${table}`);
+  });
+  rpcMock.mockImplementation((fn: string) => {
+    if (fn === 'stage_queue_counts') {
+      return Promise.resolve({ data: queueRows, error: null });
+    }
+    throw new Error(`unexpected rpc ${fn}`);
   });
 }
 
@@ -56,6 +65,7 @@ function makeClient() {
 
 beforeEach(() => {
   fromMock.mockReset();
+  rpcMock.mockReset();
 });
 
 describe('<StageCard>', () => {
@@ -91,11 +101,25 @@ describe('<StageCard>', () => {
     await waitFor(() => expect(screen.getByLabelText(/in-flight/i)).toHaveTextContent('2'));
   });
 
-  it('marks the content-queue-depth as a not-yet-available placeholder rather than fabricating a number', async () => {
-    mockTables([], []);
+  it('renders the real queue depth from stage_queue_counts for a tracked stage', async () => {
+    mockTables([], [], [{ stage: 'map', queue_depth: 7 }]);
     render(<StageCard stage="map" />, { wrapper: wrapperWith(makeClient()) });
     expect(await screen.findByText(/queue depth/i)).toBeInTheDocument();
-    expect(screen.getByText(/not yet available|pending|follow-up/i)).toBeInTheDocument();
+    expect(await screen.findByText('7')).toBeInTheDocument();
+  });
+
+  it('renders an explicit zero, not a placeholder, when a tracked stage has caught up', async () => {
+    mockTables([], [], [{ stage: 'export', queue_depth: 0 }]);
+    render(<StageCard stage="export" />, { wrapper: wrapperWith(makeClient()) });
+    expect(await screen.findByText(/queue depth/i)).toBeInTheDocument();
+    expect(await screen.findByText('0')).toBeInTheDocument();
+  });
+
+  it('marks the content-queue-depth as not-tracked rather than fabricating a number for a stage with no row', async () => {
+    mockTables([], [], [{ stage: 'map', queue_depth: 7 }]);
+    render(<StageCard stage="discover" />, { wrapper: wrapperWith(makeClient()) });
+    expect(await screen.findByText(/queue depth/i)).toBeInTheDocument();
+    expect(await screen.findByText(/not tracked/i)).toBeInTheDocument();
   });
 
   it('composes the shared TriggerBar for the whole-queue affordance', async () => {
