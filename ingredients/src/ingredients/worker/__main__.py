@@ -22,6 +22,7 @@ import threading
 import psycopg
 from dotenv import load_dotenv
 
+import ingredients.pipeline.stages  # noqa: F401 -- registers stage_fns into STAGE_FNS
 from ingredients.worker.dispatch import STAGE_FNS
 from ingredients.worker.loop import serve
 from ingredients.worker.providers import load_configs
