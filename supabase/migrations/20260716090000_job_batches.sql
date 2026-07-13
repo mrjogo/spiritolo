@@ -1,10 +1,10 @@
--- Postgres-as-queue (WS-B22), part 1 of 3: job_batches.
+-- Postgres-as-queue: job_batches.
 --
 -- The OpenAI async-Batch accelerator's bookkeeping row. Created BEFORE jobs
 -- because jobs.batch_id FKs it. A batch groups the per-item requests of one
 -- metered stage run submitted to a hosted provider's Batch API (50% off, ~24h
--- SLA); the worker reconciles open batches on boot (B24) and ingests results
--- back through the normal stage_run UPSERT path.
+-- SLA); the worker reconciles open batches on boot and ingests results back
+-- through the normal stage_run UPSERT path.
 --
 -- custom_id_map maps the provider's opaque per-line custom_id back to the
 -- Spiritolo entity id the result belongs to, so an out-of-order batch response

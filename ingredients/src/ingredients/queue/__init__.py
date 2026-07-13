@@ -1,8 +1,8 @@
-"""Postgres-as-queue client helpers (WS-B22).
+"""Postgres-as-queue client helpers.
 
 Thin, pure functions over a psycopg connection — no broker, no scheduler. The
-worker (WS-B23) composes them into its claim/heartbeat/reap loop; tests drive
-them against a real Postgres via TEST_DB_URL.
+worker composes them into its claim/heartbeat/reap loop; tests drive them
+against a real Postgres via TEST_DB_URL.
 
 - ``claim_one`` — atomically claim the oldest runnable job (FOR UPDATE SKIP
   LOCKED), respecting the approval + max-cost gates.

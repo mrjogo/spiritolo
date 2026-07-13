@@ -1,4 +1,4 @@
--- Postgres-as-queue (WS-B22), part 3 of 3: the enqueue_job / approve_job RPCs.
+-- Postgres-as-queue: the enqueue_job / approve_job RPCs.
 --
 -- These two SECURITY DEFINER functions are the ONLY write path onto jobs (RLS is
 -- deny-all). They reuse the taxonomy-curation RPC pattern exactly: SECURITY
