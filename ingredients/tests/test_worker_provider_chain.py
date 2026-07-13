@@ -1,4 +1,4 @@
-"""WS-B23 — worker provider-chain seam (pure, no DB).
+"""Worker provider-chain seam (pure, no DB).
 
 The worker resolves a stage's items through a ``ProviderChain`` built from
 *external config* (an ordered list of provider ids + a pack size). The chain

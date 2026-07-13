@@ -1,4 +1,4 @@
-"""WS-B23 — worker loop: claim -> dispatch -> heartbeat -> finalize.
+"""Worker loop: claim -> dispatch -> heartbeat -> finalize.
 
 One loop ``tick`` claims the oldest runnable job (reusing the queue claim),
 dispatches it to its ``stage_fn`` while a background thread heartbeats, then sets

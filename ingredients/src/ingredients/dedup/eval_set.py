@@ -1,4 +1,4 @@
-"""Dedup eval cases. Drives both --review (CI) and ad-hoc spot-checks.
+"""Dedup eval cases. Drives both the eval test suite (CI) and ad-hoc spot-checks.
 
 Each case fixes:
   - raw_name        : what the recipe is titled
@@ -8,7 +8,8 @@ Each case fixes:
                           must end up in the same cluster after compute.
 
 The fixture taxonomy (eval_fixture.py) is the only DB state these cases
-depend on. Run --review against TEST_DB_URL.
+depend on. The eval suite (ingredients/tests/test_dedup_eval.py, via run_eval)
+runs it against TEST_DB_URL.
 """
 
 from __future__ import annotations

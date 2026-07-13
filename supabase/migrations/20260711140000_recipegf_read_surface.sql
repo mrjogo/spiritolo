@@ -1,6 +1,6 @@
--- P3 read-surface hardening for the RecipeGF export stage.
+-- Read-surface hardening for the RecipeGF export stage.
 --
--- Barbot's menu-build import (P3) pulls each drink's pin-2 bundle by *slug* —
+-- A consumer's menu-build import pulls each drink's pin-2 bundle by *slug* —
 -- offline via the <slug>.json drop, or live via a service-role DB adapter over
 -- PostgREST. This migration makes that read path safe and clean:
 --

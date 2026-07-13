@@ -62,7 +62,7 @@ def test_build_bundle_rejects_invalid_recipe():
 
 def test_validate_bundle_is_the_p3_consumer_check():
     # validate_bundle rebuilds core ∪ bundle["verbs"] and validates
-    # {"recipe": ...} — the exact call P3 makes on import.
+    # {"recipe": ...} — the exact call a consumer (e.g. Barbot) makes on import.
     bundle = build_bundle(_recipe(), [], slug="negroni",
                           source="https://ex/n", imported_at=_IMPORTED_AT)
     assert validate_bundle(bundle).valid

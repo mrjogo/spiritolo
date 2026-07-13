@@ -33,7 +33,7 @@ load_dotenv(pathlib.Path(__file__).resolve().parent.parent.parent / ".env")
 _REAL_SUPABASE_DB_URL = os.environ.get("SUPABASE_DB_URL")
 
 # Defensive: any test that accidentally connects via SUPABASE_DB_URL
-# (e.g. SupabaseClient() with no explicit url) silently wipes the dev DB.
+# (e.g. a psycopg client built with no explicit url) silently wipes the dev DB.
 # Override with an invalid sentinel after .env loads so any such fall-back
 # fails loudly. Tests that need a real Postgres must use TEST_DB_URL.
 os.environ["SUPABASE_DB_URL"] = (

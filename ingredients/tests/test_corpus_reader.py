@@ -1,9 +1,8 @@
-"""Read-only R2 corpus reader (WS-B6). No network: every test stubs the
-S3-compat client (see docs/redesign.md B6 + CLAUDE.md hard rules).
+"""Read-only R2 corpus reader. No network: every test stubs the S3-compat
+client (see CLAUDE.md hard rules).
 
-The migration for `pages` (WS-B20, ingredients/tests/test_pages_migration.py)
-is the ONE pages migration; this file covers only the reader module, per the
-docs/redesign.md §4 reconciliation note.
+The `pages` migration is covered by ingredients/tests/test_pages_migration.py;
+this file covers only the reader module and adds no migration of its own.
 """
 from __future__ import annotations
 

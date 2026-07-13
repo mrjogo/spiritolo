@@ -1,4 +1,4 @@
-"""WS-B23 — hard cost cap + free-stage exemption.
+"""Hard cost cap + free-stage exemption.
 
 A metered stage accumulates per-item spend against ``jobs.max_cost_cents``. Once
 the next item would breach the cap the worker hard-aborts (``CostCapExceeded``):

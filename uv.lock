@@ -1286,7 +1286,6 @@ version = "0.1.0"
 source = { editable = "scripts" }
 dependencies = [
     { name = "boto3" },
-    { name = "jsonschema" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
 ]
@@ -1299,7 +1298,6 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "boto3", specifier = ">=1.43.46" },
-    { name = "jsonschema", specifier = ">=4" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-dotenv", specifier = ">=1.0" },

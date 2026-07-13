@@ -1,8 +1,7 @@
 """Ingredient string parser. Pure functions, no I/O.
 
-See docs/superpowers/specs/2026-04-25-ingredient-parser-design.md for the
-parser ladder. Bump PARSER_VERSION whenever any rule's behavior changes
-(including unit-table edits, regex changes, new rules).
+Bump PARSER_VERSION whenever any rule's behavior changes (including
+unit-table edits, regex changes, new rules).
 """
 
 from __future__ import annotations

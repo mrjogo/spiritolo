@@ -1,4 +1,4 @@
--- P2 (RecipeGF export): store each drink's RecipeGF verb-frame recipe in
+-- RecipeGF export: store each drink's RecipeGF verb-frame recipe in
 -- RELATIONAL form (mirroring how Spiritolo stores parsed ingredients as rows,
 -- not as an opaque JSON blob), plus a propose→review queue for drinks the
 -- deterministic converter can't yet emit.
@@ -70,7 +70,8 @@ create table recipegf_steps (
 -- unresolved ingredient, muddle, untranslatable unit, ...). Mirrors
 -- taxonomy_proposals: a text+CHECK status, idempotent enqueue via a unique
 -- (cluster, version) key. Resolving one is a taxonomy/data/rules fix followed
--- by `recipegf-export --reset` (or a CONVERTER_VERSION bump).
+-- by re-running the export stage (delete its stage_runs rows, or bump
+-- CONVERTER_VERSION).
 create table recipegf_proposals (
   id                bigserial primary key,
   cluster_id        bigint references recipe_clusters(id) on delete cascade,

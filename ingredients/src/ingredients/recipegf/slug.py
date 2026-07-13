@@ -1,4 +1,4 @@
-"""Mint kebab-case drink slugs from ``recipe_clusters.canonical_name`` (D1).
+"""Mint kebab-case drink slugs from ``recipe_clusters.canonical_name``.
 
 The slug is the drink-level join key — owned by Spiritolo, joined on by Barbot.
 It must satisfy RecipeGF's id-slug grammar (``^[a-z0-9]+(?:-[a-z0-9]+)*$``), the

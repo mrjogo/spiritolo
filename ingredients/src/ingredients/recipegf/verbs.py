@@ -1,6 +1,6 @@
 """Load the in-repo ``spiritolo/`` extension verb-defs and build overlays.
 
-The verb-defs live as self-describing YAML under ``verbs/`` (D2b: each repo
+The verb-defs live as self-describing YAML under ``verbs/`` (each repo
 iterates verbs freely in its own repo, no RecipeGF PR per verb). This module is
 the single place that reads them, so both the converter (which needs to know
 which spiritolo verbs exist and their required roles) and the bundle exporter

@@ -1,6 +1,18 @@
-# Pipeline cheatsheet
+# Pipeline — data flow
 
-Every Zone-2 stage (and `extract`) writes to whatever `SUPABASE_DB_URL` points at. Bulk runs follow the local-restore-then-upload flow in [upload.md](upload.md): back up staging → restore locally → run pipelines → push the diff back through the uploader.
+The pipeline runs in two zones. **Zone 1** (the `scraper/` package — SQLite plus
+the R2 HTML corpus) crawls the web into two durable inputs: per-URL `pages` state
+and the write-once HTML corpus. **Zone 2** (the `ingredients/` package —
+Supabase) turns those into the relational recipe and its published RecipeGF
+bundle.
+
+Every Zone-2 stage is a `stage_fn` over the `stage_runs` work queue: a stage's
+queue is "content qualifies AND has no run at the current version," so a re-run
+only touches what a prior run left undone. Zone-2 stages run two ways — one-off
+and deterministically via the CLI (`ingredients.cli <stage>` / `cold-build`), or
+continuously via the worker daemon off the `jobs` queue (which adds the LLM
+provider tiers and a per-job cost cap). Command surface and versioning live in
+[CLAUDE.md](../CLAUDE.md).
 
 ```mermaid
 %%{init: {'theme':'base', 'themeVariables': {
@@ -14,37 +26,34 @@ Every Zone-2 stage (and `extract`) writes to whatever `SUPABASE_DB_URL` points a
   'fontFamily': 'system-ui, -apple-system, sans-serif'
 }}}%%
 flowchart TD
-    subgraph Z1 ["Zone 1 — Scraper · SQLite (data/scraper.db)"]
-        direction TB
-        D["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>1 · discover</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Download sitemaps and queue all pages from them.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>scraper</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m scraper.discover</div></div>"]
-        C["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>2 · classify URLs</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Tag each queued URL by content type (recipe / index / other) with local ollama.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>scraper</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m scraper.classify</div></div>"]
-        F["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>3 · fetch + validate + drink-score</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Download HTML for likely-recipe URLs, validate it, and score how drink-recipe-like it is.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>scraper</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m scraper.fetch</div></div>"]
-        E["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>4 · extract JSON-LD → Supabase</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Parse Schema.org Recipe JSON-LD from cached HTML into Supabase recipes (UPSERT).</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>scraper</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m scraper.extract</div></div>"]
-        V["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>validate cached HTML (re-score only)</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Re-run validator + drink-scorer on cached HTML after a version bump (no re-fetch).</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>scraper</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m scraper.validate</div></div>"]
-        D --> C --> F --> E
-        F -. version bump .-> V
+    subgraph Z1 ["Zone 1 · Scraper — SQLite pages + R2 HTML corpus"]
+        direction LR
+        D["1 · discover<br/>sitemaps → queue pages"]
+        C["2 · classify<br/>content_type via LLM"]
+        F["3 · fetch<br/>HTML → R2 corpus;<br/>validate + drink-score inline"]
+        D --> C --> F
     end
 
-    subgraph Z2 ["Zone 2 — Ingredients · Supabase"]
-        direction TB
-        P["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>5 · parse ingredients</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Split each recipeIngredient string into structured amount / unit / name / modifier rows.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>ingredients</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m ingredients.cli</div></div>"]
-        M1["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>6a · map Phase 1 (alias + lexical)</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Match ingredient names to taxonomy nodes via aliases + lexical similarity, queue misses for LLM.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>ingredients</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m ingredients.cli map</div></div>"]
-        M2["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>6b · map resolve-pending (LLM)</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Drain the pending-LLM queue with ollama, Claude, or OpenAI to resolve unmatched ingredients.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>ingredients</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m ingredients.cli map resolve-pending --provider ollama|claude|openai</div></div>"]
-        RP["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>6c · review form proposals</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Walk the human-review queue of proposed new form nodes (lemon_zest, lime_oil, …).</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>ingredients</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m ingredients.cli map review-proposals</div></div>"]
-        PS["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>promote substances (one-shot)</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Lift auto-created brand/expression nodes (Campari, Angostura, …) onto the substance antichain.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>ingredients</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m ingredients.cli promote-substances</div></div>"]
-        N1["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>7a · normalize-names Phase 1</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Match recipe titles to canonical cocktail names via aliases + lexical similarity.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>ingredients</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m ingredients.cli normalize-names</div></div>"]
-        N2["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>7b · normalize-names resolve-pending (LLM)</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Send unmatched recipe titles to ollama, Claude, or OpenAI for canonical-name resolution.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>ingredients</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m ingredients.cli normalize-names resolve-pending --provider ollama|claude|openai</div></div>"]
-        CL["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>8 · cluster (roles + variant keys)</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Tag ingredient roles and compute cluster + variant keys for every recipe.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>ingredients</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m ingredients.cli cluster</div></div>"]
-        AU["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>cluster audit</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Print read-only audit signals for the operator to triage by hand.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>ingredients</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>uv run python -m ingredients.cli cluster audit</div></div>"]
-        P --> M1 --> M2 --> RP --> N1 --> N2 --> CL --> AU
-        M2 -. after first Claude run .-> PS
+    subgraph Z2 ["Zone 2 · Content pipeline — Supabase, over the stage_runs queue"]
+        direction LR
+        X["extract<br/>Recipe JSON-LD → recipes"]
+        P["parse<br/>recipeIngredient → recipe_ingredients"]
+        M["map<br/>name → taxonomy slug"]
+        CV["convert<br/>verb-frame → recipe_steps"]
+        CL["cluster<br/>dedup identity → recipe_clusters"]
+        EX["export<br/>freeze pin-2 bundle → recipe_exports"]
+        X --> P --> M --> CV --> CL --> EX
     end
 
-    subgraph DBL ["DB lifecycle (Mac host)"]
-        direction TB
-        RST["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>supabase db reset (wipes data)</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Drop the local DB and replay every migration from scratch.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>(Mac host)</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>supabase db reset --yes</div></div>"]
-        MIG["<div style='text-align:left;padding:6px;line-height:1.45'><div style='font-weight:600;font-size:15px;color:#dfe5d8;margin-bottom:6px'>migration up (keeps data)</div><div style='font-size:14px;color:#adb8a4;margin-bottom:10px'>Forward-apply new migrations without losing processed data.</div><div style='font-size:13px;color:#859189;margin-bottom:8px'>📁 <i>(Mac host)</i></div><div style='font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px;border:1px dashed #6b8a82;background:#2a3531;padding:6px 8px;border-radius:4px;color:#c4ccbd'>supabase migration up --include-all</div></div>"]
-    end
-
-    E ==>|recipes table| P
+    F ==>|R2 corpus HTML| X
+    M -.->|shared, name-keyed| IR[("ingredient_resolutions<br/>fix once → every recipe follows")]
+    IR -.-> CV
+    IR -.-> EX
 ```
+
+Only the fetched HTML corpus and the `pages` rows are the crawl's durable
+output; everything downstream regenerates from them, so any stage is safe to
+re-run (delete its `stage_runs` rows, or bump the stage's version constant). The
+consumer-facing RecipeGF bundle is itself a projection — generated on demand from
+the relational rows and frozen into `recipe_exports` only on export; see
+[recipegf-export.md](recipegf-export.md).

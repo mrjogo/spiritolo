@@ -1,4 +1,4 @@
-"""Assemble + validate the pin-2 imported-recipe bundle (D5).
+"""Assemble + validate the pin-2 imported-recipe bundle.
 
 Bundle shape (the frozen pin-2 contract Barbot's importer consumes):
 
@@ -87,8 +87,9 @@ def validate_bundle(bundle: dict[str, Any]):
     """Validate a bundle exactly as a consumer (Barbot) would: rebuild the
     ``core ∪ bundle['verbs']`` registry and validate ``{"recipe": recipe}``.
 
-    Returns a ``recipegf.ValidationResult``. This is the canonical P3 check —
-    it must pass with only what the bundle carries, no external lookups.
+    Returns a ``recipegf.ValidationResult``. This is the canonical
+    consumer-side check — it must pass with only what the bundle carries, no
+    external lookups.
     """
     registry = overlay_registry(bundle.get("verbs") or [])
     return RecipeValidator(registry).validate({"recipe": bundle["recipe"]})

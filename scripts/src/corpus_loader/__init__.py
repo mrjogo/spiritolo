@@ -3,6 +3,6 @@ sha256(url), plus the ``pages.r2_key`` backfill.
 
 The corpus is one of two durable inputs (the other being the ``pages`` row
 itself — see supabase/migrations/20260715090000_pages.sql). This package is
-operator-run, not a pipeline stage: see docs/redesign.md and docs/upload.md-
-style runbooks for how it's invoked against the real 16 GiB cache.
+operator-run, not a pipeline stage — invoked by hand against the real 16 GiB
+cache to populate the R2 corpus.
 """

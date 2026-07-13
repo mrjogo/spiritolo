@@ -160,42 +160,16 @@ Taxonomy nodes are managed on staging via the curation UI; they are not maintain
 
 **Eval sets** run through pytest (`cd ingredients && uv run --extra dev pytest`), not a CLI flag: [eval_set.py](ingredients/src/ingredients/eval_set.py) (parser), [mapping/eval_set.py](ingredients/src/ingredients/mapping/eval_set.py) + [mapping/eval_fixture.py](ingredients/src/ingredients/mapping/eval_fixture.py), [dedup/eval_set.py](ingredients/src/ingredients/dedup/eval_set.py) + [dedup/eval_fixture.py](ingredients/src/ingredients/dedup/eval_fixture.py), and [recipegf/eval_set.py](ingredients/src/ingredients/recipegf/eval_set.py). Fixtures are frozen so eval results don't drift with seed changes.
 
-**Providers + writes.** The worker's LLM tiers need credentials per chosen provider: `ANTHROPIC_API_KEY` (claude), `OLLAMA_BASE_URL` (defaults `http://localhost:11434`, ollama), `OPENAI_API_KEY` (openai). Writes go to whatever `SUPABASE_DB_URL` points at — including the taxonomy nodes the map stage's LLM tier auto-creates. Bulk runs (especially metered LLM work) use the local-restore-then-upload flow — see [docs/upload.md](docs/upload.md).
+**Providers + writes.** The worker's LLM tiers need credentials per chosen provider: `ANTHROPIC_API_KEY` (claude), `OLLAMA_BASE_URL` (defaults `http://localhost:11434`, ollama), `OPENAI_API_KEY` (openai). Writes go to whatever `SUPABASE_DB_URL` points at — including the taxonomy nodes the map stage's LLM tier auto-creates. The worker runs against the hosted DB directly; there is no separate upload step.
 
 ## Data flow
 
-Schema flows local → staging via the migrations CI workflow on push to the `staging` branch. **Pipeline data lives on staging** — staging is the source of truth for `recipes`, `recipe_ingredients`, `recipe_steps`, `ingredient_resolutions`, `recipe_clusters`, taxonomy growth, etc. Bulk pipeline runs (the Zone-2 stages — extract → parse → map → convert → cluster → export — via the CLI cold-build or the worker) happen against a local restore of staging and are pushed back through the uploader; see "Local-edit / staging-upload workflow" below. One-off SQL hand-edits and the curation UI hit staging directly.
+Schema flows local → staging via the migrations CI workflow on push to the `staging` branch. **Pipeline data lives on staging** — staging is the source of truth for `recipes`, `recipe_ingredients`, `recipe_steps`, `ingredient_resolutions`, `recipe_clusters`, taxonomy growth, etc. Pipeline runs execute against the hosted DB directly — the worker daemon over the `jobs` queue, or the CLI pointed at `SUPABASE_DB_URL`. One-off SQL hand-edits and the curation UI hit staging directly.
 
 **Local dev** has two viable shapes:
 
 - **Schema-only:** `supabase db reset` is enough. You get the migrated schema, empty tables, and a pre-seeded `admin@local.test` magic-link user (see [supabase/seeds/dev_admin_user.local-only.sql](supabase/seeds/dev_admin_user.local-only.sql) — the only seed file). Fine for UI work and migration writing.
 - **Schema + a snapshot of staging data:** restore a `scripts/backup-supabase.sh` dump into the local DB. This is the only way to get current reference data (taxonomy, cocktail aliases) and any pipeline output locally. The dev admin seed survives the restore (`profiles` and `auth.users` are excluded from the dump). See [docs/backups.md](docs/backups.md).
-
-## Local-edit / staging-upload workflow
-
-For any pipeline run that would write to Supabase, prefer this flow over
-hitting staging directly:
-
-1. `scripts/backup-supabase.sh` — produces `<file>.dump` plus
-   `<file>.dump.meta.json` (sidecar).
-2. `pg_restore` the dump into local Supabase
-   (see [docs/backups.md](docs/backups.md)).
-3. Run pipelines pointed at local (`SUPABASE_DB_URL` already points
-   there in the devcontainer .env).
-4. Push the diff back:
-
-   ```bash
-   uv run --package spiritolo-scripts python -m upload_to_staging \
-     --dump path/to/<file>.dump            # dry-run
-   uv run --package spiritolo-scripts python -m upload_to_staging \
-     --dump path/to/<file>.dump --apply    # actually push
-   ```
-
-The uploader refuses to run if the sidecar is missing, if the dump
-doesn't match the staging URL it was taken from, if a migration landed
-during the work session, or if staging was written to during the work
-session. Full flow + checks + failure modes documented in
-[docs/upload.md](docs/upload.md).
 
 ## Hosting
 

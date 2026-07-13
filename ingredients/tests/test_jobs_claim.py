@@ -1,4 +1,4 @@
-"""Claim-path tests for the Postgres-as-queue (WS-B22).
+"""Claim-path tests for the Postgres-as-queue.
 
 ``queue.claim.claim_one`` does a single ``UPDATE ... WHERE id = (SELECT ... FOR
 UPDATE SKIP LOCKED LIMIT 1) RETURNING *`` so concurrent workers never claim the

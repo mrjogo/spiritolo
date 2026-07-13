@@ -1,17 +1,17 @@
-"""Schema + behavior + boundary tests for the stage_runs run-ledger (B4).
+"""Schema + behavior + boundary tests for the stage_runs run-ledger.
 
 stage_runs is ONE polymorphic latest-only ledger generalizing every per-stage
 *_runs table: (entity_type, entity_id, stage) is unique, a re-run UPSERTs, the
 work queue is "content qualifies AND NOT EXISTS a run at the current version",
-and --reset deletes runs (optionally below a version / scoped) to re-queue the
-entity. ledger.py wraps the UPSERT / queue / reset SQL.
+and its `reset()` operation deletes runs (optionally below a version / scoped)
+to re-queue the entity. ledger.py wraps the UPSERT / queue / reset SQL.
 
 Runs against TEST_DB_URL with all migrations applied (the ingredients conftest
 auto-applies 20260712_020000_stage_runs.sql). The ledger is content-agnostic and
 carries NO per-entity FK, so these tests drive it against a small throwaway
 stand-in content table (`_ledger_content`) rather than any real content table —
-the greenfield content-pipeline rebuild will land the real `recipes` schema, and
-the ledger already speaks the `recipe` entity_type without depending on it.
+the ledger is decoupled from the `recipes` schema and already speaks the
+`recipe` entity_type without depending on it.
 """
 
 from __future__ import annotations

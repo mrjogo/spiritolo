@@ -22,11 +22,6 @@ Platform-managed; not our data.
 If a future `public` table FKs to `auth.users`, either exclude it the
 same way or denormalize an `email` column onto it as a recovery anchor.
 
-> **Pushing edits back to staging?** After restoring a backup locally,
-> running pipelines, and wanting to upload the diff, see
-> [docs/upload.md](upload.md). The backup script writes a sidecar
-> metadata file alongside the .dump that the uploader requires.
-
 ## Run a backup
 
 **Manual:**

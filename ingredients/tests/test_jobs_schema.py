@@ -1,4 +1,4 @@
-"""Schema-shape tests for the Postgres-as-queue tables (WS-B22).
+"""Schema-shape tests for the Postgres-as-queue tables.
 
 Asserts the ``jobs`` + ``job_batches`` migrations produce the columns,
 enum, CHECKs, defaults, partial indexes, RLS + realtime membership the

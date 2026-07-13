@@ -3,7 +3,7 @@
 ``load()`` is the pure, injectable core: it takes an S3-compat client (real or
 fake), gzips the HTML, and ``put_object``s it keyed ``sha256(url)`` — unless
 that key already exists, in which case it skips (write-once, idempotent
-re-run; see docs/redesign.md). It never calls ``delete_object`` and
+re-run). It never calls ``delete_object`` and
 never overwrites an existing key, respecting R2's object-lock.
 
 Tests inject a fake client (see scripts/tests/test_corpus_loader.py); the real

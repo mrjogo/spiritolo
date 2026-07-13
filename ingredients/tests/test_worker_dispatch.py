@@ -1,4 +1,4 @@
-"""WS-B23 — stage_fn dispatch (registry + failure + idempotency).
+"""stage_fn dispatch (registry + failure + idempotency).
 
 ``dispatch.run`` maps ``job.stage`` to a registered ``stage_fn(job, conn,
 providers)``. An unknown stage is a typed ``UnknownStage`` at the dispatch seam,

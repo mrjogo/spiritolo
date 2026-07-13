@@ -17,8 +17,8 @@ def test_definitional_substances_includes_expected_names():
 
 
 def test_candidate_promotions_finds_auto_created_brands(dedup_fixture, db_conn):
-    """Insert an auto-created 'campari' brand node (as if D's mapper made
-    it before E's promote-substances run); the candidate query must find it."""
+    """Insert an auto-created 'campari' brand node (as if the mapper made it
+    before a substance-promotion pass); the candidate query must find it."""
     conn, ids = dedup_fixture
     db_conn.execute("""
         update taxonomy_nodes

@@ -1,5 +1,6 @@
-"""Checked-in golden cases used by the `--review` CLI. Bumping
-PARSER_VERSION should be paired with re-running --review until it passes.
+"""Checked-in golden cases exercised by the eval test suite
+(ingredients/tests/test_eval_set.py, via run_eval). Bumping PARSER_VERSION
+should be paired with re-running the eval suite until it passes.
 """
 
 from __future__ import annotations

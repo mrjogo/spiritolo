@@ -1,7 +1,6 @@
 -- Relocate the scraper's `pages` work-queue table from SQLite
 -- (scraper/src/scraper/db.py) into Postgres, alongside the R2 HTML corpus
--- (keyed sha256(url) and populated by scripts/src/corpus_loader) — see
--- docs/redesign.md §9.1.4.
+-- (keyed sha256(url) and populated by scripts/src/corpus_loader).
 --
 -- `pages` stays deliberately lightweight: the HTML bytes never live here (R2
 -- holds those, read-only, keyed by `r2_key`). The legacy SQLite table's
