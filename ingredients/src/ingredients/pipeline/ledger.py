@@ -14,6 +14,13 @@ in ``scraper/db.py`` that this generalizes:
   the SAME transaction so a crash can't strand an entity out of both queue and
   ledger.
 
+The ledger is deliberately decoupled from any particular content table. It never
+hardcodes a table name or a gating column: ``work_queue`` takes the content
+table + an optional prefilter, ``reset`` takes the content table for site
+scoping, and the gating cursor is passed explicitly. So the same ledger serves
+`page` entities today and `recipe` entities once the greenfield content-pipeline
+rebuild lands the relational content tables — no change here.
+
 All functions take a psycopg connection and do not commit (the caller owns the
 transaction boundary); ``reset`` opens its own transaction for atomicity, which
 composes correctly whether the connection is autocommit or not.
@@ -21,16 +28,9 @@ composes correctly whether the connection is autocommit or not.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Sequence
 
 from psycopg.types.json import Json
-
-# Which content table an entity_type's rows live in, for queue joins and
-# site-scoped resets. stage_runs itself carries no FK to these.
-CONTENT_TABLE: dict[str, str] = {
-    "recipe_doc": "recipe_docs",
-    "page": "pages",
-}
 
 
 def record_run(
@@ -95,25 +95,31 @@ def record_run(
 def work_queue(
     conn,
     *,
+    content_table: str,
     entity_type: str,
     stage: str,
     version: str,
-    state: str | None = None,
-    site: str | None = None,
+    where: str | None = None,
+    params: Sequence[Any] = (),
     limit: int | None = None,
 ) -> list[int]:
-    """Ids of entities that qualify for ``stage`` but have no run at ``version``.
+    """Ids from ``content_table`` that qualify for ``stage`` but have no run at
+    ``version``.
 
-    ``state`` is the cheap denormalized prefilter (e.g. recipe_docs.state =
-    'extracted' for the parse queue); ``site`` scopes to one source. Because the
-    unique key guarantees ≤1 row per (entity, stage), an entity whose row is left
-    at an older version is automatically included — no history rows to filter.
+    The NOT-EXISTS predicate is the generalization of every ``get_pending_*``
+    query: an entity is queued when no stage_runs row exists for it at the
+    current version. Because the unique key guarantees ≤1 row per (entity,
+    stage), an entity whose row is left at an older version is automatically
+    included — no history rows to filter.
+
+    The ledger stays content-agnostic: the caller supplies ``content_table`` and
+    an optional ``where``/``params`` prefilter over the content row (aliased
+    ``c``) — e.g. ``where="c.state = %s", params=("extracted",)`` or a site
+    scope. No content column is hardcoded here.
     """
-    table = CONTENT_TABLE[entity_type]
-    params: list[Any] = [entity_type, stage, version]
     sql = f"""
         select c.id
-        from {table} c
+        from {content_table} c
         where not exists (
             select 1 from stage_runs r
             where r.entity_type = %s
@@ -122,17 +128,15 @@ def work_queue(
               and r.version     = %s
         )
     """
-    if state is not None:
-        sql += " and c.state = %s"
-        params.append(state)
-    if site is not None:
-        sql += " and c.site = %s"
-        params.append(site)
+    qparams: list[Any] = [entity_type, stage, version]
+    if where:
+        sql += f" and ({where})"
+        qparams.extend(params)
     sql += " order by c.id"
     if limit is not None:
         sql += " limit %s"
-        params.append(limit)
-    return [r[0] for r in conn.execute(sql, params).fetchall()]
+        qparams.append(limit)
+    return [r[0] for r in conn.execute(sql, qparams).fetchall()]
 
 
 def reset(
@@ -142,6 +146,7 @@ def reset(
     except_version: str | None = None,
     entity_type: str | None = None,
     site: str | None = None,
+    content_table: str | None = None,
     older_than: str | None = None,
     gating: tuple[str, str] | None = None,
 ) -> int:
@@ -149,11 +154,11 @@ def reset(
 
     Filters (all optional, ANDed): ``except_version`` keeps rows at that version,
     ``entity_type`` scopes to one entity kind, ``site`` scopes to one source (via
-    the entity's content table), ``older_than`` keeps rows finished on/after the
-    cutoff. When ``gating=(table, column)`` is given (e.g. ('pages',
-    'content_type') for classify), that cursor is nulled in the SAME transaction
-    as the delete — so a failure in either half rolls back both and an entity is
-    never stranded out of both the queue and the ledger.
+    ``content_table``, which must be given when ``site`` is), ``older_than`` keeps
+    rows finished on/after the cutoff. When ``gating=(table, column)`` is given
+    (e.g. ('pages', 'content_type') for classify), that cursor is nulled in the
+    SAME transaction as the delete — so a failure in either half rolls back both
+    and an entity is never stranded out of both the queue and the ledger.
     """
     with conn.transaction():
         clauses = ["stage = %s"]
@@ -168,10 +173,11 @@ def reset(
             clauses.append("finished_at < %s::timestamptz")
             params.append(older_than)
         if site is not None:
-            if entity_type is None:
-                raise ValueError("site scope requires entity_type")
-            table = CONTENT_TABLE[entity_type]
-            clauses.append(f"entity_id in (select id from {table} where site = %s)")
+            if content_table is None:
+                raise ValueError("site scope requires content_table")
+            clauses.append(
+                f"entity_id in (select id from {content_table} where site = %s)"
+            )
             params.append(site)
 
         cur = conn.execute(

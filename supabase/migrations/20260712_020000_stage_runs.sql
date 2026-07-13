@@ -6,15 +6,19 @@
 -- single table. Exactly one row per (entity, stage): a re-run UPSERTs.
 --
 -- Polymorphic by design: (entity_type, entity_id) with NO per-entity FK — a run
--- row can reference a page or a recipe_doc without a hard reference, so the
--- ledger stays a pure cache of derived state that TRUNCATE + re-run reproduces.
+-- row can reference a page or a recipe (the content entity) without a hard
+-- reference, so the ledger stays a pure cache of derived state that TRUNCATE +
+-- re-run reproduces. This also lets the ledger land ahead of the content tables:
+-- the greenfield content-pipeline rebuild introduces the real `recipes` /
+-- `recipe_ingredients` / `recipe_steps` schema, and this ledger already speaks
+-- its entity_type without depending on those tables existing yet.
 -- batch_id / job_id are plain bigint columns here (no FK): the jobs / job_batches
 -- queue tables are a separate workstream; wiring the FKs is deferred to when
 -- those tables land.
 
 create table stage_runs (
   id          bigserial primary key,
-  entity_type text   not null check (entity_type in ('page','recipe_doc')),
+  entity_type text   not null check (entity_type in ('page','recipe')),
   entity_id   bigint not null,
   stage       text   not null,   -- discover|classify|fetch|extract|parse|map|role|cluster|export
   version     text   not null,   -- the stage's version constant at run time

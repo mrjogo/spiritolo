@@ -76,7 +76,7 @@ This supersedes the "one canonical JSONB `recipe_docs` doc with an `_x` sidecar,
 
 RecipeGF is still THE representation — the relational columns ARE RecipeGF's fields — just normalized (queryable, correctable) rather than a frozen blob, serialized on demand.
 
-**Consequences:** no `recipe_docs`, no `_x`, no `strip_x`. The WHAT/HOW split is now at the table level (content tables = public recipe facts; `stage_runs` = HOW), so "hide `_x` from anon" no longer applies. B2 = the relational schema (this PR). B3 (strip_x) → a `generate_bundle(recipe_id)` module (rows + resolution + verbs). B5 → the relational tables are the queryable graph; add derived materializations (resolution/role/cluster) as needed. B8–B13 stages write relational rows (parse→recipe_ingredients; map→the shared resolution; role/cluster→derived; export→generate+freeze the bundle).
+**Consequences:** no `recipe_docs`, no `_x`, no `strip_x`. The WHAT/HOW split is now at the table level (content tables = public recipe facts; `stage_runs` = HOW), so "hide `_x` from anon" no longer applies. B2 (this PR) delivers the `stage_runs` run-ledger + this amendment; the relational `recipes`/`recipe_ingredients`/`recipe_steps` schema lands in the greenfield content-pipeline rebuild. B3 (strip_x) → a `generate_bundle(recipe_id)` module (rows + resolution + verbs). B5 → the relational tables are the queryable graph; add derived materializations (resolution/role/cluster) as needed. B8–B13 stages write relational rows (parse→recipe_ingredients; map→the shared resolution; role/cluster→derived; export→generate+freeze the bundle).
 ---
 
 ## 2. Tracts & the one gate

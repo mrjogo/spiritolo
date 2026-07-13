@@ -7,31 +7,43 @@ and --reset deletes runs (optionally below a version / scoped) to re-queue the
 entity. ledger.py wraps the UPSERT / queue / reset SQL.
 
 Runs against TEST_DB_URL with all migrations applied (the ingredients conftest
-auto-applies 20260712_020000_stage_runs.sql). recipe_docs (B2) supplies the
-content rows the recipe_doc queue joins against; stage_runs carries NO per-entity
-FK, so page-entity rows need no pages table.
+auto-applies 20260712_020000_stage_runs.sql). The ledger is content-agnostic and
+carries NO per-entity FK, so these tests drive it against a small throwaway
+stand-in content table (`_ledger_content`) rather than any real content table —
+the greenfield content-pipeline rebuild will land the real `recipes` schema, and
+the ledger already speaks the `recipe` entity_type without depending on it.
 """
 
 from __future__ import annotations
 
 import psycopg
 import pytest
-from psycopg.types.json import Json
 
 from ingredients.pipeline import ledger
 
-
-def _seed_doc(conn, source_url: str, *, state: str = "extracted") -> int:
-    return conn.execute(
-        "insert into recipe_docs (source_url, doc, state) values (%s, %s, %s) "
-        "returning id",
-        (source_url, Json({"title": "X", "_x": {}}), state),
-    ).fetchone()[0]
+_CONTENT = "_ledger_content"
 
 
-def _reset_tables(conn) -> None:
-    conn.execute("truncate table stage_runs restart identity cascade")
-    conn.execute("truncate table recipe_docs restart identity cascade")
+@pytest.fixture
+def content_table(db_conn):
+    """A throwaway stand-in for a content table: (id, state, site). Stands in for
+    the real `recipes`/`pages` content the ledger's work_queue joins against,
+    keeping the ledger tests independent of any particular content schema."""
+    db_conn.execute("truncate table stage_runs restart identity cascade")
+    db_conn.execute(f"drop table if exists {_CONTENT}")
+    db_conn.execute(
+        f"create table {_CONTENT} (id bigint primary key, state text, site text)"
+    )
+    yield _CONTENT
+    db_conn.execute(f"drop table if exists {_CONTENT}")
+
+
+def _seed_content(conn, table, id_, *, state="extracted", site=None):
+    conn.execute(
+        f"insert into {table} (id, state, site) values (%s, %s, %s)",
+        (id_, state, site),
+    )
+    return id_
 
 
 # --------------------------------------------------------------------------
@@ -78,8 +90,9 @@ def test_schema_shape(db_conn):
             """
         ).fetchall()
     )
-    for v in ("page", "recipe_doc"):
+    for v in ("page", "recipe"):
         assert v in checks, f"entity_type CHECK missing {v}"
+    assert "recipe_doc" not in checks, "entity_type must be 'recipe', not 'recipe_doc'"
     for v in ("resolved", "abstain", "pending", "failed", "proposes_new"):
         assert v in checks, f"outcome CHECK missing {v}"
     for v in ("deterministic", "llm", "manual"):
@@ -104,7 +117,7 @@ def test_schema_shape(db_conn):
 
 
 def test_entity_type_check_rejects_unknown(db_conn):
-    _reset_tables(db_conn)
+    db_conn.execute("truncate table stage_runs restart identity cascade")
     with pytest.raises(psycopg.errors.CheckViolation):
         db_conn.execute(
             "insert into stage_runs (entity_type, entity_id, stage, version, "
@@ -118,25 +131,23 @@ def test_entity_type_check_rejects_unknown(db_conn):
 # --------------------------------------------------------------------------
 
 def test_upsert_is_latest_only(db_conn):
-    _reset_tables(db_conn)
-    doc_id = _seed_doc(db_conn, "https://ex/upsert")
+    db_conn.execute("truncate table stage_runs restart identity cascade")
 
     ledger.record_run(
-        db_conn, entity_type="recipe_doc", entity_id=doc_id, stage="parse",
+        db_conn, entity_type="recipe", entity_id=1, stage="parse",
         version="v1", outcome="pending", method="deterministic",
         payload={"n": 1},
     )
     ledger.record_run(
-        db_conn, entity_type="recipe_doc", entity_id=doc_id, stage="parse",
+        db_conn, entity_type="recipe", entity_id=1, stage="parse",
         version="v2", outcome="resolved", method="llm", confidence=0.9,
         model_id="gpt-5-mini", payload={"n": 2},
     )
 
     rows = db_conn.execute(
         "select version, outcome, method, confidence, model_id, payload "
-        "from stage_runs where entity_type = 'recipe_doc' and entity_id = %s "
-        "and stage = 'parse'",
-        (doc_id,),
+        "from stage_runs where entity_type = 'recipe' and entity_id = 1 "
+        "and stage = 'parse'"
     ).fetchall()
     assert len(rows) == 1, "UPSERT must keep exactly one row per (entity, stage)"
     version, outcome, method, confidence, model_id, payload = rows[0]
@@ -150,20 +161,19 @@ def test_upsert_is_latest_only(db_conn):
 # Behavior — work queue (NOT EXISTS at current version)
 # --------------------------------------------------------------------------
 
-def test_work_queue_not_exists_predicate(db_conn):
-    _reset_tables(db_conn)
-    a = _seed_doc(db_conn, "https://ex/wq-a")
-    b = _seed_doc(db_conn, "https://ex/wq-b")
-    c = _seed_doc(db_conn, "https://ex/wq-c")
+def test_work_queue_not_exists_predicate(db_conn, content_table):
+    a = _seed_content(db_conn, content_table, 1)
+    b = _seed_content(db_conn, content_table, 2)
+    c = _seed_content(db_conn, content_table, 3)
 
     # a has been parsed at the current version; b and c have not.
     ledger.record_run(
-        db_conn, entity_type="recipe_doc", entity_id=a, stage="parse",
+        db_conn, entity_type="recipe", entity_id=a, stage="parse",
         version="v1", outcome="resolved", method="deterministic",
     )
     q = ledger.work_queue(
-        db_conn, entity_type="recipe_doc", stage="parse", version="v1",
-        state="extracted",
+        db_conn, content_table=content_table, entity_type="recipe",
+        stage="parse", version="v1", where="c.state = %s", params=("extracted",),
     )
     assert set(q) == {b, c}
 
@@ -171,33 +181,32 @@ def test_work_queue_not_exists_predicate(db_conn):
     # the unique constraint guarantees ≤1 row per (entity, stage), so a stale
     # version is automatically re-queued with no history filtering.
     ledger.record_run(
-        db_conn, entity_type="recipe_doc", entity_id=b, stage="parse",
+        db_conn, entity_type="recipe", entity_id=b, stage="parse",
         version="v0", outcome="resolved", method="deterministic",
     )
     q2 = ledger.work_queue(
-        db_conn, entity_type="recipe_doc", stage="parse", version="v1",
-        state="extracted",
+        db_conn, content_table=content_table, entity_type="recipe",
+        stage="parse", version="v1", where="c.state = %s", params=("extracted",),
     )
-    assert set(q2) == {b, c}, "parse@v0 doc must re-appear in the v1 queue"
+    assert set(q2) == {b, c}, "parse@v0 entity must re-appear in the v1 queue"
 
 
-def test_truncate_stage_runs_requeues_everything(db_conn):
+def test_truncate_stage_runs_requeues_everything(db_conn, content_table):
     # stage_runs is prunable derived state: TRUNCATE + re-run reproduces it.
-    _reset_tables(db_conn)
-    a = _seed_doc(db_conn, "https://ex/tr-a")
+    a = _seed_content(db_conn, content_table, 1)
     ledger.record_run(
-        db_conn, entity_type="recipe_doc", entity_id=a, stage="parse",
+        db_conn, entity_type="recipe", entity_id=a, stage="parse",
         version="v1", outcome="resolved", method="deterministic",
     )
     assert ledger.work_queue(
-        db_conn, entity_type="recipe_doc", stage="parse", version="v1",
-        state="extracted",
+        db_conn, content_table=content_table, entity_type="recipe",
+        stage="parse", version="v1",
     ) == []
 
     db_conn.execute("truncate table stage_runs")
     assert ledger.work_queue(
-        db_conn, entity_type="recipe_doc", stage="parse", version="v1",
-        state="extracted",
+        db_conn, content_table=content_table, entity_type="recipe",
+        stage="parse", version="v1",
     ) == [a]
 
 
@@ -205,21 +214,20 @@ def test_truncate_stage_runs_requeues_everything(db_conn):
 # Behavior — reset
 # --------------------------------------------------------------------------
 
-def test_reset_requeues_below_version(db_conn):
-    _reset_tables(db_conn)
-    a = _seed_doc(db_conn, "https://ex/rs-a")
-    b = _seed_doc(db_conn, "https://ex/rs-b")
+def test_reset_requeues_below_version(db_conn, content_table):
+    a = _seed_content(db_conn, content_table, 1)
+    b = _seed_content(db_conn, content_table, 2)
     ledger.record_run(
-        db_conn, entity_type="recipe_doc", entity_id=a, stage="parse",
+        db_conn, entity_type="recipe", entity_id=a, stage="parse",
         version="v1", outcome="resolved", method="deterministic",
     )
     ledger.record_run(
-        db_conn, entity_type="recipe_doc", entity_id=b, stage="parse",
+        db_conn, entity_type="recipe", entity_id=b, stage="parse",
         version="v2", outcome="resolved", method="deterministic",
     )
 
     deleted = ledger.reset(
-        db_conn, stage="parse", except_version="v2", entity_type="recipe_doc",
+        db_conn, stage="parse", except_version="v2", entity_type="recipe",
     )
     assert deleted == 1
 
@@ -230,8 +238,8 @@ def test_reset_requeues_below_version(db_conn):
 
     # A re-queues at v2; B (already v2) does not.
     q = ledger.work_queue(
-        db_conn, entity_type="recipe_doc", stage="parse", version="v2",
-        state="extracted",
+        db_conn, content_table=content_table, entity_type="recipe",
+        stage="parse", version="v2",
     )
     assert set(q) == {a}
 
@@ -239,9 +247,9 @@ def test_reset_requeues_below_version(db_conn):
 def test_reset_nulls_gating_cursor_atomically(db_conn):
     # classify's queue gates on a denormalized cursor (pages.content_type IS
     # NULL), so its reset must delete the run row AND null the cursor in ONE
-    # transaction. stage_runs has no FK to the gated table, so we exercise the
-    # generic gating mechanism against a throwaway stand-in for `pages`.
-    _reset_tables(db_conn)
+    # transaction. The ledger takes the gating (table, column) explicitly and
+    # carries no FK, so we exercise it against a throwaway stand-in for `pages`.
+    db_conn.execute("truncate table stage_runs restart identity cascade")
     db_conn.execute("drop table if exists _ledger_gating_pages")
     db_conn.execute(
         "create table _ledger_gating_pages (id bigint primary key, "

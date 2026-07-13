@@ -233,13 +233,7 @@ def test_recipe_variants_view_exists(db_conn):
     assert row is not None
 
 
-def test_recipes_public_reflects_recipe_docs_contract_after_b2(db_conn):
-    # The dedup migration added cluster_id/variant_key to recipes_public over the
-    # legacy `recipes` table. The v2.1 redesign's B2 migration
-    # (20260712_010000_recipe_docs) supersedes that projection: recipes_public
-    # now reads from recipe_docs and exposes the public column contract only
-    # (id/source_url/site/name/author/image_url/jsonld). Cluster identity moved
-    # into the doc (cluster_key/variant_key), so it is no longer a public column.
+def test_recipes_public_view_includes_cluster_id_and_variant_key(db_conn):
     cols = {
         row[0]
         for row in db_conn.execute(
@@ -249,7 +243,5 @@ def test_recipes_public_reflects_recipe_docs_contract_after_b2(db_conn):
             """
         ).fetchall()
     }
-    assert cols == {
-        "id", "source_url", "site", "name", "author", "image_url", "jsonld",
-    }
-    assert "cluster_id" not in cols
+    assert "cluster_id" in cols
+    assert "variant_key" in cols
