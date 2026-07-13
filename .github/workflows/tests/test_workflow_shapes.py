@@ -222,3 +222,21 @@ def test_runbook_covers_all_steps():
     assert "v0.4.0" in md
     # No projection-rebuild step leaks into the runbook either.
     assert "rebuild_projections" not in md
+
+
+# --------------------------------------------------------------------------- #
+# workflows-ci.yml — this very shape test runs in CI (else it never guards)      #
+# --------------------------------------------------------------------------- #
+
+def test_shape_tests_gated_in_ci():
+    doc = _yaml(".github/workflows/workflows-ci.yml")
+    on = _on(doc)
+    assert "main" in on["pull_request"]["branches"]
+    # It must re-run when any artifact it inspects — or the test itself — changes.
+    paths = set(on["pull_request"]["paths"])
+    assert ".github/workflows/**" in paths
+
+    job = next(iter(doc["jobs"].values()))
+    script = _all_run_scripts(job)
+    assert "pyyaml" in script.lower(), "the job must install PyYAML"
+    assert "test_workflow_shapes.py" in script, "the job must run the shape test"
