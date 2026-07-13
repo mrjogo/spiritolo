@@ -1,4 +1,10 @@
-"""Per-recipe parsing logic. The CLI wires this into a Supabase loop."""
+"""Per-recipe parsing logic. The CLI wires this into a Supabase loop.
+
+Historically this lived at ``ingredients/worker.py``. When the worker daemon
+(WS-B23) landed, ``worker`` became a package; this module keeps the original
+per-recipe parsing helper, re-exported from ``ingredients.worker`` so existing
+importers (``ingredients.cli``, ``tests/test_worker.py``) are unaffected.
+"""
 
 from __future__ import annotations
 
