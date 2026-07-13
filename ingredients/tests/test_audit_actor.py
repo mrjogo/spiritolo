@@ -1,4 +1,4 @@
-"""Actor-derivation tests for the audit log (WS-B26).
+"""Actor-derivation tests for the audit log.
 
 The whole point of the audit log is the human-vs-worker-vs-system
 distinction, and it must fall out of ``auth.uid()`` + the ``app.job_id`` /

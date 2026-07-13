@@ -1,4 +1,4 @@
--- Audit log (WS-B26), part 1 of 2: the append-only audit.log table.
+-- Audit log: the append-only audit.log table.
 --
 -- One generic AFTER-trigger (20260717091000_audit_triggers.sql) writes exactly
 -- one row here per content mutation, capturing actor (human | worker | system),

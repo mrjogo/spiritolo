@@ -1,4 +1,4 @@
-"""Worker actor-context helper for the audit log (WS-B26).
+"""Worker actor-context helper for the audit log.
 
 The audit trigger (``audit.log_change``) derives ``actor_kind='worker'`` from
 the transaction-local GUC ``app.job_id`` and records ``app.source`` verbatim.
