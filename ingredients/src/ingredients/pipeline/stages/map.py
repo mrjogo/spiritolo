@@ -19,6 +19,8 @@ import psycopg
 from common.providers.packing import Item
 from ingredients.mapping.alias_layer import fetch_aliases_dict
 from ingredients.mapping.lexical_layer import resolve_lexical
+from ingredients.mapping.llm_actions import apply_llm_action
+from ingredients.mapping.resolutions import write_resolution
 from ingredients.mapping.types import Resolved
 from ingredients.pipeline.stages import base
 
@@ -45,38 +47,32 @@ def _already_resolved(conn: psycopg.Connection, names: list[str]) -> set[str]:
     return {r[0] for r in rows}
 
 
-def _write_resolution(
-    conn: psycopg.Connection, name: str, slug: str | None, method: str
-) -> None:
-    conn.execute(
-        """
-        insert into ingredient_resolutions (normalized_name, taxonomy_slug, method, version)
-        values (%s, %s, %s, %s)
-        on conflict (normalized_name) do update set
-            taxonomy_slug = excluded.taxonomy_slug,
-            method        = excluded.method,
-            version       = excluded.version,
-            updated_at    = now()
-        """,
-        (name, slug, method, MAPPER_VERSION),
-    )
-
-
 def _resolve_names(
     conn: psycopg.Connection, names: list[str], aliases: dict[str, int], providers: Any
 ) -> None:
     """Resolve every name lacking a resolution at MAPPER_VERSION into the shared
-    table: alias -> lexical -> LLM tier -> abstain."""
+    table: alias -> lexical -> LLM tier -> abstain.
+
+    The LLM tier's answer per name may choose a slug, propose a brand/expression
+    (auto-created via ``apply_llm_action``), propose a form node (queued for
+    review, leaving the name parked), or abstain."""
     pending = [n for n in names if n not in _already_resolved(conn, names)]
     llm_names: list[str] = []
     for name in pending:
         node_id = aliases.get(name)
         if node_id is not None:
-            _write_resolution(conn, name, _slug_for_node(conn, node_id), "alias")
+            write_resolution(
+                conn, normalized_name=name, taxonomy_slug=_slug_for_node(conn, node_id),
+                method="alias", version=MAPPER_VERSION,
+            )
             continue
         result = resolve_lexical(conn, name)
         if isinstance(result, Resolved):
-            _write_resolution(conn, name, _slug_for_node(conn, result.taxonomy_node_id), "lexical")
+            write_resolution(
+                conn, normalized_name=name,
+                taxonomy_slug=_slug_for_node(conn, result.taxonomy_node_id),
+                method="lexical", version=MAPPER_VERSION,
+            )
             continue
         llm_names.append(name)
 
@@ -85,8 +81,10 @@ def _resolve_names(
         result = providers.resolve([Item(id=n, payload=n) for n in llm_names])
         resolved_by_llm = result.resolved
     for name in llm_names:
-        slug = resolved_by_llm.get(name)
-        _write_resolution(conn, name, slug, "llm" if slug else "abstain")
+        apply_llm_action(
+            conn, normalized_name=name, answer=resolved_by_llm.get(name),
+            version=MAPPER_VERSION,
+        )
 
 
 def _recipe_names(conn: psycopg.Connection, recipe_id: int) -> list[str]:
