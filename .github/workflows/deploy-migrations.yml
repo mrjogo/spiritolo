@@ -5,6 +5,13 @@ on:
     branches: [staging]
     paths:
       - 'supabase/migrations/**'
+  # A PR to main gets a validation-only gate: there is one Postgres in this
+  # topology, so main never deploys — it only proves the migrations forward-apply
+  # cleanly before they can reach staging.
+  pull_request:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
   # Manual trigger for the initial bootstrap (push events on branch
   # creation skip the paths filter so the first deploy never fires
   # automatically) and for ad-hoc re-runs.
@@ -12,6 +19,8 @@ on:
 
 jobs:
   push:
+    # Deploy only on a staging push (or a manual run), never on a PR.
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -31,3 +40,66 @@ jobs:
             exit 1
           fi
           supabase db push --db-url "$STAGING_DB_URL" --include-all
+
+  validate:
+    # PR-to-main gate: forward-apply every migration to a throwaway Postgres so a
+    # migration that won't apply is caught before it reaches staging.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Bootstrap the Supabase role + auth surface
+        env:
+          DB: postgresql://postgres:postgres@localhost:5432/postgres
+        run: |
+          set -euo pipefail
+          # A bare Postgres lacks the cluster-global roles, auth schema, and
+          # extensions schema the migrations reference (grants, auth.users FKs,
+          # auth.uid(), pg_trgm relocation). Stub just enough for a forward-apply
+          # to compile — the same surface the ingredients test conftest creates.
+          psql "$DB" -v ON_ERROR_STOP=1 <<'SQL'
+          do $$
+          begin
+            if not exists (select from pg_roles where rolname = 'anon')
+              then create role anon nologin; end if;
+            if not exists (select from pg_roles where rolname = 'authenticated')
+              then create role authenticated nologin; end if;
+            if not exists (select from pg_roles where rolname = 'service_role')
+              then create role service_role nologin bypassrls; end if;
+          end $$;
+          grant usage on schema public to anon, authenticated, service_role;
+          create schema if not exists auth;
+          create table if not exists auth.users (
+            id uuid primary key default gen_random_uuid(), email text);
+          create or replace function auth.uid() returns uuid
+            language sql stable as 'select null::uuid';
+          create schema if not exists extensions;
+          alter database postgres set search_path to "$user", public, extensions;
+          SQL
+
+      - name: Forward-apply migrations to throwaway Postgres
+        env:
+          DB: postgresql://postgres:postgres@localhost:5432/postgres
+        run: |
+          set -euo pipefail
+          # Stop on the first error; a migration that won't apply fails the PR.
+          for f in supabase/migrations/*.sql; do
+            echo "applying $f"
+            psql "$DB" -v ON_ERROR_STOP=1 -f "$f"
+          done

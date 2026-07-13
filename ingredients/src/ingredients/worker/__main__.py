@@ -6,9 +6,9 @@ Railway restart, and serves the global ``STAGE_FNS`` registry (stages register
 themselves at import; empty until stages register).
 
 The provider implementations and the local-provider proxy transport are wired
-in by the Docker/Tailscale image; the batch-reconcile boot hook is filled in
-separately. This module only provides the process seam — it deliberately holds
-no batch logic and no hosted-client construction.
+in by the Docker/Tailscale image. The batch-reconcile boot hook is bound here
+when a batch provider is configured — otherwise it stays ``None`` and boot just
+runs the reaper.
 """
 
 from __future__ import annotations
@@ -23,9 +23,22 @@ import psycopg
 from dotenv import load_dotenv
 
 import ingredients.pipeline.stages  # noqa: F401 -- registers stage_fns into STAGE_FNS
+
+from ingredients.worker.batches import OpenAIBatchReconcileClient, build_reconcile_hook
 from ingredients.worker.dispatch import STAGE_FNS
 from ingredients.worker.loop import serve
 from ingredients.worker.providers import load_configs
+
+
+def _build_reconcile_hook():
+    """Bind the OpenAI async-Batch reconciler when a key is configured.
+
+    Batch is an opt-in accelerator; with no ``OPENAI_API_KEY`` the worker skips
+    reconciliation entirely (returns ``None``) and boot just runs the reaper.
+    """
+    if not os.environ.get("OPENAI_API_KEY"):
+        return None
+    return build_reconcile_hook(OpenAIBatchReconcileClient.from_env())
 
 
 def _load_chain_configs() -> dict:
@@ -61,7 +74,7 @@ def main() -> None:
             provider_impls={},  # the real provider clients are wired in here
             worker_id=os.environ.get("WORKER_ID"),
             conn_factory=lambda: psycopg.connect(db_url, autocommit=True),
-            reconcile_hook=None,  # the batch reconciler is filled in here
+            reconcile_hook=_build_reconcile_hook(),
             stop_event=stop_event,
         )
     finally:
