@@ -16,6 +16,13 @@ working.
 
 from __future__ import annotations
 
+from ingredients.worker.batches import (
+    BatchItemResult,
+    BatchPoll,
+    ReconcileSummary,
+    build_reconcile_hook,
+    reconcile,
+)
 from ingredients.worker.cost import CostCapExceeded, CostMeter
 from ingredients.worker.dispatch import STAGE_FNS, UnknownStage, register, run
 from ingredients.worker.loop import boot, serve, tick
@@ -23,15 +30,20 @@ from ingredients.worker.parsing import build_rows_for_recipe
 from ingredients.worker.providers import ProviderChain, build_chain, load_configs
 
 __all__ = [
+    "BatchItemResult",
+    "BatchPoll",
     "CostCapExceeded",
     "CostMeter",
     "ProviderChain",
+    "ReconcileSummary",
     "STAGE_FNS",
     "UnknownStage",
     "boot",
     "build_chain",
+    "build_reconcile_hook",
     "build_rows_for_recipe",
     "load_configs",
+    "reconcile",
     "register",
     "run",
     "serve",
