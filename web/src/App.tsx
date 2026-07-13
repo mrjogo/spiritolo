@@ -16,6 +16,23 @@ const Taxonomy = lazy(() =>
   import('./pages/Taxonomy').then((m) => ({ default: m.Taxonomy })),
 );
 
+// Lazy-load the /ops console the same way — a separate chunk kept out of
+// the recipe-page bundle until an admin actually opens it.
+const OpsLayout = lazy(() =>
+  import('./pages/ops/OpsLayout').then((m) => ({ default: m.OpsLayout })),
+);
+const OpsDashboard = lazy(() =>
+  import('./pages/ops/Dashboard').then((m) => ({ default: m.Dashboard })),
+);
+
+function OpsChunkFallback() {
+  return (
+    <div role="status" aria-label="Loading ops console">
+      Loading…
+    </div>
+  );
+}
+
 // Self-contained fallback for the lazy chunk: matches the in-page
 // "settling" spinner so loading the chunk → loading data → settling
 // the d3 simulation all show the same affordance in the same spot,
@@ -76,6 +93,24 @@ export default function App() {
                 </Suspense>
               }
             />
+
+            <Route
+              path="/ops"
+              element={
+                <Suspense fallback={<OpsChunkFallback />}>
+                  <OpsLayout />
+                </Suspense>
+              }
+            >
+              <Route
+                index
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsDashboard />
+                  </Suspense>
+                }
+              />
+            </Route>
           </Route>
         </Route>
       </Route>

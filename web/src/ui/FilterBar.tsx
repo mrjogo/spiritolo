@@ -1,18 +1,13 @@
 import { useState } from 'react';
 import { FilterChips, type ChipOption } from '../components/taxonomy/FilterChips';
 import type { PostgrestFilter } from './hooks/usePagedQuery';
+import type { FilterScopeDescriptor } from './scope';
 
-export interface ScopeDescriptor {
-  kind: 'filter';
-  stage?: string;
-  site?: string;
-  limit?: number;
-  where?: PostgrestFilter[];
-}
+export type { FilterScopeDescriptor as ScopeDescriptor } from './scope';
 
 export interface FilterBarValue {
   filters: PostgrestFilter[];
-  scope: ScopeDescriptor;
+  scope: FilterScopeDescriptor;
 }
 
 interface Props {
