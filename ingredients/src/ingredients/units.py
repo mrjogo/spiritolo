@@ -1,169 +1,112 @@
-"""Closed vocabulary tables for the ingredient parser.
+"""Vocabulary the ingredient parser matches on.
 
-Editing these tables is a parser logic change — bump PARSER_VERSION in
-parser.py whenever you add or remove an alias.
+Unit recognition (measurement units and shape/form count nouns) is delegated to
+**RecipeGF's registry** — the single unit authority. RecipeGF's ``UnitValidator``
+decides validity and canonical spelling (``is_valid`` / ``normalize`` /
+``get_approx_ml``); this module reads RecipeGF's ``bar-units`` and ``count-units``
+registries to keep the parser's two recognition sets (measurement-unit surfaces
+vs count-noun surfaces) and to canonicalize to RecipeGF's spelling — so a parsed
+unit is emitted exactly as RecipeGF names it (``Tbs``, ``pnt``, ``qt``, ``gal``,
+``each`` for a cube/piece), needing no downstream translation. A small
+``_SPELLED_OUT`` bridge supplies the natural-language surface forms recipe text
+uses that RecipeGF's convert-units snapshot does not carry (``ounce``,
+``teaspoon``, ``milliliter``, ``gram``, ``pound``, ``liter``, …).
 
-Four tables, four roles. Together they govern what shows up in
-ParseResult.unit and ParseResult.name:
+The two INGREDIENT tables below are *identity*, not units, so they stay here:
 
-  UNIT_ALIASES         Words the parser will populate ParseResult.unit
-                       with via _try_qty_unit / _try_lexical_qty. Three
-                       sub-categories live here:
-                         * volume / weight measurements: oz, ml, cup,
-                           tsp, tbsp, pint, quart, gallon, lb, g, kg, …
-                         * imprecise bartending counts: dash, splash,
-                           pinch, drop, jigger, shot, squeeze, barspoon,
-                           grind, sprinkle, handful, knob, dropper, …
-                         * containers: bottle, can, bag, bunch (also
-                           dual-listed in COUNT_NOUN_ALIASES so they can
-                           match at the tail position too).
+  INGREDIENT_COUNTABLES Whole-ingredient nouns that are countable but are NOT
+                       measurement words: lemon, lime, orange, banana, cherry,
+                       egg, star anise, … When these match, _try_qty_known_noun
+                       emits unit="each" — count of whole items.
 
-  COUNT_NOUN_ALIASES   Form / piece / shape words. Populate
-                       ParseResult.unit via _try_count_noun (head or
-                       tail position). Examples: wedge, slice, leaf,
-                       sprig, cube, wheel, twist, peel, zest, stick,
-                       clove, pod, bean, chunk, quarter, half, coin,
-                       disc, ring, segment, spear, stalk, sheet, strip,
-                       scoop, piece. These describe how the ingredient
-                       has been *shaped*, not the ingredient itself.
+  BARE_INGREDIENT_ALIASES Mass-noun ingredients seen in no-qty rows: Ice,
+                       Soda water, Vodka, Champagne, … Recognized only by
+                       _try_no_qty_known_noun (unit=None).
 
-  INGREDIENT_COUNTABLES Whole-ingredient nouns that are countable but
-                       are NOT measurement words: lemon, lime, orange,
-                       banana, raspberry, jalapeño, cherry, berry, egg,
-                       peppercorn, star anise, … When these match,
-                       _try_qty_known_noun emits unit="each" — the
-                       sentinel for "count of whole items," distinct
-                       from any volume measurement. Whole-ingredient
-                       nouns never populate the unit field directly.
-
-  BARE_INGREDIENT_ALIASES Mass-noun ingredients seen in no-qty rows:
-                       Ice, Crushed ice, Soda water, Worcestershire,
-                       Vodka, Champagne, … Recognized only by
-                       _try_no_qty_known_noun, which emits unit=None
-                       (no qty → no unit). Never affects qty-bearing
-                       parses; deliberately separate so that mass nouns
-                       like `cream` or `club soda` don't mis-fire as
-                       tail-position count nouns.
+Editing the INGREDIENT tables or the ``_SPELLED_OUT`` bridge is a parser logic
+change — bump PARSER_VERSION in parser.py.
 
 ParseResult.unit value space, by parser_rule:
-  qty_unit            -> a UNIT_ALIASES canonical (oz, ml, dash, bottle, …).
-  count_noun          -> a COUNT_NOUN_ALIASES canonical (wedge, leaf, …).
+  qty_unit            -> a RecipeGF measurement-unit canonical (oz, ml, dash, …).
+  count_noun          -> a RecipeGF count-unit canonical (wedge, leaf, each, …).
   qty_known_noun      -> the literal string "each".
   qty_annotated_name  -> None (preserved annotation; unit unknown).
-  lexical_qty         -> a UNIT_ALIASES canonical (Pinch X, Splash X).
+  lexical_qty         -> a RecipeGF measurement-unit canonical (Pinch X, Splash X).
   no_qty_known_noun   -> None (no qty → no unit).
   topup, garnish_prefix -> None (semantic role, no qty/unit).
 """
 
 from __future__ import annotations
 
-# Surface form -> canonical unit. Keys are matched case-insensitively.
-UNIT_ALIASES: dict[str, str] = {
-    # volume
-    "oz": "oz", "oz.": "oz", "ounce": "oz", "ounces": "oz",
+from recipegf import UnitValidator, spec
+
+_UNITS = UnitValidator()
+
+
+def _registry_surface_map(relpath: str) -> dict[str, str]:
+    """Surface-form (lowercased) -> RecipeGF canonical name, for one registry
+    unit file. Each unit contributes its own name plus every alias."""
+    out: dict[str, str] = {}
+    for unit in spec.load_yaml(relpath)["units"]:
+        name = unit["name"]
+        out[name.lower()] = name
+        for alias in unit.get("aliases") or []:
+            out[alias.lower()] = name
+    return out
+
+
+# Natural-language unit surfaces recipe text uses that RecipeGF's convert-units
+# snapshot doesn't accept on its own (it carries abbreviations + the bar/count
+# aliases, not the spelled-out standard words). Values are RecipeGF-canonical.
+_SPELLED_OUT: dict[str, str] = {
+    "oz.": "oz", "ounce": "oz", "ounces": "oz",
     "fl oz": "oz", "fl. oz.": "oz", "fl oz.": "oz",
     "fluid ounce": "oz", "fluid ounces": "oz",
-    "ml": "ml", "ml.": "ml", "milliliter": "ml", "milliliters": "ml",
-    "cl": "cl",
-    "l": "l", "liter": "l", "liters": "l", "litre": "l", "litres": "l",
-    "tsp": "tsp", "tsp.": "tsp", "teaspoon": "tsp", "teaspoons": "tsp",
-    "tbsp": "tbsp", "tbsp.": "tbsp", "tablespoon": "tbsp", "tablespoons": "tbsp",
-    "tbs": "tbsp", "tbs.": "tbsp",
-    "cup": "cup", "cups": "cup", "cupful": "cup", "cupfuls": "cup",
-    "pint": "pint", "pints": "pint", "pt": "pint", "pt.": "pint",
-    "quart": "quart", "quarts": "quart", "qt": "quart", "qt.": "quart",
-    # weight
-    "g": "g", "g.": "g", "gram": "g", "grams": "g",
-    "kg": "kg", "kg.": "kg", "kilogram": "kg", "kilograms": "kg",
-    "lb": "lb", "lb.": "lb", "lbs": "lb", "lbs.": "lb",
-    "pound": "lb", "pounds": "lb",
-    # bartending counts treated as units
-    "dash": "dash", "dashes": "dash",
-    "drop": "drop", "drops": "drop",
-    "splash": "splash", "splashes": "splash",
-    "barspoon": "barspoon", "barspoons": "barspoon",
+    "ml.": "ml", "milliliter": "ml", "milliliters": "ml",
+    "liter": "l", "liters": "l", "litre": "l", "litres": "l",
+    "teaspoon": "tsp", "teaspoons": "tsp", "tsp.": "tsp",
+    "tablespoons": "Tbs", "tbsp.": "Tbs", "tbs.": "Tbs",
+    "cups": "cup", "cupful": "cup", "cupfuls": "cup",
+    "gram": "g", "grams": "g", "g.": "g",
+    "kilogram": "kg", "kilograms": "kg", "kg.": "kg",
+    "pound": "lb", "pounds": "lb", "lbs": "lb", "lbs.": "lb", "lb.": "lb",
+    "pt": "pnt", "pt.": "pnt", "pints": "pnt",
+    "qt.": "qt", "gallons": "gal",
     "bar spoon": "barspoon", "bar spoons": "barspoon",
-    "pinch": "pinch", "pinches": "pinch",
-    "part": "part", "parts": "part",
-    "jigger": "jigger", "jiggers": "jigger",
-    "pony": "pony", "ponies": "pony",
-    "shot": "shot", "shots": "shot",
-    "squeeze": "squeeze", "squeezes": "squeeze",
-    # container counts — volume is context-dependent (wine bottle ≠ beer
-    # bottle); downstream consumers must resolve the canonical volume from
-    # the name, not from the unit alone.
-    "bottle": "bottle", "bottles": "bottle",
-    "bunch": "bunch", "bunches": "bunch",
-    "can": "can", "cans": "can",
-    "bag": "bag", "bags": "bag",
-    "gallon": "gallon", "gallons": "gallon",
-    "swath": "swath", "swaths": "swath",
-    # imprecise bartending counts (`2 grind black pepper`, `1 sprinkle salt`)
-    "grind": "grind", "grinds": "grind",
-    "sprinkle": "sprinkle", "sprinkles": "sprinkle",
-    "handful": "handful", "handfuls": "handful",
-    "knob": "knob", "knobs": "knob",
-    "dropper": "dropper", "droppers": "dropper",
-    "dropperful": "dropper", "dropperfuls": "dropper",
-    "packet": "packet", "packets": "packet",
-    "package": "package", "packages": "package",
 }
 
-# Surface form -> canonical count noun. Same lookup discipline.
-# True measurement count nouns. The parser populates the `unit` field
-# *only* with values from this dict (or UNIT_ALIASES). If a word doesn't
-# describe a measurement of an ingredient — like `lemon` or `banana` —
-# it does not belong here, even if it's countable. Bare-ingredient
-# countables go in INGREDIENT_COUNTABLES below.
-COUNT_NOUN_ALIASES: dict[str, str] = {
-    "leaf": "leaf", "leaves": "leaf",
-    "slice": "slice", "slices": "slice",
-    "wedge": "wedge", "wedges": "wedge",
-    "wheel": "wheel", "wheels": "wheel",
-    "stick": "stick", "sticks": "stick",
-    "cube": "cube", "cubes": "cube",
-    "sprig": "sprig", "sprigs": "sprig",
-    "piece": "piece", "pieces": "piece",
-    "twist": "twist", "twists": "twist",
-    # plant-part count nouns (head: `4 cardamom pods`, `1 vanilla bean`,
-    # `1.5 cloves garlic`). These describe a *part* of the ingredient
-    # (clove, pod, bean = structural pieces) so they ARE measurement-shaped.
-    # Whole-fruit names (cherry, berry, peppercorn, egg) are different —
-    # they live in INGREDIENT_COUNTABLES and emit unit="each".
-    "clove": "clove", "cloves": "clove",
-    "pod": "pod", "pods": "pod",
-    "bean": "bean", "beans": "bean",
-    # serving counts and forms
-    "scoop": "scoop", "scoops": "scoop",
-    "strip": "strip", "strips": "strip",
-    "stalk": "stalk", "stalks": "stalk",
-    "sheet": "sheet", "sheets": "sheet",
-    "disc": "disc", "discs": "disc", "disk": "disc", "disks": "disc",
-    "coin": "coin", "coins": "coin",
-    "quarter": "quarter", "quarters": "quarter",
-    "chunk": "chunk", "chunks": "chunk",
-    "ring": "ring", "rings": "ring",
-    "segment": "segment", "segments": "segment",
-    "spear": "spear", "spears": "spear",
-    "half": "half", "halves": "half",
-    # `springs` is a corpus typo for `sprigs` (`2 springs cilantro`).
-    "spring": "sprig", "springs": "sprig",
-    # NOTE: `cherry`, `berry`, `egg`, `egg white`, `egg yolk`, `peppercorn`,
-    # and `star anise` are *whole-ingredient names* and live in
-    # INGREDIENT_COUNTABLES, not here. Keeping them out of COUNT_NOUN
-    # ensures count_noun's tail/head match never emits `unit=cherry` or
-    # `unit=egg` — qty_known_noun handles them with unit="each".
-    # parts-of-fruit (`1 lemon zest`, `2 orange peels`, `1 lime seed`).
-    "zest": "zest",
-    "peel": "peel", "peels": "peel",
-    "seed": "seed", "seeds": "seed",
-    # containers — also in UNIT_ALIASES so `1 bottle wine` (head)
-    # *and* `2 wine bottles` (tail) both parse.
+# RecipeGF standard (convert-units) abbreviations that are recipe-relevant. The
+# full snapshot carries physics/computing noise (m, s, t, d, Hz, kW, …); the
+# parser must not treat `1 m mint` as meters, so only this curated volume/weight
+# set from the standard registry is admitted.
+_STANDARD_ALLOW = {"cup", "l", "cl", "dl", "ml", "g", "kg", "mg", "lb", "oz", "tsp"}
+
+# Measurement-unit surfaces (qty_unit / lexical_qty): RecipeGF bar-units +
+# curated standard abbreviations + the spelled-out bridge.
+_UNIT_SURFACE: dict[str, str] = {
+    **_registry_surface_map("registry/units/bar-units.yaml"),
+    **{u: u for u in _STANDARD_ALLOW},
+    **_SPELLED_OUT,
+}
+
+# Count-noun surfaces (count_noun): RecipeGF count-units + the container words
+# that dual-list as both a measure (bar-units) and a tail count noun, so
+# `1 bottle wine` and `2 wine bottles` both parse.
+_COUNT_SURFACE: dict[str, str] = {
+    **_registry_surface_map("registry/units/count-units.yaml"),
     "bottle": "bottle", "bottles": "bottle",
     "can": "can", "cans": "can",
     "bunch": "bunch", "bunches": "bunch",
     "bag": "bag", "bags": "bag",
+    # `springs` is a corpus typo for `sprigs` (`2 springs cilantro`).
+    "spring": "sprig", "springs": "sprig",
 }
+
+
+def unit_surface_forms() -> list[str]:
+    """Every measurement-unit surface form the parser recognizes. The parser
+    builds its concatenated-row guard alternation from this set."""
+    return list(_UNIT_SURFACE.keys())
 
 
 # Countable ingredient nouns — `1 lemon`, `2 limes`, `4 raspberries`,
@@ -341,15 +284,18 @@ BARE_INGREDIENT_ALIASES: dict[str, str] = {
 
 
 def canonicalize_unit(surface: str) -> str | None:
+    """RecipeGF canonical spelling of a measurement unit surface form, or None.
+    RecipeGF is the authority; this only maps recipe-text surfaces onto it."""
     if not surface:
         return None
-    return UNIT_ALIASES.get(surface.lower())
+    return _UNIT_SURFACE.get(surface.lower())
 
 
 def canonicalize_count_noun(surface: str) -> str | None:
+    """RecipeGF canonical spelling of a shape/form count-noun surface, or None."""
     if not surface:
         return None
-    return COUNT_NOUN_ALIASES.get(surface.lower())
+    return _COUNT_SURFACE.get(surface.lower())
 
 
 def is_unit_alias(surface: str) -> bool:
@@ -368,7 +314,7 @@ def canonicalize_qty_noun(surface: str) -> str | None:
     if not surface:
         return None
     key = surface.lower()
-    return COUNT_NOUN_ALIASES.get(key) or INGREDIENT_COUNTABLES.get(key)
+    return _COUNT_SURFACE.get(key) or INGREDIENT_COUNTABLES.get(key)
 
 
 def canonicalize_known_noun(surface: str) -> str | None:
@@ -380,7 +326,7 @@ def canonicalize_known_noun(surface: str) -> str | None:
         return None
     key = surface.lower()
     return (
-        COUNT_NOUN_ALIASES.get(key)
+        _COUNT_SURFACE.get(key)
         or INGREDIENT_COUNTABLES.get(key)
         or BARE_INGREDIENT_ALIASES.get(key)
     )

@@ -17,19 +17,19 @@ from ingredients.units import (
     canonicalize_count_noun,
     canonicalize_qty_noun,
     canonicalize_known_noun,
-    UNIT_ALIASES,
+    unit_surface_forms,
 )
 
-PARSER_VERSION = "v9"
+PARSER_VERSION = "v10"
 
 # Pattern used to detect concatenated multi-ingredient rows in the candidate
 # name produced by _try_qty_unit. If the name contains an embedded quantity
 # followed by a known unit (e.g. "amaro3 oz ...") it's a concatenation artifact
 # and we must abstain rather than produce a garbled parse.
-# Built from the full UNIT_ALIASES table so it stays in sync automatically.
-# Sorted longest-first to avoid early truncation in alternation.
+# Built from the parser's full unit surface set so it stays in sync
+# automatically. Sorted longest-first to avoid early truncation in alternation.
 _UNIT_ALTERNATION = "|".join(
-    re.escape(k) for k in sorted(UNIT_ALIASES, key=len, reverse=True)
+    re.escape(k) for k in sorted(unit_surface_forms(), key=len, reverse=True)
 )
 # Concat-row guard: a *letter* directly followed by `<digit>+ <unit>` is the
 # scraper-artifact giveaway (`Amaro3 oz Lambrusco`, `Rosé1 oz club soda`).

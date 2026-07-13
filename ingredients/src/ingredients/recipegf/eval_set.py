@@ -169,12 +169,13 @@ _NO_TECHNIQUE = _recipe(
 )
 
 _UNTRANSLATABLE_UNIT = _recipe(
-    "Two-Part Sour", "https://example.com/two-part-sour",
-    "Stir the two parts together with ice and strain.",
+    "Glug Sour", "https://example.com/glug-sour",
+    "Stir the glugs together with ice and strain.",
     [
-        # "part" is a relative unit with no absolute RecipeGF equivalent.
-        _ing(1, "2 parts whiskey", "whiskey", "bourbon", 2, "part", "base_spirit"),
-        _ing(2, "1 part lemon juice", "lemon juice", "lemon-juice", 1, "part", "citrus"),
+        # "glug" is not a unit RecipeGF's registry recognizes, so the converter
+        # abstains rather than emit an invalid quantity.
+        _ing(1, "2 glugs whiskey", "whiskey", "bourbon", 2, "glug", "base_spirit"),
+        _ing(2, "1 glug lemon juice", "lemon juice", "lemon-juice", 1, "glug", "citrus"),
     ],
 )
 
