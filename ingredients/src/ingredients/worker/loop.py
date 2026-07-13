@@ -1,8 +1,8 @@
-"""Worker loop: boot + claim/dispatch/heartbeat/finalize tick (WS-B23).
+"""Worker loop: boot + claim/dispatch/heartbeat/finalize tick.
 
-``boot`` runs once at process start: it invokes the batch-reconcile seam (filled
-in by B24) and then the reaper (requeue jobs whose heartbeat went stale — the
-Railway-restart retry story). ``tick`` is one pass of the run loop:
+``boot`` runs once at process start: it invokes the batch-reconcile seam and
+then the reaper (requeue jobs whose heartbeat went stale — the Railway-restart
+retry story). ``tick`` is one pass of the run loop:
 
     claim_one  ->  commit the claim  ->  start a heartbeat thread
                ->  dispatch to the stage_fn  ->  stop the heartbeat
@@ -93,9 +93,9 @@ def boot(
 ) -> int:
     """Run the boot sequence once; return the number of jobs the reaper requeued.
 
-    Order matters: the batch-reconcile seam (``reconcile_hook``, B24) runs
-    BEFORE the reaper/claim loop so a completed batch's rows exist before any
-    dependent stage claims. B23 only guarantees the seam is invoked — it has no
+    Order matters: the batch-reconcile seam (``reconcile_hook``) runs BEFORE the
+    reaper/claim loop so a completed batch's rows exist before any dependent
+    stage claims. This function only guarantees the seam is invoked — it has no
     batch logic of its own.
     """
     if reconcile_hook is not None:

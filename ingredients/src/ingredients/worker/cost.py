@@ -1,4 +1,4 @@
-"""Cost accounting + hard cap for the worker (WS-B23).
+"""Cost accounting + hard cap for the worker.
 
 A metered stage (hosted LLM, ScraperAPI) accumulates spend call-by-call. The
 ``CostMeter`` is the running total plus the ceiling: before a metered call is

@@ -1,4 +1,4 @@
--- Audit log (WS-B26), part 2 of 2: the generic trigger + its attachments.
+-- Audit log: the generic trigger + its attachments.
 --
 -- audit.log_change() is the SINGLE audit writer. The actor distinction falls
 -- out with no side channel:
@@ -58,12 +58,12 @@ $$;
 -- provenance. Each has a scalar bigint `id` PK, so pk := to_jsonb(row)->>'id'
 -- is well-defined.
 --
--- GREENFIELD NOTE: the redesign's relational recipe tables (recipes /
--- recipe_ingredients / recipe_steps) are not built yet. When they land, attach
--- this SAME trigger to each of them (one `create trigger audit_<table> after
--- insert or update or delete on public.<table> for each row execute function
--- audit.log_change();`) so pipeline writes and manual recipe edits are captured
--- identically — no new function, just the attachment.
+-- NOTE: the relational recipe tables (recipes / recipe_ingredients /
+-- recipe_steps) are not built yet. When they land, attach this SAME trigger to
+-- each of them (one `create trigger audit_<table> after insert or update or
+-- delete on public.<table> for each row execute function audit.log_change();`)
+-- so pipeline writes and manual recipe edits are captured identically — no new
+-- function, just the attachment.
 --
 -- Composite-PK reference tables (taxonomy_edges / taxonomy_aliases /
 -- cocktail_aliases) are intentionally NOT row-audited: their curation RPCs

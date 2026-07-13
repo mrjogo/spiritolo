@@ -1,9 +1,9 @@
-"""Stage-fn dispatch registry (WS-B23).
+"""Stage-fn dispatch registry.
 
-``STAGE_FNS`` maps a stage name to the callable that runs it. B23 owns the
-registry + the seam contract; each pipeline stage (built later, gated on
-RecipeGF v0.4.0) registers its own ``stage_fn`` body — the single point where a
-fake stage_fn is injected in tests.
+``STAGE_FNS`` maps a stage name to the callable that runs it. This module owns
+the registry + the seam contract; each pipeline stage registers its own
+``stage_fn`` body — the single point where a fake stage_fn is injected in
+tests.
 
 A ``stage_fn`` has the signature ``fn(job, conn, providers)`` where:
   - ``job``       is the claimed job row (a dict with ``stage`` / ``payload`` /

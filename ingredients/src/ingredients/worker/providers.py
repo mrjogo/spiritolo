@@ -1,4 +1,4 @@
-"""Config-not-code provider chain for the worker (WS-B23).
+"""Config-not-code provider chain for the worker.
 
 ``ProviderChain`` wires a stage's ordered provider tiers (from external config,
 never DB schema) into a single ``resolve(items)`` call that:

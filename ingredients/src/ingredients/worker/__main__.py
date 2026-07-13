@@ -1,14 +1,14 @@
-"""``python -m ingredients.worker`` — the always-on worker entrypoint (WS-B23).
+"""``python -m ingredients.worker`` — the always-on worker entrypoint.
 
 Wires the runtime to the real environment and hands off to ``loop.serve``: it
 connects via ``SUPABASE_DB_URL``, installs SIGINT/SIGTERM handlers for a clean
 Railway restart, and serves the global ``STAGE_FNS`` registry (stages register
-themselves at import; greenfield-empty for now).
+themselves at import; empty until stages register).
 
-The provider implementations and the local-provider proxy transport are wired by
-WS-B25 (the Docker/Tailscale image); the batch-reconcile boot hook is filled in
-by WS-B24. This module only provides the process seam — it deliberately holds no
-batch logic and no hosted-client construction.
+The provider implementations and the local-provider proxy transport are wired
+in by the Docker/Tailscale image; the batch-reconcile boot hook is filled in
+separately. This module only provides the process seam — it deliberately holds
+no batch logic and no hosted-client construction.
 """
 
 from __future__ import annotations
@@ -57,10 +57,10 @@ def main() -> None:
             conn,
             stage_fns=STAGE_FNS,
             configs=_load_chain_configs(),
-            provider_impls={},  # WS-B25 wires the real provider clients here
+            provider_impls={},  # the real provider clients are wired in here
             worker_id=os.environ.get("WORKER_ID"),
             conn_factory=lambda: psycopg.connect(db_url, autocommit=True),
-            reconcile_hook=None,  # WS-B24 fills in the batch reconciler here
+            reconcile_hook=None,  # the batch reconciler is filled in here
             stop_event=stop_event,
         )
     finally:
