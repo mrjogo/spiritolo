@@ -52,16 +52,20 @@ integration.
 One bucket holding gzipped HTML keyed `sha256(url)`: S3-compatible (Tigris-
 backed), $0.015/GB-month, free egress and free API operations. Write-once and
 read-only after the one-time load — the loader never overwrites or deletes a
-key, and the worker never re-scrapes. Buckets are dashboard-only (no CLI/API to
-create one):
+key, and the worker never re-scrapes.
 
-1. In the Railway project that runs the worker (§5) — same canvas — click
-   **Create → Bucket**, pick a region, optionally rename it (Railway appends a
-   hash for global uniqueness).
-2. Open the bucket → **Credentials** tab. It lists `ENDPOINT`
-   (`https://storage.railway.app`), `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`,
-   `BUCKET`, and `REGION` (`auto`) — the worker consumes these in §5 as the
-   generic `S3_*` vars the code reads.
+```bash
+# In the worker's project (§5's `railway init` creates it; `railway link` to it).
+railway bucket create spiritolo-corpus --region <region>   # e.g. --region sjc; prompted if omitted
+railway bucket credentials    # prints AWS_ENDPOINT_URL / AWS_ACCESS_KEY_ID /
+                              # AWS_SECRET_ACCESS_KEY / AWS_S3_BUCKET_NAME / AWS_DEFAULT_REGION
+```
+
+Railway appends a hash to the name for global uniqueness, so take the real
+`AWS_S3_BUCKET_NAME` from `credentials`, not the name you passed. §5 sets the
+worker's generic `S3_*` vars from this output (`AWS_ENDPOINT_URL`→`S3_ENDPOINT`,
+`AWS_ACCESS_KEY_ID`→`S3_ACCESS_KEY_ID`, and so on). (Or create it on the canvas
+→ **Create → Bucket** and copy the **Credentials** tab.)
 
 Railway has **no object-lock or versioning** yet, so the corpus's only other
 copy is your local `data/html/` archive — keep it. Load the corpus per
@@ -86,15 +90,13 @@ railway variables \
   --set OPENAI_API_KEY=<key> --set ANTHROPIC_API_KEY=<key> --set DEEPSEEK_API_KEY=<key> \
   --set TAILSCALE_AUTHKEY=<ts_authkey> \
   --set OLLAMA_BASE_URL="http://barbot:11434" \
-  --set 'S3_ENDPOINT=${{<bucket>.ENDPOINT}}' \
-  --set 'S3_ACCESS_KEY_ID=${{<bucket>.ACCESS_KEY_ID}}' \
-  --set 'S3_SECRET_ACCESS_KEY=${{<bucket>.SECRET_ACCESS_KEY}}' \
-  --set 'S3_BUCKET=${{<bucket>.BUCKET}}' --set 'S3_REGION=${{<bucket>.REGION}}'
-# <bucket> = the Storage Bucket's service name (§3); the ${{…}} references pull
-# live from its Credentials, so a rotated key propagates with no re-set (single
-# quotes stop the shell expanding ${{…}} before Railway resolves it).
-# RECIPEGF_TOKEN goes in dashboard → service → Settings → Build → build args
-# (build-time only), NOT as a runtime variable.
+  --set S3_ENDPOINT=https://storage.railway.app --set S3_REGION=auto \
+  --set S3_ACCESS_KEY_ID=<AWS_ACCESS_KEY_ID> --set S3_SECRET_ACCESS_KEY=<AWS_SECRET_ACCESS_KEY> \
+  --set S3_BUCKET=<AWS_S3_BUCKET_NAME>
+# The three <…> S3 values are the matching fields from `railway bucket
+# credentials` (§3). RECIPEGF_TOKEN is a BUILD arg (worker.Dockerfile `ARG`),
+# not a runtime var — the CLI can't set build args, so add it in
+# dashboard → service → Settings → Build → build args (skip if RecipeGF is public).
 railway up --ci                              # first deploy from worker.Dockerfile / railway.json
 railway logs                                 # confirm: tailscaled up, tailnet joined, poll loop started
 ```

@@ -126,19 +126,20 @@ only genuinely-new names hit an LLM. Point its chain at free local `barbot`
 
 ## 5. Verify
 
-1. Supabase SQL editor → [new query](https://supabase.com/dashboard/project/atvlzbgrquiseczzeczn/sql/new), run:
+```bash
+psql "$SUPABASE_DB_URL" -c "
+  select
+    (select count(*) from pages) as pages,
+    (select count(*) from pages
+       where content_type in ('likely_drink_recipe','confirmed_drink')
+         and r2_key is not null) as extractable,
+    (select count(*) from recipes) as recipes,
+    (select count(*) from recipe_exports) as exports;"
+```
 
-   ```sql
-   select
-     (select count(*) from pages)                                as pages,
-     (select count(*) from pages where content_type in ('likely_drink_recipe','confirmed_drink') and r2_key is not null) as extractable,
-     (select count(*) from recipes)                              as recipes,
-     (select count(*) from recipe_exports)                       as exports;
-   ```
-
-   `extractable` ≈ `recipes` ≈ `exports` once the pipeline drains.
-2. `/ops` dashboard → every stage's content-queue-depth is **0**.
-3. Spot-check a bundle in `/ops` → **Exports** → preview.
+`extractable` ≈ `recipes` ≈ `exports` once the pipeline drains. The `/ops`
+dashboard shows the same live (every stage's content-queue-depth at 0), and
+`/ops → Exports → preview` spot-checks a bundle.
 
 ## 6. Decommission the local data
 
