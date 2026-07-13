@@ -97,3 +97,128 @@ def test_entrypoint_no_global_proxy_export():
     assert "export TS_LOCAL_PROXY=" in sh
     assert "export ALL_PROXY" not in sh
     assert "export HTTPS_PROXY" not in sh
+
+
+# --------------------------------------------------------------------------- #
+# deploy-migrations.yml — the PR-to-main validate gate                          #
+# --------------------------------------------------------------------------- #
+
+def _all_run_scripts(job: dict) -> str:
+    return "\n".join(
+        step.get("run", "") for step in job.get("steps", []) if isinstance(step, dict)
+    )
+
+
+def test_deploy_migrations_has_validate_job():
+    doc = _yaml(".github/workflows/deploy-migrations.yml")
+    on = _on(doc)
+    pr = on["pull_request"]
+    assert "main" in pr["branches"]
+    assert "supabase/migrations/**" in pr["paths"]
+
+    # A job that runs a postgres:16 service and forward-applies every migration
+    # with ON_ERROR_STOP.
+    validate = next(
+        (
+            j for j in doc["jobs"].values()
+            if isinstance(j.get("services"), dict)
+            and any(
+                str(svc.get("image", "")).startswith("postgres:16")
+                for svc in j["services"].values()
+            )
+        ),
+        None,
+    )
+    assert validate is not None, "no validate job with a postgres:16 service"
+    script = _all_run_scripts(validate)
+    assert "ON_ERROR_STOP=1" in script
+    assert "supabase/migrations/*.sql" in script
+    assert "psql" in script
+
+
+def test_deploy_migrations_no_rebuild_projections():
+    # The single-DB topology gives main a validation gate only; no projection
+    # rebuild step is wired here.
+    doc = _text(".github/workflows/deploy-migrations.yml")
+    assert "rebuild_projections" not in doc
+
+
+# --------------------------------------------------------------------------- #
+# web-ci.yml — the Vitest PR gate for the SPA                                   #
+# --------------------------------------------------------------------------- #
+
+def test_web_ci_runs_vitest():
+    doc = _yaml(".github/workflows/web-ci.yml")
+    on = _on(doc)
+    assert "web/**" in on["pull_request"]["paths"]
+
+    job = next(iter(doc["jobs"].values()))
+    script = _all_run_scripts(job)
+    wd = job.get("defaults", {}).get("run", {}).get("working-directory", "")
+    step_wds = [s.get("working-directory", "") for s in job.get("steps", []) if isinstance(s, dict)]
+    in_web = wd == "web" or "web" in step_wds or "cd web" in script
+    assert in_web, "web CI must run inside web/"
+    assert "npm test" in script
+
+
+# --------------------------------------------------------------------------- #
+# deploy-worker.yml — Railway deploy on staging pushes to worker paths          #
+# --------------------------------------------------------------------------- #
+
+def test_deploy_worker_paths():
+    doc = _yaml(".github/workflows/deploy-worker.yml")
+    on = _on(doc)
+    push = on["push"]
+    assert "staging" in push["branches"]
+    required = {
+        "ingredients/**", "common/**", "worker.Dockerfile",
+        "scripts/worker-entrypoint.sh", "railway.json", "uv.lock",
+    }
+    assert required.issubset(set(push["paths"])), (
+        f"missing trigger paths: {required - set(push['paths'])}"
+    )
+
+    job = next(iter(doc["jobs"].values()))
+    script = _all_run_scripts(job)
+    assert "railway up" in script
+    assert "--ci" in script
+
+
+# --------------------------------------------------------------------------- #
+# railway.json — declarative Dockerfile builder, single replica                 #
+# --------------------------------------------------------------------------- #
+
+def test_railway_json_dockerfile_builder():
+    cfg = json.loads(_text("railway.json"))
+    assert cfg["build"]["builder"] == "DOCKERFILE"
+    assert cfg["build"]["dockerfilePath"] == "worker.Dockerfile"
+    assert cfg["deploy"]["numReplicas"] == 1
+    assert cfg["deploy"]["restartPolicyType"] == "ON_FAILURE"
+
+
+# --------------------------------------------------------------------------- #
+# docs/devops-runbook.md — zero-to-deployed operator guide                      #
+# --------------------------------------------------------------------------- #
+
+def test_runbook_covers_all_steps():
+    md = _text("docs/devops-runbook.md")
+    lowered = md.lower()
+    for marker in (
+        "supabase pro",
+        "repo secrets",
+        "cloudflare r2",
+        "tailscale",
+        "railway",
+        "vercel",
+        "recipegf",
+        "smoke",
+        "promote",
+    ):
+        assert marker in lowered, f"runbook missing a section for {marker!r}"
+    # The load-bearing secrets/artifacts an operator must not miss.
+    assert "RECIPEGF_TOKEN" in md
+    assert "TAILSCALE_AUTHKEY" in md
+    assert "R2_" in md
+    assert "v0.4.0" in md
+    # No projection-rebuild step leaks into the runbook either.
+    assert "rebuild_projections" not in md
