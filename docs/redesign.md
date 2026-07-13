@@ -61,6 +61,24 @@ model.
   **review/edit after a batch** — edits route through an RPC that writes content
   *and* appends one `audit_log` row (actor = human).
 
+---
+## Model amendment (ratified) — RecipeGF-shaped RELATIONAL storage, generated on demand
+
+This supersedes the "one canonical JSONB `recipe_docs` doc with an `_x` sidecar, stripped at export" model wherever it appears below (§1, §9, the sequence diagram, and workstreams B2/B3/B5/B8–B13).
+
+**Why:** the ingredient→taxonomy resolution (e.g. "american bourbon" → "bourbon") changes often, driven by taxonomy curation, and is inherently *shared* — fix it once and every recipe follows. Baking the resolved slug into a canonical per-recipe doc loses fix-once and forces a doc rewrite on every correction. Resolution is cheap and volatile — exactly what not to freeze.
+
+**The model:**
+- **Canonical, stable, stored** — the recipe in RecipeGF shape, RELATIONALLY: `recipes` (header + raw `source` jsonld), `recipe_ingredients` (RecipeGF ingredient rows: name/amount/amount_max/unit/modifiers), `recipe_steps` (RecipeGF verb-frame steps). These parse/convert outputs don't change when the taxonomy changes.
+- **Canonical, shared, corrected-often** — the taxonomy + a name-keyed `name → taxonomy` resolution (fix once, applies everywhere). Never stored per recipe-ingredient.
+- **Derived, generated on demand** — each ingredient's `ref`/slug + `role`, cluster/variant keys, similarity/search indexes, and the full RecipeGF **bundle** `{recipe, verbs, meta}` assembled from the relational rows + current resolution + verb-defs. Always current w.r.t. the taxonomy.
+- **Freeze on export** — a bundle published to a consumer (Barbot) is a frozen snapshot; the live representation stays current.
+
+RecipeGF is still THE representation — the relational columns ARE RecipeGF's fields — just normalized (queryable, correctable) rather than a frozen blob, serialized on demand.
+
+**Consequences:** no `recipe_docs`, no `_x`, no `strip_x`. The WHAT/HOW split is now at the table level (content tables = public recipe facts; `stage_runs` = HOW), so "hide `_x` from anon" no longer applies. B2 (this PR) delivers the `stage_runs` run-ledger + this amendment; the relational `recipes`/`recipe_ingredients`/`recipe_steps` schema lands in the greenfield content-pipeline rebuild. B3 (strip_x) → a `generate_bundle(recipe_id)` module (rows + resolution + verbs). B5 → the relational tables are the queryable graph; add derived materializations (resolution/role/cluster) as needed. B8–B13 stages write relational rows (parse→recipe_ingredients; map→the shared resolution; role/cluster→derived; export→generate+freeze the bundle).
+---
+
 ## 2. Tracts & the one gate
 
 | Tract | Repo | Delivery | Workstreams |
@@ -575,6 +593,16 @@ YAGNI:
 ## 9. Foundation — Data & Process Model
 
 ### 0. Frame: one content model, three process tables
+
+> **Ratified amendment supersedes this section.** The source-of-truth content
+> shape is now RecipeGF-shaped **relational** storage (`recipes` +
+> `recipe_ingredients` + `recipe_steps`), not a single `recipe_docs` JSONB doc
+> with an `_x` sidecar. Ingredient→taxonomy resolution and the export bundle are
+> **generated on demand**, never frozen per recipe. See **"Model amendment
+> (ratified) — RecipeGF-shaped RELATIONAL storage, generated on demand"** after
+> §1. Read the `recipe_docs`/`_x`/`strip_x` descriptions below as the superseded
+> prior design; the concepts (projections, the three process tables) still hold,
+> re-homed onto the relational tables.
 
 The redesign has **one source-of-truth content shape** (`recipe_docs`, a
 RecipeGF-shaped JSONB doc) plus curated reference data (`taxonomy_*`,
