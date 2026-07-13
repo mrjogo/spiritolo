@@ -37,4 +37,14 @@ describe('<OpsLayout>', () => {
     expect(screen.getByRole('link', { name: /dashboard/i })).toBeInTheDocument();
     expect(screen.getByText('dashboard-child')).toBeInTheDocument();
   });
+
+  it('links to every /ops DB browser', () => {
+    useIsAdminMock.mockReturnValue({ isAdmin: true, isLoading: false });
+    renderAt('/ops');
+    expect(screen.getByRole('link', { name: /recipes/i })).toHaveAttribute('href', '/ops/recipes');
+    expect(screen.getByRole('link', { name: /stage runs/i })).toHaveAttribute('href', '/ops/stage-runs');
+    expect(screen.getByRole('link', { name: /audit log/i })).toHaveAttribute('href', '/ops/audit-log');
+    expect(screen.getByRole('link', { name: /clusters/i })).toHaveAttribute('href', '/ops/clusters');
+    expect(screen.getByRole('link', { name: /exports/i })).toHaveAttribute('href', '/ops/exports');
+  });
 });

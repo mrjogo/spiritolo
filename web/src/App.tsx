@@ -24,6 +24,21 @@ const OpsLayout = lazy(() =>
 const OpsDashboard = lazy(() =>
   import('./pages/ops/Dashboard').then((m) => ({ default: m.Dashboard })),
 );
+const OpsRecipesBrowser = lazy(() =>
+  import('./pages/ops/RecipesBrowser').then((m) => ({ default: m.RecipesBrowser })),
+);
+const OpsStageRunsBrowser = lazy(() =>
+  import('./pages/ops/StageRunsBrowser').then((m) => ({ default: m.StageRunsBrowser })),
+);
+const OpsAuditLogBrowser = lazy(() =>
+  import('./pages/ops/AuditLogBrowser').then((m) => ({ default: m.AuditLogBrowser })),
+);
+const OpsClustersBrowser = lazy(() =>
+  import('./pages/ops/ClustersBrowser').then((m) => ({ default: m.ClustersBrowser })),
+);
+const OpsExportsBrowser = lazy(() =>
+  import('./pages/ops/ExportsBrowser').then((m) => ({ default: m.ExportsBrowser })),
+);
 
 function OpsChunkFallback() {
   return (
@@ -107,6 +122,46 @@ export default function App() {
                 element={
                   <Suspense fallback={<OpsChunkFallback />}>
                     <OpsDashboard />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="recipes"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsRecipesBrowser />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="stage-runs"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsStageRunsBrowser />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="audit-log"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsAuditLogBrowser />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="clusters"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsClustersBrowser />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="exports"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsExportsBrowser />
                   </Suspense>
                 }
               />
