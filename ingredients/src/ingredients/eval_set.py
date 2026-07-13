@@ -73,7 +73,7 @@ _PARSE_CASES: list[EvalCase] = [
              expect_amount=3.0, expect_unit="leaf", expect_name="basil"),
     EvalCase("4 sugar cubes", "liquor",
              expect_status="parsed", expect_rule="count_noun",
-             expect_amount=4.0, expect_unit="cube", expect_name="sugar"),
+             expect_amount=4.0, expect_unit="each", expect_name="sugar"),
     EvalCase("1 fresh rosemary sprig", "thekitchn",
              expect_status="parsed", expect_rule="count_noun",
              expect_amount=1.0, expect_unit="sprig", expect_name="rosemary"),
@@ -84,10 +84,10 @@ _PARSE_CASES: list[EvalCase] = [
              expect_name="counter culture espresso"),
     EvalCase("1 pint Pilsner lager", "punch",
              expect_status="parsed", expect_rule="qty_unit",
-             expect_amount=1.0, expect_unit="pint", expect_name="pilsner lager"),
+             expect_amount=1.0, expect_unit="pnt", expect_name="pilsner lager"),
     EvalCase("1 quart tomato juice", "foodandwine",
              expect_status="parsed", expect_rule="qty_unit",
-             expect_amount=1.0, expect_unit="quart", expect_name="tomato juice"),
+             expect_amount=1.0, expect_unit="qt", expect_name="tomato juice"),
     EvalCase("1 pound granulated sugar", "seriouseats",
              expect_status="parsed", expect_rule="qty_unit",
              expect_amount=1.0, expect_unit="lb", expect_name="granulated sugar"),
@@ -226,7 +226,7 @@ _PARSE_CASES: list[EvalCase] = [
     # v5: heaping/scant/mounded qualifier between qty and unit.
     EvalCase("1 heaping tablespoon instant coffee granules", "seriouseats",
              expect_status="parsed", expect_rule="qty_unit",
-             expect_amount=1.0, expect_unit="tbsp",
+             expect_amount=1.0, expect_unit="Tbs",
              expect_name="instant coffee granules"),
     EvalCase("1 mounded teaspoon sweet barbecue sauce", "foodnetwork",
              expect_status="parsed", expect_rule="qty_unit",
@@ -244,7 +244,7 @@ _PARSE_CASES: list[EvalCase] = [
              expect_amount=3.0, expect_unit="bag", expect_name="green tea"),
     EvalCase("1 gallon apple cider", "foodandwine",
              expect_status="parsed", expect_rule="qty_unit",
-             expect_amount=1.0, expect_unit="gallon", expect_name="apple cider"),
+             expect_amount=1.0, expect_unit="gal", expect_name="apple cider"),
     EvalCase("2 grind black pepper", "diffordsguide",
              expect_status="parsed", expect_rule="qty_unit",
              expect_amount=2.0, expect_unit="grind", expect_name="black pepper"),
@@ -306,7 +306,7 @@ _PARSE_CASES: list[EvalCase] = [
     EvalCase("4- to 6-quart slow cooker and cheesecloth", "marthastewart",
              expect_status="parsed", expect_rule="qty_unit",
              expect_amount=4.0, expect_amount_max=6.0,
-             expect_unit="quart", expect_name="slow cooker and cheesecloth"),
+             expect_unit="qt", expect_name="slow cooker and cheesecloth"),
     # v9: leading size annotation strip — the leading number is a SIZE
     # (inches/cm), not a count of items, so we drop it along with the size
     # word. amount=None reflects the genuine "we don't know the count" state.

@@ -116,41 +116,28 @@ REASON_SLUG_COLLISION = "slug_collision"
 # Unit + ingredient normalization
 # ---------------------------------------------------------------------------
 
-# RecipeGF's UnitValidator is the single authority for unit *validity* — we do
-# not keep a parallel unit table here. The only local unit knowledge is the
-# bridge below: parser-canonical spellings RecipeGF doesn't already alias.
-#
-# NOTE (consolidation): RecipeGF currently covers only ~21 of Spiritolo's ~66
-# canonical units (parser ``units.py``). The direction is to MIGRATE Spiritolo's
-# richer, hard-won vocabulary *into* RecipeGF's registries (an upstream RecipeGF
-# PR — it's the shared contract), THEN retire the parser's table + dedup's
-# ``_OZ_PER_UNIT`` + this bridge. NOT the reverse: collapsing onto today's
-# RecipeGF would drop ~45 units. Until then P2 *abstains* on unmapped units
-# (unknown_unit → review), so nothing is silently lost. See the "Unit coverage"
-# section in docs/recipegf-export.md for the categorized migration worklist.
+# RecipeGF's UnitValidator is the single unit authority — validity AND canonical
+# spelling. The parser already emits RecipeGF-canonical units (its units.py maps
+# recipe-text surfaces onto RecipeGF's registry), so here we only confirm
+# validity and normalize; a unit RecipeGF doesn't recognize routes to review.
 _UNITS = UnitValidator()
 
-# Parser-canonical units RecipeGF rejects but that map cleanly onto a
-# RecipeGF-valid unit. Anything the validator accepts passes through untouched;
-# anything neither accepted nor here → uncertain.
-_UNIT_TRANSLATE = {"tbsp": "Tbs", "pint": "pnt", "quart": "qt", "gallon": "gal"}
-
-# Count units where a missing amount defaults to 1 (a single piece).
-_COUNT_UNITS = {"each", "cube", "piece", "slice", "wedge", "wheel", "sprig", "twist"}
+# Count units where a missing amount defaults to 1 (a single piece). All are
+# RecipeGF count-unit canonicals (cube/piece normalize to "each").
+_COUNT_UNITS = {"each", "slice", "wedge", "wheel", "sprig", "twist"}
 
 # Roles whose missing amount we default to 1 (a garnish/dash accent).
 _DEFAULT_ONE_ROLES = {"garnish", "bitters"}
 
 
 def _recipegf_unit(unit: str | None) -> str | None:
-    """Translate a parser unit to a RecipeGF-valid unit, or ``None`` if it has
-    no faithful RecipeGF equivalent (relative units like ``part``, exotic
-    count nouns like ``leaf``). Validity is RecipeGF's call, not ours."""
+    """The RecipeGF-canonical form of a parser unit, or ``None`` if RecipeGF
+    doesn't recognize it. Validity + canonical spelling are RecipeGF's call."""
     if not unit:
         return None
     if _UNITS.is_valid(unit):
-        return unit
-    return _UNIT_TRANSLATE.get(unit)
+        return _UNITS.normalize(unit)
+    return None
 
 
 def _ingredient_name(ing: SourceIngredient) -> str | None:

@@ -41,7 +41,8 @@ def test_teaspoon_canonicalizes():
 
 
 def test_tablespoon_canonicalizes():
-    _assert_parsed(parse("3 tablespoons sugar"), amount=3.0, unit="tbsp", name="sugar")
+    # RecipeGF's canonical spelling for the tablespoon is "Tbs".
+    _assert_parsed(parse("3 tablespoons sugar"), amount=3.0, unit="Tbs", name="sugar")
 
 
 def test_cup_canonicalizes():
