@@ -63,7 +63,7 @@ def test_migration_seeds_the_current_chain():
     )
     assert set(seeded) == {
         "discover", "classify", "fetch", "extract",
-        "parse", "map", "role", "cluster", "export",
+        "parse", "map", "convert", "cluster", "export",
     }
     # fetch is the one stage that goes through ScraperAPI (a metered HTTP
     # API); every other stage defaults to a free deterministic/local chain.

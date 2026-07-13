@@ -20,7 +20,7 @@ create table stage_runs (
   id          bigserial primary key,
   entity_type text   not null check (entity_type in ('page','recipe')),
   entity_id   bigint not null,
-  stage       text   not null,   -- discover|classify|fetch|extract|parse|map|role|cluster|export
+  stage       text   not null,   -- discover|classify|fetch|extract|parse|map|convert|cluster|export
   version     text   not null,   -- the stage's version constant at run time
 
   outcome     text not null check (outcome in

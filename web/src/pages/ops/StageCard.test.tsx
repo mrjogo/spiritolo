@@ -130,7 +130,7 @@ describe('<StageCard>', () => {
 
   it('shows a neutral message when a stage has no runs yet', async () => {
     mockTables([], []);
-    render(<StageCard stage="role" />, { wrapper: wrapperWith(makeClient()) });
+    render(<StageCard stage="convert" />, { wrapper: wrapperWith(makeClient()) });
     expect(await screen.findByText(/no runs yet/i)).toBeInTheDocument();
   });
 });

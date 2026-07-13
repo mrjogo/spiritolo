@@ -21,8 +21,8 @@ interface Props {
 // today (stage_runs outcome aggregates + live jobs + accumulated cost),
 // plus a real content-queue-depth count from stage_queue_counts for every
 // stage that RPC tracks. A stage with no row there (discover/classify/fetch,
-// still SQLite-backed; role, folded into cluster) shows an explicit
-// "not tracked" message rather than a fabricated number.
+// still SQLite-backed) shows an explicit "not tracked" message rather than a
+// fabricated number.
 export function StageCard({ stage }: Props) {
   const { rows: outcomeRows, status } = usePagedQuery<OutcomeRow>({
     table: 'stage_run_outcome_counts',

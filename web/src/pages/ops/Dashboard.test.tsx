@@ -12,7 +12,7 @@ describe('<Dashboard>', () => {
     render(<Dashboard />);
     const cards = screen.getAllByTestId('stage-card');
     expect(cards.map((c) => c.textContent)).toEqual([
-      'discover', 'classify', 'fetch', 'extract', 'parse', 'map', 'role', 'cluster', 'export',
+      'discover', 'classify', 'fetch', 'extract', 'parse', 'map', 'convert', 'cluster', 'export',
     ]);
   });
 });

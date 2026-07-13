@@ -28,7 +28,7 @@ insert into stage_config (stage, metered, requires_approval) values
   ('extract',  false, false),
   ('parse',    false, false),
   ('map',      false, false),
-  ('role',     false, false),
+  ('convert',  false, false),
   ('cluster',  false, false),
   ('export',   false, false);
 

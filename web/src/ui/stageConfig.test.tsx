@@ -58,7 +58,7 @@ describe('isMetered / requiresApproval', () => {
 describe('PIPELINE_STAGES', () => {
   it('lists the unified pipeline in discover -> ... -> export order', () => {
     expect(PIPELINE_STAGES).toEqual([
-      'discover', 'classify', 'fetch', 'extract', 'parse', 'map', 'role', 'cluster', 'export',
+      'discover', 'classify', 'fetch', 'extract', 'parse', 'map', 'convert', 'cluster', 'export',
     ]);
   });
 });
