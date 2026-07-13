@@ -73,7 +73,7 @@ begin
       when 'pages' then (
         select count(*)
         from public.pages p
-        where p.content_type = any(array['drink_recipe'])
+        where p.content_type = any(array['likely_drink_recipe', 'confirmed_drink'])
           and p.r2_key is not null
           and not exists (
             select 1 from public.stage_runs r

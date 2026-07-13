@@ -29,8 +29,10 @@ from . import jsonld
 STAGE = "extract"
 EXTRACTOR_VERSION = "v1"
 
-# Page classification labels the extract queue accepts.
-RECIPE_CONTENT_TYPES = ("drink_recipe",)
+# Page classification labels the extract queue accepts — the Zone-1 classifier's
+# recipe verdicts (mirrors scraper.db.EXTRACT_CONTENT_TYPES; ingredients doesn't
+# depend on scraper, so the values are duplicated rather than imported).
+RECIPE_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink")
 
 _corpus_reader: corpus.CorpusReader | None = None
 

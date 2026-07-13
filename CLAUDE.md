@@ -166,6 +166,8 @@ Taxonomy nodes are managed on staging via the curation UI; they are not maintain
 
 Schema flows local → staging via the migrations CI workflow on push to the `staging` branch. **Pipeline data lives on staging** — staging is the source of truth for `recipes`, `recipe_ingredients`, `recipe_steps`, `ingredient_resolutions`, `recipe_clusters`, taxonomy growth, etc. Pipeline runs execute against the hosted DB directly — the worker daemon over the `jobs` queue, or the CLI pointed at `SUPABASE_DB_URL`. One-off SQL hand-edits and the curation UI hit staging directly.
 
+**One-time data migration** — moving the existing local SQLite `pages` state + HTML corpus into the hosted Postgres + R2 and regenerating content: see [docs/migration.md](docs/migration.md) (tooling: `python -m corpus_loader import-pages | load-corpus`).
+
 **Local dev** has two viable shapes:
 
 - **Schema-only:** `supabase db reset` is enough. You get the migrated schema, empty tables, and a pre-seeded `admin@local.test` magic-link user (see [supabase/seeds/dev_admin_user.local-only.sql](supabase/seeds/dev_admin_user.local-only.sql) — the only seed file). Fine for UI work and migration writing.
