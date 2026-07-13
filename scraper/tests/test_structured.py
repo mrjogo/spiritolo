@@ -55,7 +55,7 @@ def test_microdata_recipe_normalized_to_jsonld_shape():
     the dict looks like JSON-LD: bare @type string, single-valued props unwrapped
     from lists, nested Person item reshaped into a flat dict with @type."""
     from scraper.structured import find_recipe
-    from scraper.extract import derive_author, derive_image_url, derive_name
+    from scraper.structured import derive_author, derive_image_url, derive_name
     r = find_recipe(load("microdata.html"))
     assert r is not None
     assert r["@type"] == "Recipe"
@@ -70,9 +70,8 @@ def test_microdata_recipe_normalized_to_jsonld_shape():
 
 
 def test_promoted_field_derivation_author():
-    """Derivation is extract's job — the parser returns the raw dict."""
-    from scraper.structured import find_recipe
-    from scraper.extract import derive_author
+    """find_recipe returns the raw dict; the derive_* helpers flatten fields off it."""
+    from scraper.structured import derive_author, find_recipe
     r = find_recipe(load("standard.html"))
     assert derive_author(r) == "Count Negroni"
     r2 = find_recipe(load("author_bare_string.html"))
@@ -81,7 +80,7 @@ def test_promoted_field_derivation_author():
 
 def test_promoted_field_derivation_image_url():
     from scraper.structured import find_recipe
-    from scraper.extract import derive_image_url
+    from scraper.structured import derive_image_url
     r_str = find_recipe(load("standard.html"))
     assert derive_image_url(r_str) == "https://example.com/negroni.jpg"
     r_obj = find_recipe(load("image_as_object.html"))
@@ -92,18 +91,18 @@ def test_promoted_field_derivation_image_url():
 
 def test_promoted_field_derivation_image_array_of_objects():
     from scraper.structured import find_recipe
-    from scraper.extract import derive_image_url
+    from scraper.structured import derive_image_url
     r = find_recipe(load("image_array_of_objects.html"))
     assert derive_image_url(r) == "https://example.com/vesper-1.jpg"
 
 
 def test_promoted_field_derivation_image_missing():
-    from scraper.extract import derive_image_url
+    from scraper.structured import derive_image_url
     assert derive_image_url({"name": "No image"}) is None
 
 
 def test_promoted_field_derivation_author_missing():
-    from scraper.extract import derive_author
+    from scraper.structured import derive_author
     assert derive_author({"name": "No author"}) is None
 
 
