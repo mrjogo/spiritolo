@@ -1,11 +1,10 @@
-"""Read-only R2 corpus reader (WS-B6).
+"""Read-only R2 corpus reader.
 
-The HTML corpus is one of the two clean-slate inputs the v2.1 rebuild
-preserves (the other being the ``pages`` row — see supabase/migrations/
-20260715090000_pages.sql, and the write-once loader in
-scripts/src/corpus_loader). It is write-once and read-only after the one-time
-load: this module is strictly a reader — it exposes exactly one operation,
-``CorpusReader.read_html``, and no put/write/delete surface.
+The HTML corpus is one of two durable inputs (the other being the ``pages``
+row — see supabase/migrations/20260715090000_pages.sql, and the write-once
+loader in scripts/src/corpus_loader). It is write-once and read-only after the
+one-time load: this module is strictly a reader — it exposes exactly one
+operation, ``CorpusReader.read_html``, and no put/write/delete surface.
 
 Keys are ``sha256(url)``, matching scripts/src/corpus_loader/keys.py exactly
 (same one-liner, deliberately not shared across the two packages — see

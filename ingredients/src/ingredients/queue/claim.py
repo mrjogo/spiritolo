@@ -1,4 +1,4 @@
-"""Claim the next runnable job (WS-B22).
+"""Claim the next runnable job.
 
 ``claim_one`` is a single ``UPDATE ... WHERE id = (SELECT ... FOR UPDATE SKIP
 LOCKED LIMIT 1) RETURNING *``: two workers running it concurrently each get a

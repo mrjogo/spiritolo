@@ -1,4 +1,4 @@
-"""B7 — config-not-code provider-chain library.
+"""Config-not-code provider-chain library.
 
 Each smart stage is a rewireable chain of provider tiers
 (deterministic -> local -> hosted) read from external config. The chain packs
