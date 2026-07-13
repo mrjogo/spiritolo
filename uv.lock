@@ -974,8 +974,8 @@ wheels = [
 
 [[package]]
 name = "recipegf"
-version = "0.3.0"
-source = { git = "https://github.com/mrjogo/RecipeGF.git?subdirectory=python&tag=v0.3.0#d73499273527e7cef1615d70d66b4cb0f96dbc51" }
+version = "0.4.0"
+source = { git = "https://github.com/mrjogo/RecipeGF.git?subdirectory=python&tag=v0.4.0#33ecd376b014bc24a3622f2ab87d9f8de0d825ae" }
 dependencies = [
     { name = "jsonschema" },
     { name = "pydantic" },
@@ -1232,7 +1232,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "recipegf", git = "https://github.com/mrjogo/RecipeGF.git?subdirectory=python&tag=v0.3.0" },
+    { name = "recipegf", git = "https://github.com/mrjogo/RecipeGF.git?subdirectory=python&tag=v0.4.0" },
     { name = "spiritolo-common", editable = "common" },
 ]
 provides-extras = ["dev"]

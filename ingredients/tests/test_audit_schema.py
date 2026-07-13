@@ -168,7 +168,10 @@ def test_audit_log_rls_denies_non_admin(db_conn):
 
 def test_trigger_attached_to_curated_tables(db_conn):
     tables = _audited_tables(db_conn)
-    assert {"taxonomy_nodes", "taxonomy_proposals", "recipegf_proposals"} <= tables
+    assert {
+        "taxonomy_nodes", "taxonomy_proposals",
+        "recipes", "recipe_ingredients", "recipe_steps", "ingredient_resolutions",
+    } <= tables
 
 
 def test_composite_pk_tables_not_audited(db_conn):

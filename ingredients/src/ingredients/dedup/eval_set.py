@@ -147,13 +147,16 @@ def _evaluate_case(
         ).fetchone()
         default_role, is_def_garnish = node_row
         ing = {
-            "taxonomy_node_slug": slug, "taxonomy_node_id": node_id,
+            "taxonomy_slug": slug,
             "default_role": default_role, "is_defining_garnish": is_def_garnish,
             "amount": amount, "unit": unit, "position": pos, "raw_text": "",
         }
         role, _ = classify_role(ing)
         ing["role"] = role
-        ing["antichain_node_id"] = roll_up_to_antichain(conn, node_id)
+        antichain_id = roll_up_to_antichain(conn, node_id)
+        ing["antichain_slug"] = conn.execute(
+            "select slug from taxonomy_nodes where id = %s", (antichain_id,)
+        ).fetchone()[0]
         ings.append(ing)
 
     # 3. Cluster key expectation.
