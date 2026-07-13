@@ -146,7 +146,7 @@ Taxonomy nodes are managed on staging via the curation UI; they are not maintain
 
 **The stages:**
 
-- **extract** — reads a classified page's cached HTML from the R2 corpus, finds the Schema.org Recipe JSON-LD, and UPSERTs a `recipes` row (raw `source` verbatim + derived title/author/image). No Recipe JSON-LD → the LLM tier synthesizes a recipe source from the page, else it abstains.
+- **extract** — reads a classified page's cached HTML from the object store, finds the Schema.org Recipe JSON-LD, and UPSERTs a `recipes` row (raw `source` verbatim + derived title/author/image). No Recipe JSON-LD → the LLM tier synthesizes a recipe source from the page, else it abstains.
 - **parse** — parses each `recipes.source` `recipeIngredient` string with strict abstain discipline into `recipe_ingredients` (RecipeGF shape: name + amount/amount_max/unit + `string[]` modifiers). `PARSER_VERSION` in [parser.py](ingredients/src/ingredients/parser.py); bump on any rule or unit-table change.
 - **map** — resolves each `recipe_ingredients.name` to a taxonomy slug in the **shared** `ingredient_resolutions` (name-keyed — resolved once for every recipe that uses it): alias → lexical → LLM tier → abstain. An LLM `propose_brand`/expression whose parent slug already exists auto-creates the node + edge + `taxonomy_provenance` (`is_cluster_node=false`) and writes the resolution; a `propose_form` queues a `taxonomy_proposals` row for human review (the curation UI) and parks the name.
 - **convert** — deterministic technique keyword scan → RecipeGF verb-frame `recipe_steps`. Anything uncertain (no technique, muddle, untranslatable unit, unresolved ingredient) records a `pending` / `proposes_new` outcome in `stage_runs` and writes no steps.
@@ -166,7 +166,7 @@ Taxonomy nodes are managed on staging via the curation UI; they are not maintain
 
 Schema flows local → staging via the migrations CI workflow on push to the `staging` branch. **Pipeline data lives on staging** — staging is the source of truth for `recipes`, `recipe_ingredients`, `recipe_steps`, `ingredient_resolutions`, `recipe_clusters`, taxonomy growth, etc. Pipeline runs execute against the hosted DB directly — the worker daemon over the `jobs` queue, or the CLI pointed at `SUPABASE_DB_URL`. One-off SQL hand-edits and the curation UI hit staging directly.
 
-**One-time data migration** — moving the existing local SQLite `pages` state + HTML corpus into the hosted Postgres + R2 and regenerating content: see [docs/migration.md](docs/migration.md) (tooling: `python -m corpus_loader import-pages | load-corpus`).
+**One-time data migration** — moving the existing local SQLite `pages` state + HTML corpus into the hosted Postgres + object store and regenerating content: see [docs/migration.md](docs/migration.md) (tooling: `python -m corpus_loader import-pages | load-corpus`).
 
 **Local dev** has two viable shapes:
 

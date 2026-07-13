@@ -1,9 +1,9 @@
 """One-time backfill: set ``pages.r2_key`` for every row that lacks one.
 
 Run once after the corpus loader has uploaded the pre-staged HTML cache
-(so every url in ``pages`` has a matching R2 object keyed the same way —
-see keys.sha256_key / load.load). Idempotent: rows that already have an
-r2_key are left untouched.
+(so every url in ``pages`` has a matching object in the object store, keyed
+the same way — see keys.sha256_key / load.load). Idempotent: rows that
+already have an r2_key are left untouched.
 """
 from __future__ import annotations
 

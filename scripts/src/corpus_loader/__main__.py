@@ -4,9 +4,10 @@
   python -m corpus_loader load-corpus  --sqlite data/scraper.db --html-dir data/html
 
 ``import-pages`` moves the SQLite ``pages`` work-queue into Postgres ``pages``;
-``load-corpus`` uploads each fetched page's HTML to R2 and sets ``pages.r2_key``.
-Postgres comes from ``SUPABASE_DB_URL``; R2 from the ``R2_*`` env vars (see
-docs/migration.md). Run ``import-pages`` before ``load-corpus``.
+``load-corpus`` uploads each fetched page's HTML to the object store and sets
+``pages.r2_key``. Postgres comes from ``SUPABASE_DB_URL``; object storage from
+the ``S3_*`` env vars (see docs/migration.md). Run ``import-pages`` before
+``load-corpus``.
 """
 from __future__ import annotations
 
@@ -40,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     p_load = sub.add_parser("load-corpus", help="Local HTML -> R2; set pages.r2_key.")
     p_load.add_argument("--sqlite", default="data/scraper.db")
     p_load.add_argument("--html-dir", default="data/html")
-    p_load.add_argument("--bucket", default=os.environ.get("R2_BUCKET", "spiritolo-corpus"))
+    p_load.add_argument("--bucket", default=os.environ.get("S3_BUCKET"))
 
     args = parser.parse_args(argv)
     sqlite_conn = sqlite3.connect(args.sqlite)

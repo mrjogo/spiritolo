@@ -1,11 +1,11 @@
-"""Upload each fetched page's local HTML into the R2 corpus and mark it
+"""Upload each fetched page's local HTML into the corpus bucket and mark it
 extractable.
 
 The corpus is write-once — ``load`` skips any key already present. A page
-becomes extractable only here: after its HTML is confirmed in R2 do we set
-``pages.r2_key``. Denylisted pages (blocked / disabled) and pages with no saved
-HTML are skipped and never get an ``r2_key``, so ``extract`` never reads a block
-page or a missing object.
+becomes extractable only here: after its HTML is confirmed in the object
+store do we set ``pages.r2_key``. Denylisted pages (blocked / disabled) and
+pages with no saved HTML are skipped and never get an ``r2_key``, so
+``extract`` never reads a block page or a missing object.
 
 Run ``import_pages`` first — the ``r2_key`` update targets rows by ``url``, so
 the Postgres ``pages`` rows must already exist.
@@ -33,12 +33,13 @@ def load_corpus(
     bucket: str,
     html_root: str | pathlib.Path,
 ) -> dict[str, int]:
-    """Upload every fetched page's HTML to R2 and set ``pages.r2_key``.
+    """Upload every fetched page's HTML to the object store and set
+    ``pages.r2_key``.
 
     ``html_root`` is the base directory the SQLite ``html_path`` values are
-    relative to (``data/html``). Idempotent: ``load`` skips keys already in R2,
-    and the ``r2_key`` update is deterministic. A page whose local file is
-    missing is counted and skipped, not fatal.
+    relative to (``data/html``). Idempotent: ``load`` skips keys already in
+    the object store, and the ``r2_key`` update is deterministic. A page whose
+    local file is missing is counted and skipped, not fatal.
     """
     root = pathlib.Path(html_root)
     sqlite_conn.row_factory = sqlite3.Row
@@ -54,8 +55,9 @@ def load_corpus(
         else:
             skipped_existing += 1
         # r2_key is set only if the page's Postgres row exists (import ran first).
-        # A 0-row update means the HTML is in R2 but the page isn't imported yet,
-        # so it's reported (not_in_pg) rather than counted as a silent success.
+        # A 0-row update means the HTML is in the object store but the page
+        # isn't imported yet, so it's reported (not_in_pg) rather than counted
+        # as a silent success.
         cur = pg_conn.execute(
             "update pages set r2_key = %s where url = %s", (sha256_key(url), url)
         )

@@ -1,10 +1,10 @@
 -- Relocate the scraper's `pages` work-queue table from SQLite
--- (scraper/src/scraper/db.py) into Postgres, alongside the R2 HTML corpus
--- (keyed sha256(url) and populated by scripts/src/corpus_loader).
+-- (scraper/src/scraper/db.py) into Postgres, alongside the object-store HTML
+-- corpus (keyed sha256(url) and populated by scripts/src/corpus_loader).
 --
--- `pages` stays deliberately lightweight: the HTML bytes never live here (R2
--- holds those, read-only, keyed by `r2_key`). The legacy SQLite table's
--- per-field snapshot columns (`pages_status_before`, ...) and its
+-- `pages` stays deliberately lightweight: the HTML bytes never live here (the
+-- object store holds those, read-only, keyed by `r2_key`). The legacy SQLite
+-- table's per-field snapshot columns (`pages_status_before`, ...) and its
 -- `attempts`/`fetch_error` bookkeeping are gone on purpose — that history now
 -- lives in `stage_runs.payload` / `audit_log` instead, not on the row itself.
 --

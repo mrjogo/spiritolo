@@ -1,4 +1,4 @@
-"""Read-only R2 corpus reader.
+"""Read-only object-store corpus reader.
 
 The HTML corpus is one of two durable inputs (the other being the ``pages``
 row — see supabase/migrations/20260715090000_pages.sql, and the write-once
@@ -39,7 +39,7 @@ class GetObjectClient(Protocol):
 
 
 def key_for(url: str) -> str:
-    """The R2 object key for ``url``: sha256(url.encode()).hexdigest().
+    """The object-store key for ``url``: sha256(url.encode()).hexdigest().
 
     Deliberately not canonicalized — the caller owns any url normalization.
     """
@@ -47,7 +47,7 @@ def key_for(url: str) -> str:
 
 
 class CorpusReader:
-    """Read-only client for the R2 HTML corpus.
+    """Read-only client for the object-store HTML corpus.
 
     Exposes ``read_html`` only — no put/write/delete method, matching the
     write-once contract (see ``test_reader_is_read_only``).
@@ -69,21 +69,23 @@ class CorpusReader:
 
 
 def default_reader() -> CorpusReader:
-    """Build the real R2 corpus reader from ``R2_*`` env vars.
+    """Build the real corpus reader from the ``S3_*`` env vars (``S3_ENDPOINT``
+    / ``S3_ACCESS_KEY_ID`` / ``S3_SECRET_ACCESS_KEY`` / ``S3_BUCKET``, optional
+    ``S3_REGION``). Any S3-compatible object store works.
 
     Not exercised by any test — those inject a fake client instead (see
     ingredients/tests/test_corpus_reader.py). Used by the worker at runtime.
     """
     import boto3
 
-    account_id = os.environ["R2_ACCOUNT_ID"]
     raw = boto3.client(
         "s3",
-        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
-        aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+        endpoint_url=os.environ["S3_ENDPOINT"],
+        aws_access_key_id=os.environ["S3_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["S3_SECRET_ACCESS_KEY"],
+        region_name=os.environ.get("S3_REGION", "auto"),
     )
-    return CorpusReader(_NotFoundIsNoneAdapter(raw), bucket=os.environ["R2_BUCKET"])
+    return CorpusReader(_NotFoundIsNoneAdapter(raw), bucket=os.environ["S3_BUCKET"])
 
 
 class _NotFoundIsNoneAdapter:

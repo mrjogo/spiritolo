@@ -1,4 +1,4 @@
-"""Content-addressed R2 object keys for the HTML corpus.
+"""Content-addressed object-store keys for the HTML corpus.
 
 Deliberately NOT canonicalized: a key is exactly ``sha256(url)``. The loader
 never normalizes a url (trailing slash, scheme, ...) before hashing it — the
@@ -11,5 +11,5 @@ import hashlib
 
 
 def sha256_key(url: str) -> str:
-    """Return the R2 object key for ``url``."""
+    """Return the object-store key for ``url``."""
     return hashlib.sha256(url.encode()).hexdigest()

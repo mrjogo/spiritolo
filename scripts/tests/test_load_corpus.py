@@ -1,6 +1,6 @@
-"""Tests for the local-HTML -> R2 corpus upload that also marks pages
+"""Tests for the local-HTML -> object-store corpus upload that also marks pages
 extractable (sets ``pages.r2_key``). Needs TEST_DB_URL (skips otherwise); the
-R2 client is a fake.
+S3 client is a fake.
 """
 from __future__ import annotations
 

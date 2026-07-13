@@ -6,10 +6,10 @@ This is the one-time move of per-URL crawl state — the URLs, their LLM
 ``data/scraper.db`` into the cloud, so the Zone-2 ``extract`` stage has a queue
 to work from without re-crawling or re-classifying.
 
-The HTML bytes are NOT touched here; those go to R2 via ``load_corpus``, which
-also sets ``pages.r2_key``. This importer leaves ``r2_key`` NULL by design: a
-page becomes extractable (``r2_key`` non-null) only once its HTML is confirmed
-in R2.
+The HTML bytes are NOT touched here; those go to the object store via
+``load_corpus``, which also sets ``pages.r2_key``. This importer leaves
+``r2_key`` NULL by design: a page becomes extractable (``r2_key`` non-null)
+only once its HTML is confirmed in the object store.
 
 Idempotent: re-running UPSERTs by ``url``, so a re-import after a fix is safe.
 """
@@ -39,7 +39,7 @@ def map_row(row: dict[str, Any]) -> dict[str, Any]:
       page. A blocked page stays ``blocked`` even though it has saved HTML — that
       HTML is the block page, not content, so it must never be extracted.
     - ``r2_key`` is omitted (stays NULL); ``load_corpus`` sets it once the page's
-      HTML is in R2.
+      HTML is in the object store.
     """
     status = row.get("status")
     disabled_reason = row.get("disabled_reason")
@@ -96,8 +96,9 @@ def import_pages(sqlite_conn: sqlite3.Connection, pg_conn) -> dict[str, int]:
 
     ``pg_conn`` is a psycopg connection whose transaction the caller manages.
     Returns a summary: total ``read``, how many carry a recipe verdict
-    (``extractable`` — what ``extract`` picks up once the HTML is in R2), and how
-    many are ``denylisted`` — a quick sanity check for the operator.
+    (``extractable`` — what ``extract`` picks up once the HTML is in the
+    object store), and how many are ``denylisted`` — a quick sanity check for
+    the operator.
     """
     read = extractable = denylisted = 0
     for sqlite_row in _iter_sqlite_pages(sqlite_conn):

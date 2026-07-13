@@ -3,14 +3,14 @@
 One-time move of the existing data into the hosted system. Almost nothing is
 "converted": the pipeline **regenerates** everything from two durable inputs, so
 the job is (1) get those inputs into their hosted homes and (2) re-run the
-stages. Infra standup (Supabase Pro, R2 bucket, Railway worker, Tailscale) is
-[devops-runbook.md](devops-runbook.md); this is the data.
+stages. Infra standup (Supabase Pro, the Railway Storage Bucket, the Railway
+worker, Tailscale) is [devops-runbook.md](devops-runbook.md); this is the data.
 
 ## What moves vs. regenerates
 
 | Data | Now | Action |
 |---|---|---|
-| HTML corpus | local files (`data/html/`) | **load → R2** |
+| HTML corpus | local files (`data/html/`) | **load → object store** |
 | `pages` state (URLs + `content_type`) | local SQLite (`data/scraper.db`) | **import → Postgres** |
 | recipes / ingredients / steps / clusters / exports | staging (old schema) | **drop + regenerate** |
 | taxonomy + cocktail_aliases | staging | **keep** (migrations don't drop them) |
@@ -23,9 +23,9 @@ project — you'd throw away the curated taxonomy for nothing.
 ## Prereqs
 
 - Infra stood up per [devops-runbook.md](devops-runbook.md) (Supabase Pro, the
-  `spiritolo-corpus` R2 bucket, the Railway worker deployed).
+  Railway Storage Bucket, the Railway worker deployed).
 - Local `data/scraper.db` and `data/html/` present.
-- `.env` (repo root) has, for the hosted DB and R2:
+- `.env` (repo root) has, for the hosted DB and the object store:
 
 ```bash
 # The hosted DB (session pooler). Single environment: staging == live, so both
@@ -33,10 +33,13 @@ project — you'd throw away the curated taxonomy for nothing.
 # reads SUPABASE_STAGING_DB_URL.
 SUPABASE_DB_URL=postgresql://postgres.atvlzbgrquiseczzeczn:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres
 SUPABASE_STAGING_DB_URL=postgresql://postgres.atvlzbgrquiseczzeczn:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres
-R2_ACCOUNT_ID=<id>
-R2_ACCESS_KEY_ID=<key>
-R2_SECRET_ACCESS_KEY=<secret>
-R2_BUCKET=spiritolo-corpus
+# Object store — from the Railway bucket's Credentials tab. Any S3-compatible
+# store works; these are the generic S3 vars the code reads.
+S3_ENDPOINT=https://storage.railway.app
+S3_ACCESS_KEY_ID=<key>
+S3_SECRET_ACCESS_KEY=<secret>
+S3_BUCKET=<globally-unique bucket name>
+S3_REGION=auto
 ```
 
 Every step below is idempotent — safe to re-run. Keep `data/scraper.db` and
@@ -85,11 +88,11 @@ cd scripts && uv run python -m corpus_loader import-pages --sqlite ../data/scrap
 # → read=<N> extractable=<N> denylisted=<N>
 ```
 
-## 3. Load the HTML corpus (local → R2) and mark pages extractable
+## 3. Load the HTML corpus (local → object store) and mark pages extractable
 
-Uploads each fetched page's HTML to R2 (write-once; skips keys already there)
-and sets `pages.r2_key = sha256(url)` so `extract` can find it. Denylisted and
-un-fetched pages are skipped by design.
+Uploads each fetched page's HTML to the object store (write-once; skips keys
+already there) and sets `pages.r2_key = sha256(url)` so `extract` can find it.
+Denylisted and un-fetched pages are skipped by design.
 
 ```bash
 cd scripts && uv run python -m corpus_loader load-corpus \
@@ -139,6 +142,7 @@ only genuinely-new names hit an LLM. Point its chain at free local `barbot`
 
 ## 6. Decommission the local data
 
-Once step 5 checks out, the corpus lives in R2 (object-locked) and the pages
-state in Postgres. Archive `data/scraper.db` and `data/html/` somewhere cold; the
-worker never reads them again.
+Once step 5 checks out, the corpus lives in the object store and the pages
+state in Postgres. The bucket has no versioning or object-lock, so keep one cold
+archive of `data/scraper.db` + `data/html/` as the only other copy of the
+irreplaceable scrape — don't delete them.

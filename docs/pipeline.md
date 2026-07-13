@@ -1,7 +1,7 @@
 # Pipeline — data flow
 
 The pipeline runs in two zones. **Zone 1** (the `scraper/` package — SQLite plus
-the R2 HTML corpus) crawls the web into two durable inputs: per-URL `pages` state
+the object-store HTML corpus) crawls the web into two durable inputs: per-URL `pages` state
 and the write-once HTML corpus. **Zone 2** (the `ingredients/` package —
 Supabase) turns those into the relational recipe and its published RecipeGF
 bundle.
@@ -26,11 +26,11 @@ provider tiers and a per-job cost cap). Command surface and versioning live in
   'fontFamily': 'system-ui, -apple-system, sans-serif'
 }}}%%
 flowchart TD
-    subgraph Z1 ["Zone 1 · Scraper — SQLite pages + R2 HTML corpus"]
+    subgraph Z1 ["Zone 1 · Scraper — SQLite pages + object-store HTML corpus"]
         direction LR
         D["1 · discover<br/>sitemaps → queue pages"]
         C["2 · classify<br/>content_type via LLM"]
-        F["3 · fetch<br/>HTML → R2 corpus;<br/>validate + drink-score inline"]
+        F["3 · fetch<br/>HTML → object store;<br/>validate + drink-score inline"]
         D --> C --> F
     end
 
@@ -45,7 +45,7 @@ flowchart TD
         X --> P --> M --> CV --> CL --> EX
     end
 
-    F ==>|R2 corpus HTML| X
+    F ==>|object-store HTML| X
     M -.->|shared, name-keyed| IR[("ingredient_resolutions<br/>fix once → every recipe follows")]
     IR -.-> CV
     IR -.-> EX

@@ -1,5 +1,5 @@
-"""Read-only R2 corpus reader. No network: every test stubs the S3-compat
-client (see CLAUDE.md hard rules).
+"""Read-only object-store corpus reader. No network: every test stubs the
+S3-compat client (see CLAUDE.md hard rules).
 
 The `pages` migration is covered by ingredients/tests/test_pages_migration.py;
 this file covers only the reader module and adds no migration of its own.
