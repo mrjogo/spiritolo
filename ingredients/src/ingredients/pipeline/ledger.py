@@ -1,4 +1,4 @@
-"""stage_runs run-ledger access (B4).
+"""stage_runs run-ledger access.
 
 One polymorphic latest-only ledger for every pipeline stage. Three operations,
 mirroring the per-stage ``record_*`` / ``get_pending_*`` / ``clear_*`` helpers
@@ -18,8 +18,8 @@ The ledger is deliberately decoupled from any particular content table. It never
 hardcodes a table name or a gating column: ``work_queue`` takes the content
 table + an optional prefilter, ``reset`` takes the content table for site
 scoping, and the gating cursor is passed explicitly. So the same ledger serves
-`page` entities today and `recipe` entities once the greenfield content-pipeline
-rebuild lands the relational content tables — no change here.
+`page` entities today and `recipe` entities once a relational `recipes` schema
+exists — no change here.
 
 All functions take a psycopg connection and do not commit (the caller owns the
 transaction boundary); ``reset`` opens its own transaction for atomicity, which

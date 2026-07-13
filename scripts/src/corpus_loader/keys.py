@@ -3,7 +3,7 @@
 Deliberately NOT canonicalized: a key is exactly ``sha256(url)``. The loader
 never normalizes a url (trailing slash, scheme, ...) before hashing it — the
 caller owns any normalization, so the same url always maps to the same key
-and different urls never collide (see docs/redesign.md WS-B20).
+and different urls never collide (see docs/redesign.md).
 """
 from __future__ import annotations
 

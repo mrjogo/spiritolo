@@ -1,4 +1,4 @@
-"""Schema-shape + RLS + trigger-attachment tests for the audit log (WS-B26).
+"""Schema-shape + RLS + trigger-attachment tests for the audit log.
 
 Asserts the ``audit.log`` migration produces the columns, CHECKs, indexes,
 and admin-read-only RLS the /ops surface depends on, that the generic

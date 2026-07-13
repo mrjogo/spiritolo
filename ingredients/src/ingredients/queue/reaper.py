@@ -1,4 +1,4 @@
-"""Requeue stale-heartbeat jobs (WS-B22).
+"""Requeue stale-heartbeat jobs.
 
 The reaper is the entire retry story: a worker that dies mid-job (Railway
 restart, crash) stops heartbeating, so its in-flight job's ``last_heartbeat``

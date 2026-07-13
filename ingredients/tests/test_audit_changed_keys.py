@@ -1,4 +1,4 @@
-"""changed_keys + single-writer tests for the audit log (WS-B26).
+"""changed_keys + single-writer tests for the audit log.
 
 - ``changed_keys`` lists only the keys whose value actually changed (jsonb
   is-distinct-from), not a stored full-diff blob.

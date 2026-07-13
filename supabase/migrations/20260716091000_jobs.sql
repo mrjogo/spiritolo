@@ -1,4 +1,4 @@
--- Postgres-as-queue (WS-B22), part 2 of 3: the jobs table.
+-- Postgres-as-queue: the jobs table.
 --
 -- A jobs row is dispatch intent: "run <stage> over <payload scope>." The worker
 -- claims the oldest runnable job with FOR UPDATE SKIP LOCKED (see queue/claim.py),
@@ -65,8 +65,8 @@ create policy jobs_admin_read on jobs
 
 grant select on jobs to authenticated;
 
--- Realtime: the /ops UI subscribes to live job-status changes (useRealtimeJobs,
--- B27). On a real Supabase cluster the supabase_realtime publication already
+-- Realtime: the /ops UI subscribes to live job-status changes (useRealtimeJobs).
+-- On a real Supabase cluster the supabase_realtime publication already
 -- exists; on a bare Postgres (CI test DB) it doesn't — create it if absent, and
 -- add jobs idempotently so re-applying the migration is a no-op.
 do $$

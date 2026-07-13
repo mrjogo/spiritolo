@@ -1,4 +1,4 @@
--- B4 — stage_runs: the unified run-ledger for the v2.1 redesign.
+-- stage_runs: the unified run-ledger.
 --
 -- One polymorphic latest-only ledger for ALL stages (Zone-1 + Zone-2 merged),
 -- generalizing the per-stage *_runs tables (classify_url_runs, validate_html_
@@ -9,12 +9,12 @@
 -- row can reference a page or a recipe (the content entity) without a hard
 -- reference, so the ledger stays a pure cache of derived state that TRUNCATE +
 -- re-run reproduces. This also lets the ledger land ahead of the content tables:
--- the greenfield content-pipeline rebuild introduces the real `recipes` /
--- `recipe_ingredients` / `recipe_steps` schema, and this ledger already speaks
--- its entity_type without depending on those tables existing yet.
+-- once the `recipes` / `recipe_ingredients` / `recipe_steps` schema exists,
+-- this ledger already speaks its entity_type without depending on those tables
+-- existing yet.
 -- batch_id / job_id are plain bigint columns here (no FK): the jobs / job_batches
--- queue tables are a separate workstream; wiring the FKs is deferred to when
--- those tables land.
+-- queue tables land separately; wiring the FKs is deferred to when those tables
+-- land.
 
 create table stage_runs (
   id          bigserial primary key,

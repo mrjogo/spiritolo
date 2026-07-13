@@ -1,20 +1,18 @@
--- WS-B20: relocate the scraper's `pages` work-queue table from SQLite
--- (scraper/src/scraper/db.py) into the one Postgres. This is one of the two
--- preserved clean-slate inputs for the v2.1 rebuild (docs/redesign.md §9.1.4)
--- — the other being the R2 HTML corpus, keyed sha256(url) and populated by
--- scripts/src/corpus_loader.
+-- Relocate the scraper's `pages` work-queue table from SQLite
+-- (scraper/src/scraper/db.py) into Postgres, alongside the R2 HTML corpus
+-- (keyed sha256(url) and populated by scripts/src/corpus_loader) — see
+-- docs/redesign.md §9.1.4.
 --
 -- `pages` stays deliberately lightweight: the HTML bytes never live here (R2
 -- holds those, read-only, keyed by `r2_key`). The legacy SQLite table's
 -- per-field snapshot columns (`pages_status_before`, ...) and its
 -- `attempts`/`fetch_error` bookkeeping are gone on purpose — that history now
--- lives in `stage_runs.payload` / `audit_log` (foundation tables from other
--- workstreams), not on the row itself.
+-- lives in `stage_runs.payload` / `audit_log` instead, not on the row itself.
 --
 -- RLS: enabled with zero policies and no grants to anon/authenticated — the
 -- same deny-all convention used by taxonomy_proposals / recipegf_recipes.
 -- Only the table owner and service_role (BYPASSRLS) can read/write directly;
--- there is no RPC surface for `pages` in this workstream.
+-- there is no RPC surface for `pages`.
 create table pages (
   id              bigserial primary key,
   url             text not null unique,
