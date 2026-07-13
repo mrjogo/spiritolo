@@ -311,3 +311,109 @@ create trigger audit_recipe_steps
 create trigger audit_ingredient_resolutions
   after insert or update or delete on public.ingredient_resolutions
   for each row execute function audit.log_change();
+
+-- ---------------------------------------------------------------------------
+-- 12. Repoint the taxonomy-curation RPCs off the dropped
+--     recipe_ingredients.taxonomy_node_id onto the shared resolution.
+-- ---------------------------------------------------------------------------
+-- A node's recipe usage is now "recipe_ingredients whose normalized name
+-- resolves (via ingredient_resolutions) to a slug this node owns" — not a
+-- per-row taxonomy id. Same signatures + semantics; only the usage subquery
+-- changes, so the curation UI keeps working.
+create or replace function public.get_taxonomy_node_blockers(p_id bigint)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'permission denied: not admin' using errcode = '42501';
+  end if;
+
+  return jsonb_build_object(
+    'children', (
+      select count(*)::int from public.taxonomy_edges where parent_id = p_id
+    ),
+    'child_names', coalesce(
+      (
+        select jsonb_agg(
+          jsonb_build_object('id', n.id, 'display_name', n.display_name)
+          order by n.display_name
+        )
+        from public.taxonomy_edges e
+        join public.taxonomy_nodes n on n.id = e.child_id
+        where e.parent_id = p_id
+      ),
+      '[]'::jsonb
+    ),
+    'parents', (
+      select count(*)::int from public.taxonomy_edges where child_id = p_id
+    ),
+    'aliases', (
+      select count(*)::int from public.taxonomy_aliases where node_id = p_id
+    ),
+    'provenance', (
+      select count(*)::int from public.taxonomy_provenance where node_id = p_id
+    ),
+    'recipe_ingredients', (
+      select count(*)::int
+      from public.recipe_ingredients ri
+      join public.ingredient_resolutions ir
+        on lower(btrim(ri.name)) = ir.normalized_name
+      join public.taxonomy_nodes n on n.slug = ir.taxonomy_slug
+      where n.id = p_id
+    ),
+    'taxonomy_proposals', (
+      select count(*)::int from public.taxonomy_proposals where proposed_parent_id = p_id
+    )
+  );
+end;
+$$;
+
+create or replace function public.delete_taxonomy_node(p_id bigint)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_children    int;
+  v_recipes     int;
+  v_proposals   int;
+begin
+  if not public.is_admin() then
+    raise exception 'permission denied: not admin' using errcode = '42501';
+  end if;
+
+  if not exists (select 1 from public.taxonomy_nodes where id = p_id) then
+    raise exception 'taxonomy_node % not found', p_id using errcode = '23503';
+  end if;
+
+  select count(*) into v_children
+    from public.taxonomy_edges where parent_id = p_id;
+  select count(*) into v_recipes
+    from public.recipe_ingredients ri
+    join public.ingredient_resolutions ir
+      on lower(btrim(ri.name)) = ir.normalized_name
+    join public.taxonomy_nodes n on n.slug = ir.taxonomy_slug
+    where n.id = p_id;
+  select count(*) into v_proposals
+    from public.taxonomy_proposals where proposed_parent_id = p_id;
+
+  if v_children > 0 or v_recipes > 0 or v_proposals > 0 then
+    raise exception
+      'blocked: % children, % recipe references, % proposal references',
+      v_children, v_recipes, v_proposals
+      using errcode = '23503',
+            detail = jsonb_build_object(
+              'children', v_children,
+              'recipe_ingredients', v_recipes,
+              'taxonomy_proposals', v_proposals
+            )::text;
+  end if;
+
+  delete from public.taxonomy_nodes where id = p_id;
+end;
+$$;
