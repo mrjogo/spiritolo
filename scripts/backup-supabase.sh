@@ -110,8 +110,7 @@ META="${OUT}.meta.json"
 # during the snapshot window has updated_at <= T.
 TAKEN_AT=$(psql "$URL" -tAX -c "select to_char(now() at time zone 'utc', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')")
 
-# Migration list at backup time. Used by the uploader's schema-version
-# check.
+# Migration list at backup time — part of the dump's provenance record.
 MIGRATIONS_JSON=$(psql "$URL" -tAX -c "
   select json_agg(version order by version)
   from supabase_migrations.schema_migrations

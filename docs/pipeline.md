@@ -12,8 +12,7 @@ only touches what a prior run left undone. Zone-2 stages run two ways — one-of
 and deterministically via the CLI (`ingredients.cli <stage>` / `cold-build`), or
 continuously via the worker daemon off the `jobs` queue (which adds the LLM
 provider tiers and a per-job cost cap). Command surface and versioning live in
-[CLAUDE.md](../CLAUDE.md); bulk runs use the local-restore-then-upload flow in
-[upload.md](upload.md).
+[CLAUDE.md](../CLAUDE.md).
 
 ```mermaid
 %%{init: {'theme':'base', 'themeVariables': {

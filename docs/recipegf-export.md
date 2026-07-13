@@ -151,9 +151,8 @@ cd ingredients && uv run python -m ingredients.cli cold-build
 ```
 
 Every subcommand takes only `--site` / `--limit`. To re-run a stage, delete its
-`stage_runs` rows or bump the version constant. Bulk runs follow the
-local-restore-then-upload flow (see [docs/upload.md](upload.md)); writes go to
-whatever `SUPABASE_DB_URL` points at.
+`stage_runs` rows or bump the version constant. Writes go to whatever
+`SUPABASE_DB_URL` points at.
 
 ## Versioning
 
