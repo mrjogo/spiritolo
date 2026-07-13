@@ -206,7 +206,7 @@ def test_runbook_covers_all_steps():
     for marker in (
         "supabase pro",
         "repo secrets",
-        "cloudflare r2",
+        "storage bucket",
         "tailscale",
         "railway",
         "vercel",
@@ -218,7 +218,7 @@ def test_runbook_covers_all_steps():
     # The load-bearing secrets/artifacts an operator must not miss.
     assert "RECIPEGF_TOKEN" in md
     assert "TAILSCALE_AUTHKEY" in md
-    assert "R2_" in md
+    assert "S3_" in md
     assert "v0.4.0" in md
     # No projection-rebuild step leaks into the runbook either.
     assert "rebuild_projections" not in md

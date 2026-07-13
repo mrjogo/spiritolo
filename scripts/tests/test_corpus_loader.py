@@ -1,6 +1,6 @@
-"""Corpus loader: gzip + write-once upload of cached HTML to R2, and the
-pages.r2_key backfill. Every test here stubs the S3-compat client — no network,
-no live R2 (see CLAUDE.md hard rules).
+"""Corpus loader: gzip + write-once upload of cached HTML to the object store,
+and the pages.r2_key backfill. Every test here stubs the S3-compat client — no
+network, no live object store (see CLAUDE.md hard rules).
 """
 from __future__ import annotations
 

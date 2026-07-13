@@ -1,13 +1,13 @@
 # DevOps runbook — zero to a running worker
 
 The exact CLI to stand up and continuously deploy the fully-cloud topology:
-one Supabase Pro Postgres (pipeline queue + serving), a Cloudflare R2 corpus
-bucket, one Railway worker, and the Vercel SPA. Single environment — `staging`
-doubles as live; there is no separate production yet.
+one Supabase Pro Postgres (pipeline queue + serving), a Railway Storage Bucket
+for the HTML corpus, one Railway worker, and the Vercel SPA. Single environment
+— `staging` doubles as live; there is no separate production yet.
 
 Prereqs on the operator box: `gh` (authenticated), the `supabase` CLI, Node
-(`npm`/`npx`), the Railway CLI (`npm i -g @railway/cli`), `wrangler`
-(`npm i -g wrangler`), `aws-cli`, `psql`/`pg_restore` v17+, and a Tailscale
+(`npm`/`npx`), the Railway CLI (`npm i -g @railway/cli`), `aws-cli` (for
+inspecting the corpus bucket), `psql`/`pg_restore` v17+, and a Tailscale
 account with barbot already on the tailnet.
 
 The worker has no inbound port and no host affinity: it polls the `jobs` table
@@ -47,29 +47,29 @@ gh secret set RAILWAY_TOKEN  --body "<railway project token>"              # onl
 needed if you deploy via the workflow rather than Railway's native GitHub
 integration.
 
-## 3. Cloudflare R2 — corpus bucket
+## 3. Railway Storage Bucket — corpus
 
-One bucket, `spiritolo-corpus`, holding gzipped HTML keyed `sha256(url)`. Enable
-object-lock **at creation** (it can't be turned on later) and versioning, so a
-bad job can never destroy the only copy of a scrape. The corpus is write-once,
-read-only after the one-time load; the worker never re-scrapes.
+One bucket holding gzipped HTML keyed `sha256(url)`: S3-compatible (Tigris-
+backed), $0.015/GB-month, free egress and free API operations. Write-once and
+read-only after the one-time load — the loader never overwrites or deletes a
+key, and the worker never re-scrapes.
 
 ```bash
-wrangler login
-# Create an R2 API token in the dashboard → Access Key/Secret + account endpoint.
-export R2_ENDPOINT="https://<account_id>.r2.cloudflarestorage.com"
-export AWS_ACCESS_KEY_ID=<r2_key> AWS_SECRET_ACCESS_KEY=<r2_secret> AWS_DEFAULT_REGION=auto
-aws s3api create-bucket --bucket spiritolo-corpus \
-  --object-lock-enabled-for-bucket --endpoint-url "$R2_ENDPOINT"
-aws s3api put-bucket-versioning --bucket spiritolo-corpus \
-  --versioning-configuration '{"Status":"Enabled"}' --endpoint-url "$R2_ENDPOINT"
-aws s3api put-object-lock-configuration --bucket spiritolo-corpus \
-  --object-lock-configuration '{"ObjectLockEnabled":"Enabled","Rule":{"DefaultRetention":{"Mode":"GOVERNANCE","Years":2}}}' \
-  --endpoint-url "$R2_ENDPOINT"
+# In the worker's project (§5's `railway init` creates it; `railway link` to it).
+railway bucket create spiritolo-corpus --region <region>   # e.g. --region sjc; prompted if omitted
+railway bucket credentials    # prints AWS_ENDPOINT_URL / AWS_ACCESS_KEY_ID /
+                              # AWS_SECRET_ACCESS_KEY / AWS_S3_BUCKET_NAME / AWS_DEFAULT_REGION
 ```
 
-Then run the corpus loader once and backfill `pages.r2_key`. The worker reads
-freely afterward — R2 has no egress fee.
+Railway appends a hash to the name for global uniqueness, so take the real
+`AWS_S3_BUCKET_NAME` from `credentials`, not the name you passed. §5 sets the
+worker's generic `S3_*` vars from this output (`AWS_ENDPOINT_URL`→`S3_ENDPOINT`,
+`AWS_ACCESS_KEY_ID`→`S3_ACCESS_KEY_ID`, and so on). (Or create it on the canvas
+→ **Create → Bucket** and copy the **Credentials** tab.)
+
+Railway has **no object-lock or versioning** yet, so the corpus's only other
+copy is your local `data/html/` archive — keep it. Load the corpus per
+[docs/migration.md](migration.md); egress is free afterward.
 
 ## 4. Tailscale auth key
 
@@ -90,10 +90,13 @@ railway variables \
   --set OPENAI_API_KEY=<key> --set ANTHROPIC_API_KEY=<key> --set DEEPSEEK_API_KEY=<key> \
   --set TAILSCALE_AUTHKEY=<ts_authkey> \
   --set OLLAMA_BASE_URL="http://barbot:11434" \
-  --set R2_ACCOUNT_ID=<id> --set R2_ACCESS_KEY_ID=<key> \
-  --set R2_SECRET_ACCESS_KEY=<secret> --set R2_BUCKET=spiritolo-corpus
-# RECIPEGF_TOKEN goes in dashboard → service → Settings → Build → build args
-# (build-time only), NOT as a runtime variable.
+  --set S3_ENDPOINT=https://storage.railway.app --set S3_REGION=auto \
+  --set S3_ACCESS_KEY_ID=<AWS_ACCESS_KEY_ID> --set S3_SECRET_ACCESS_KEY=<AWS_SECRET_ACCESS_KEY> \
+  --set S3_BUCKET=<AWS_S3_BUCKET_NAME>
+# The three <…> S3 values are the matching fields from `railway bucket
+# credentials` (§3). RECIPEGF_TOKEN is a BUILD arg (worker.Dockerfile `ARG`),
+# not a runtime var — the CLI can't set build args, so add it in
+# dashboard → service → Settings → Build → build args (skip if RecipeGF is public).
 railway up --ci                              # first deploy from worker.Dockerfile / railway.json
 railway logs                                 # confirm: tailscaled up, tailnet joined, poll loop started
 ```
@@ -143,10 +146,10 @@ uv lock --upgrade-package recipegf
 
 Sign into `/ops` as an admin, enqueue a **1-URL** scoped `fetch` job, approve it
 (metered → confirm-before-cost), and watch the worker claim it: ScraperAPI
-fetches, bytes land in R2, the `pages` / `recipe_docs` / `stage_runs` rows
-appear, `/ops` shows live status via Realtime, and an `audit_log` row records
-the mutation. `railway logs` should show tailscaled up, the tailnet joined, and
-the poll loop running.
+fetches, bytes land in the bucket, the `pages` / `stage_runs` rows appear,
+`/ops` shows live status via Realtime, and an `audit_log` row records the
+mutation. `railway logs` should show tailscaled up, the tailnet joined, and the
+poll loop running.
 
 ## 9. Promote to staging
 

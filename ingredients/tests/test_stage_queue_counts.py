@@ -169,8 +169,8 @@ def test_recipes_backed_stage_counts_rows_with_no_run_at_current_version(clean):
 def test_pages_backed_stage_requires_recipe_content_type_and_corpus_key(clean):
     conn = clean
     _become(conn, admin=True)
-    _insert_page(conn, "https://ex.test/a", content_type="drink_recipe", r2_key="k1")
-    _insert_page(conn, "https://ex.test/b", content_type="drink_recipe", r2_key=None)
+    _insert_page(conn, "https://ex.test/a", content_type="likely_drink_recipe", r2_key="k1")
+    _insert_page(conn, "https://ex.test/b", content_type="confirmed_drink", r2_key=None)
     _insert_page(conn, "https://ex.test/c", content_type="likely_drink_article", r2_key="k3")
     conn.commit()
 

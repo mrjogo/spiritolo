@@ -1,16 +1,16 @@
 """extract stage — cached HTML (JSON-LD) -> a `recipes` row.
 
 For each queued page (classified as a recipe, with a corpus key) it reads the
-cached HTML from the R2 corpus, finds the Schema.org Recipe JSON-LD, and UPSERTs
-a `recipes` row (raw `source` jsonb verbatim + derived title/author/image;
-equipment stays empty until the convert stage). A page with no Recipe JSON-LD
-falls through to the LLM tier (provider chain) which synthesizes the recipe
-source from the page; with no provider it abstains. One `stage_runs` row per
-page records the outcome at `EXTRACTOR_VERSION` (the page is the entity here —
-extract consumes pages and produces recipes).
+cached HTML from the object store, finds the Schema.org Recipe JSON-LD, and
+UPSERTs a `recipes` row (raw `source` jsonb verbatim + derived
+title/author/image; equipment stays empty until the convert stage). A page
+with no Recipe JSON-LD falls through to the LLM tier (provider chain) which
+synthesizes the recipe source from the page; with no provider it abstains. One
+`stage_runs` row per page records the outcome at `EXTRACTOR_VERSION` (the page
+is the entity here — extract consumes pages and produces recipes).
 
 The corpus reader is injected via `set_corpus_reader` (tests pass a fake); at
-runtime it defaults to the env-configured R2 reader.
+runtime it defaults to the env-configured object-store reader.
 """
 
 from __future__ import annotations
@@ -29,8 +29,10 @@ from . import jsonld
 STAGE = "extract"
 EXTRACTOR_VERSION = "v1"
 
-# Page classification labels the extract queue accepts.
-RECIPE_CONTENT_TYPES = ("drink_recipe",)
+# Page classification labels the extract queue accepts — the Zone-1 classifier's
+# recipe verdicts (mirrors scraper.db.EXTRACT_CONTENT_TYPES; ingredients doesn't
+# depend on scraper, so the values are duplicated rather than imported).
+RECIPE_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink")
 
 _corpus_reader: corpus.CorpusReader | None = None
 

@@ -3,7 +3,7 @@
 Seeds a tiny taxonomy + one classified page whose cached HTML carries an Old
 Fashioned Recipe JSON-LD, runs every stage in order, and asserts a frozen bundle
 plus one stage_run per stage. Runs against TEST_DB_URL with a fake corpus reader
-(no R2) and no LLM.
+(no object store) and no LLM.
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ _HTML = """
 
 
 class _FakeCorpus:
-    """Serves one gzipped HTML doc by its sha256(url) key, like the R2 reader."""
+    """Serves one gzipped HTML doc by its sha256(url) key, like the object-store reader."""
 
     def __init__(self, mapping: dict[str, str]):
         self._by_key = {k: gzip.compress(v.encode()) for k, v in mapping.items()}
@@ -81,7 +81,7 @@ def conn(test_db_url: str):
         key = hashlib.sha256(url.encode()).hexdigest()
         c.execute(
             "insert into pages (url, site, r2_key, content_type) "
-            "values (%s, 'ex', %s, 'drink_recipe')",
+            "values (%s, 'ex', %s, 'likely_drink_recipe')",
             (url, key),
         )
         extract.set_corpus_reader(_FakeCorpus({key: _HTML}))

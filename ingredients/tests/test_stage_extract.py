@@ -41,7 +41,7 @@ def conn(test_db_url: str):
             c.execute(f"truncate {t} restart identity cascade")
 
 
-def _page(conn, url, content_type="drink_recipe", key=None):
+def _page(conn, url, content_type="likely_drink_recipe", key=None):
     if key is None:
         key = hashlib.sha256(url.encode()).hexdigest()
     conn.execute(

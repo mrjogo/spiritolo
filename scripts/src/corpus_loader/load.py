@@ -1,14 +1,14 @@
-"""Write-once upload of one cached HTML page to the R2 corpus.
+"""Write-once upload of one cached HTML page to the object-store corpus.
 
 ``load()`` is the pure, injectable core: it takes an S3-compat client (real or
 fake), gzips the HTML, and ``put_object``s it keyed ``sha256(url)`` — unless
 that key already exists, in which case it skips (write-once, idempotent
-re-run). It never calls ``delete_object`` and
-never overwrites an existing key, respecting R2's object-lock.
+re-run). It never calls ``delete_object`` and never overwrites an existing
+key — the corpus is write-once by construction.
 
 Tests inject a fake client (see scripts/tests/test_corpus_loader.py); the real
-client used operationally is built by ``default_client()`` below, from
-``R2_*`` env vars, and is exercised by no test (no network in CI/dev).
+client used operationally is built by ``default_client()`` below, from the
+``S3_*`` env vars, and is exercised by no test (no network in CI/dev).
 """
 from __future__ import annotations
 
@@ -57,7 +57,9 @@ def load(client: S3Client, bucket: str, url: str, html: bytes) -> bool:
 
 
 def default_client():
-    """Build the real R2 (S3-compat) client from ``R2_*`` env vars.
+    """Build the real S3 client from the ``S3_*`` env vars (``S3_ENDPOINT`` /
+    ``S3_ACCESS_KEY_ID`` / ``S3_SECRET_ACCESS_KEY``, optional ``S3_REGION``).
+    Any S3-compatible object store works.
 
     Not exercised by any test — those inject ``FakeS3Client`` instead (see
     scripts/tests/test_corpus_loader.py). Only used by the operator runbook
@@ -65,12 +67,12 @@ def default_client():
     """
     import boto3
 
-    account_id = os.environ["R2_ACCOUNT_ID"]
     raw = boto3.client(
         "s3",
-        endpoint_url=f"https://{account_id}.r2.cloudflarestorage.com",
-        aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],
+        endpoint_url=os.environ["S3_ENDPOINT"],
+        aws_access_key_id=os.environ["S3_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["S3_SECRET_ACCESS_KEY"],
+        region_name=os.environ.get("S3_REGION", "auto"),
     )
     return _NotFoundIsNoneAdapter(raw)
 
