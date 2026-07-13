@@ -1,14 +1,13 @@
-"""Schema-level integration tests for the WS-B20 `pages` migration.
+"""Schema-level integration tests for the `pages` migration.
 
-`pages` is one of the two clean-slate inputs preserved into v2.1 (the other
-being the R2 HTML corpus read by ingredients.pipeline.corpus). It replaces the
-scraper's SQLite `pages` table with a lightweight per-URL row in the one
-Postgres — no snapshot/attempts/fetch_error bookkeeping (that history now
-lives in stage_runs.payload / audit_log, added by other workstreams).
+`pages` is one of the two durable pipeline inputs (the other being the R2 HTML
+corpus read by ingredients.pipeline.corpus). It replaces the scraper's SQLite
+`pages` table with a lightweight per-URL row in Postgres — no
+snapshot/attempts/fetch_error bookkeeping (that history now lives in
+stage_runs.payload / audit_log).
 
-This is the ONE migration for `pages` (owned by B20, per docs/redesign.md §4
-reconciliation note 2); ingredients/tests/test_corpus_reader.py (B6) covers
-only the read-side corpus module and adds no migration of its own.
+This is the sole migration for `pages`; ingredients/tests/test_corpus_reader.py
+covers only the read-side corpus module and adds no migration of its own.
 """
 from __future__ import annotations
 
@@ -109,8 +108,8 @@ def test_url_unique_constraint(db_conn):
 
 def test_rls_deny_all(db_conn):
     """RLS is enabled and neither anon nor authenticated can read/write
-    `pages` directly — there is no RPC surface for it in this workstream;
-    only the table owner / service_role (BYPASSRLS, granted broad access on
+    `pages` directly — there is no RPC surface for it; only the table owner /
+    service_role (BYPASSRLS, granted broad access on
     real Supabase — not replicated by the conftest's stub roles) touch it
     directly."""
     row = db_conn.execute(

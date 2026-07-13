@@ -1,4 +1,4 @@
-"""Reaper tests for the Postgres-as-queue (WS-B22).
+"""Reaper tests for the Postgres-as-queue.
 
 ``queue.reaper.requeue_stale`` puts jobs whose ``last_heartbeat`` is older than
 a threshold back on the queue (state='queued', worker_id=null). It is the entire

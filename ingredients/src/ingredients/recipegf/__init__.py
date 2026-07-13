@@ -1,7 +1,7 @@
-"""Spiritolo → RecipeGF export stage (spike P2).
+"""Spiritolo → RecipeGF export stage.
 
 Emits validated RecipeGF *pin-2 bundles* from Spiritolo recipe data, so
-Barbot (P3) can import finished, self-contained recipe docs with no runtime
+Barbot can import finished, self-contained recipe docs with no runtime
 cross-dependency on Spiritolo.
 
 Layers (all pure-Python, no DB, unit-testable in isolation):
@@ -18,7 +18,9 @@ persists/exports bundles; it is a thin shell over the pure core above.
 
 Versioning: ``CONVERTER_VERSION`` in ``version.py`` — bump when conversion
 rules (templates, technique keywords, slug rules, ingredient handling) change,
-then re-run ``recipegf-export --reset --except-version <prior>``.
+then re-run the export stage (``ingredients.cli export``): delete the export
+stage's ``stage_runs`` rows, or rely on the version bump itself, to re-queue
+affected recipes.
 """
 
 from __future__ import annotations

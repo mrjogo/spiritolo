@@ -5,9 +5,9 @@ way that would produce a different bundle for the same input: technique
 keyword table, step templates, slug-minting rules, ingredient/unit handling,
 the id encoding version, or the set of spiritolo/ extension verbs emitted.
 
-Bumping requires re-running:
-    recipegf-export --reset --except-version <prior> --yes
-so prior-version bundles fall back onto the export work queue.
+Bumping requires re-running the export stage (``ingredients.cli export``):
+delete the export stage's ``stage_runs`` rows (or rely on the version bump
+itself) so prior-version bundles fall back onto the export work queue.
 
 This is a distinct axis from the recipe-id ``:vN`` encoding version (which
 travels in the doc id) — a stage-logic bump does not necessarily change the
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 CONVERTER_VERSION = "v1"
 
-# Reverse-DNS authority Spiritolo mints recipe ids under (D1). The spiritolo
+# Reverse-DNS authority Spiritolo mints recipe ids under. The spiritolo
 # namespace is reserved for VERBS, never for recipe authorities, so a bare
 # ``spiritolo/<slug>`` recipe id is intentionally invalid — recipe ids always
 # carry a reverse-DNS authority.

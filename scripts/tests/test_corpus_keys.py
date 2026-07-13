@@ -1,4 +1,4 @@
-"""Content-addressed R2 key derivation for the HTML corpus (WS-B20).
+"""Content-addressed R2 key derivation for the HTML corpus.
 
 Keys are sha256(url) — stable and url-sensitive on purpose: the loader never
 canonicalizes a url before hashing it, so the caller owns any normalization.

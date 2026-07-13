@@ -1,19 +1,17 @@
-# RecipeGF export (P2)
+# RecipeGF export
 
-Spiritolo emits **validated RecipeGF pin-2 bundles** from its recipe data, so
-Barbot (P3) can import finished, self-contained recipe docs with no runtime
-cross-dependency on Spiritolo. This is the Spiritolo half of the cross-repo
-recipe-identity design; the frozen interface pins live in Barbot's
-`docs/architecture/recipe-cross-repo.md`.
+Spiritolo emits **validated RecipeGF pin-2 bundles** from its recipe data, so a
+consumer (Barbot) can import finished, self-contained recipe docs with no
+runtime cross-dependency on Spiritolo.
 
-Depends on **RecipeGF v0.3.0** (P1) — the id grammar, `RecipeValidator`, the
+Depends on **RecipeGF v0.4.0** — the id grammar, `RecipeValidator`, the
 `VerbRegistry` overlay API, and the namespace registry (the `spiritolo`
-namespace is already registered upstream). Pinned in
+namespace is registered upstream). Pinned in
 [`ingredients/pyproject.toml`](../ingredients/pyproject.toml) as a git tag dep.
 
 ## What it produces — the pin-2 bundle
 
-One bundle per **drink** (a `recipe_clusters` row). Shape:
+One bundle per **recipe**. Shape:
 
 ```jsonc
 {
@@ -24,107 +22,66 @@ One bundle per **drink** (a `recipe_clusters` row). Shape:
 }
 ```
 
-**Seam guarantees** (enforced at build time; a violating bundle is never
+**Seam guarantees** (enforced at generation; a violating bundle is never
 emitted):
 
 - The id is reverse-DNS `com.spiritolo/<slug>:v1` and passes
   `is_valid_recipe_id`. A bare `spiritolo/<slug>` id is **rejected** — the
   `spiritolo` namespace is for VERBS, not recipe authorities.
+- Each ingredient carries a reverse-DNS `ref` (`com.spiritolo/<slug>`) minted
+  from the shared taxonomy resolution — a portable identity, never a
+  client-side slugified name.
 - `meta.slug == parse_recipe_id(id).slug` (via RecipeGF's `parse_recipe_id`, not
   ad-hoc string splitting).
 - The bundle is **self-contained**: it carries every `spiritolo/` verb-def its
   steps reference, so a consumer validates with zero external lookups —
   `RecipeValidator(VerbRegistry().load_overlay(bundle["verbs"])).validate({"recipe": bundle["recipe"]})`.
-- `meta` carries the full `slug` / `source` / `imported_at` triple Barbot's
-  import DB CHECK needs.
+- `meta` carries the full `slug` / `source` / `imported_at` triple a consumer's
+  import needs.
 
-## Pipeline shape
+## Pipeline shape — convert, then export
 
-Deterministic **Phase 1**, following Spiritolo's versioned-stage +
-propose→review pattern:
+The verb-frame projection is produced by two deterministic pipeline stages, both
+versioned at `CONVERTER_VERSION` and run over the shared `stage_runs` work queue:
 
-1. **Slug** — [`slug.py`](../ingredients/src/ingredients/recipegf/slug.py) mints a
-   kebab-case slug from `recipe_clusters.canonical_name` (owned by Spiritolo, the
-   drink registry). No valid slug → review.
-2. **Technique** —
-   [`technique.py`](../ingredients/src/ingredients/recipegf/technique.py) infers
-   `stir | shake | build | blend` from the JSON-LD `recipeInstructions` text. No
-   keyword, or a muddle it can't place → review.
-3. **Convert** —
-   [`converter.py`](../ingredients/src/ingredients/recipegf/converter.py) turns the
-   cluster's representative recipe (jsonld + parsed/roled `recipe_ingredients`,
-   joined to `taxonomy_nodes.slug`) into a verb-frame `recipe`. Ingredient names
-   are the **registered taxonomy slug** the mapper resolved (the Barbot
-   slug→object seam). D6 identity governance: there is **no** slugify-the-parsed-
-   name fallback — an ingredient token is an identity, so it must be a slug
-   registered in Spiritolo's taxonomy, never client-side slugified (which can
-   collide / emit an ungoverned token). An unresolved ingredient → review
-   (`unresolved_ingredient`). Verbs are exempt (closed RecipeGF vocab).
-   - **Single sources of truth, no re-derivation.** Unit *validity* is
-     RecipeGF's `UnitValidator` — the converter keeps no parallel unit table,
-     only a small parser→RecipeGF alias bridge (`tbsp→Tbs`, `pint→pnt`,
-     `quart→qt`, `gallon→gal`) for spellings RecipeGF doesn't alias; anything
-     with no faithful RecipeGF unit → review. Ingredient **bucketing**
-     (ice/garnish/body) trusts dedup's `role` tag rather than re-detecting it,
-     so a missing role → review (also a de-facto freshness guard, since export
-     runs after cluster compute). *(The parser's own `units.py` and dedup's
-     `_OZ_PER_UNIT` are separate pre-RecipeGF unit tables — see "Unit coverage"
-     below for how they consolidate.)*
-4. **Validate + bundle** —
-   [`bundle.py`](../ingredients/src/ingredients/recipegf/bundle.py) assembles the
-   pin-2 shape and enforces the seam guarantees. Every `Ok` recipe is validated
-   against `core ∪ spiritolo/` before it can leave.
+1. **`convert`** — the pure technique→template converter
+   ([`converter.py`](../ingredients/src/ingredients/recipegf/converter.py)) turns
+   each mapped recipe (its `recipe_ingredients` joined to the shared
+   `ingredient_resolutions`, plus the JSON-LD instructions) into RecipeGF
+   verb-frame steps, written to `recipe_steps`, along with the derived
+   `equipment` list and a kebab **slug** minted onto `recipes.recipe_slug`.
+   Technique (`stir | shake | build | blend`) is inferred from the instruction
+   text to select the step template; ingredient roles (to bucket
+   ice/garnish/body) are classified inline from the taxonomy default role —
+   ephemeral, not stored. A recipe the converter can't yet emit writes no steps
+   and records a non-terminal `stage_runs` outcome: `pending` (an ingredient
+   isn't resolved yet — it returns after the `map` stage) or `proposes_new`
+   (needs a rules/technique review, e.g. a muddle the templates can't place).
 
-Anything uncertain routes to **propose→review** (`recipegf_proposals`,
-mirroring `taxonomy_proposals`) with a stable reason code, and the cluster is
-parked at the current `CONVERTER_VERSION` so it drops off the queue until a
-version bump or `--reset`. An LLM Phase 2 could later drain the review queue
-behind the same seam.
+2. **`export`** —
+   [`generate.py`](../ingredients/src/ingredients/recipegf/generate.py)'s
+   `generate_bundle` assembles the pin-2 bundle from the current rows + shared
+   resolution + in-repo verb-defs and validates it against `core ∪ spiritolo/`;
+   the stage then **freezes** that snapshot into `recipe_exports`. The
+   `stage_runs` outcome is `resolved` (frozen), `pending` (an ingredient still
+   isn't resolved), or `failed` (a seam violation — e.g. an unbuildable recipe).
 
-### Uncertain reason codes
+Ingredient identity is governed: there is **no** slugify-the-parsed-name
+fallback — an ingredient token is an identity, so it must be a slug registered
+in Spiritolo's taxonomy (the shared `ingredient_resolutions`), never
+client-side slugified (which can collide or emit an ungoverned token). Verbs are
+exempt (closed RecipeGF vocab).
 
-| Reason | Meaning |
-|---|---|
-| `no_slug` | canonical_name yields no valid kebab slug |
-| `no_technique` | no stir/shake/build/blend keyword in instructions |
-| `muddle_unsupported` | instructions mention muddling; v1 templates can't place a muddle step |
-| `missing_roles` | an ingredient has no dedup role (cluster compute hasn't tagged this recipe) |
-| `unresolved_ingredient` | a row has no taxonomy slug and no parseable name |
-| `unknown_unit` | a unit has no faithful RecipeGF equivalent (e.g. `part`) |
-| `missing_amount` | a body ingredient has a unit but no amount |
-| `duplicate_ingredient` | two ingredients resolve to the same name |
-| `no_body` | nothing left to mix after removing ice/garnish |
-| `validation_failed` | assembled doc failed `RecipeValidator` (should be rare) |
+## Unit coverage
 
-## Unit coverage & the consolidation direction
-
-RecipeGF currently recognizes only **~21 of Spiritolo's ~66 canonical units**
-(the values `parser/units.py` emits). The other ~45 have no RecipeGF equivalent
-today, so the converter **abstains** on them (`unknown_unit` → review) — nothing
-is silently dropped, but those recipes don't export until the unit exists in
-RecipeGF.
-
-**The fix is to migrate Spiritolo's hard-won vocabulary INTO RecipeGF's
-registries (an upstream RecipeGF PR — RecipeGF is the shared contract), then
-retire `units.py`, dedup's `_OZ_PER_UNIT`, and this stage's alias bridge.** Not
-the reverse: collapsing onto today's RecipeGF would lose those 45. Regenerate
-the exact gap any time with a diff of `units.py`'s canonical values against
-`recipegf.UnitValidator.is_valid`. The gap, categorized:
-
-- **Pure spelling** RecipeGF should just alias: `tbsp→Tbs`, `pint→pnt`,
-  `quart→qt`, `gallon→gal` (this stage's 4-entry bridge is the stopgap).
-- **Bar measures with a known volume** → add to `bar-units.yaml` with
-  `approx_ml`: `jigger`, `pony`, `shot`, `dropper`, `squeeze`.
-- **Shaped-piece count nouns** (same shape as RecipeGF's `slice`/`wedge`/`wheel`)
-  → add to `count-units.yaml`: `leaf`, `stick`, `clove`, `pod`, `bean`, `scoop`,
-  `strip`, `stalk`, `sheet`, `ring`, `segment`, `spear`, `disc`, `coin`,
-  `quarter`, `half`, `chunk`, `seed`, `zest`, `peel`.
-- **Deliberately hard** (per-unit judgment; some may stay unrepresentable):
-  `part` (a *ratio*, not an absolute amount), container counts `bottle`/`can`/
-  `bag`/`bunch`/`packet`/`package` (volume is product-dependent — already flagged
-  in `units.py`), and vague `grind`/`sprinkle`/`handful`/`knob`/`swath`.
-
-`cube` is **not** in the gap: RecipeGF already aliases `cube → each`.
+Unit vocabulary is delegated to RecipeGF's registries: the parser emits
+RecipeGF-canonical unit names (`units.py` reads RecipeGF's `bar-units` and
+`count-units` registries directly), and the converter validates with
+`UnitValidator`, keeping no parallel unit table of its own. Its only local shim
+is a 4-entry spelling bridge (`tbsp→Tbs`, `pint→pnt`, `quart→qt`, `gallon→gal`)
+for surfaces RecipeGF doesn't alias. A unit with no faithful RecipeGF
+equivalent routes to review (`unknown_unit`) rather than being silently
+coerced.
 
 ## `spiritolo/` extension verbs
 
@@ -132,7 +89,7 @@ Beyond RecipeGF core (`add`, `stir`, `shake`, `strain`, `muddle`, `rim`,
 `garnish`, `express`), Spiritolo defines extension verbs as self-describing YAML
 under
 [`recipegf/verbs/`](../ingredients/src/ingredients/recipegf/verbs), loaded via
-the overlay API (D2b: iterate verbs in-repo, no RecipeGF PR per verb):
+the overlay API (verbs iterate in-repo — no RecipeGF PR per verb):
 
 - `spiritolo/blend` — blend in place until smooth (frozen drinks).
 - `spiritolo/top` — top a built drink with an (effervescent) ingredient, added
@@ -140,84 +97,63 @@ the overlay API (D2b: iterate verbs in-repo, no RecipeGF PR per verb):
 
 A bundle embeds only the defs its recipe actually uses.
 
-## Storage — relational, not a blob
+## Storage — relational, generated on demand
 
-The verb-frame recipe is stored **relationally** (mirroring how the parser
-stores `recipe_ingredients` as rows, not as an opaque JSON blob), added by
-[`20260711120000_recipegf_export.sql`](../supabase/migrations/20260711120000_recipegf_export.sql):
+The verb-frame recipe is **not stored as a bundle blob**. It lives in the shared
+relational content model
+([`20260720120000_content_relational_model.sql`](../supabase/migrations/20260720120000_content_relational_model.sql)):
 
-- `recipegf_recipes` — one header row per `(cluster, converter_version)`:
-  `status` (`exported` | `uncertain`), `slug`, `recipe_id`, `title`, `technique`,
-  `equipment text[]`, `source_url`, `exported_at`. An `uncertain` row is a
-  parking marker (no children) that keeps the cluster off the queue and pairs
-  with a `recipegf_proposals` row.
-- `recipegf_ingredients` — the RecipeGF-projected ingredients as rows
-  (`position`, `name`, `amount`, `unit`).
-- `recipegf_steps` — the verb-frame steps as rows (`step_index`, `verb`,
-  `result`, `roles jsonb`, `modifiers jsonb`). The per-verb role map is genuinely
-  schemaless, so it lives in `roles` jsonb (consistent with Spiritolo's other
-  jsonb columns); `verb`/`result` are typed columns.
+- `recipes` — one header row per recipe: the RecipeGF-shaped fields (`title`,
+  `equipment text[]`, the minted `recipe_slug`) alongside the raw source
+  JSON-LD (`source`) and `source_url`.
+- `recipe_ingredients` — the RecipeGF ingredient rows (parse output): `position`,
+  `name`, `amount`, `unit`, `modifiers`.
+- `recipe_steps` — the verb-frame steps (convert output): `step_index`, `verb`,
+  `result`, `roles` (jsonb — the per-verb role map is genuinely schemaless),
+  `modifiers` (text[]).
+- `ingredient_resolutions` — the **shared**, name-keyed ingredient→taxonomy
+  resolution. Each ingredient's portable `ref` is minted from here, so a
+  taxonomy correction touches one shared row and every bundle that uses that
+  ingredient follows on the next generation — no per-recipe rewrite.
 
-**The pin-2 bundle is a projection, generated on demand** by
-`db.generate_bundle(cluster_id, converter_version)` — it reconstructs
-`{recipe, verbs, meta}` from these rows (`meta.imported_at` = the header's
-`exported_at`), byte-equivalent to what the converter produced (guaranteed by a
-roundtrip test). The export work
-queue is "clusters with no `recipegf_recipes` row at the current
-`CONVERTER_VERSION`" — a `NOT EXISTS`, exactly like the parser's queue. The
-review queue is `recipegf_proposals`.
+**The pin-2 bundle is a projection, generated on demand** by `generate_bundle`
+from those rows every time it's asked for, so the live representation stays
+current with the taxonomy. A **published** bundle is frozen separately by the
+`export` stage into `recipe_exports` — one row per `(recipe_id,
+converter_version)` carrying the frozen `bundle` jsonb, its `recipe_slug` /
+`recipe_ref` (`com.spiritolo/<slug>:v1`), and `exported_at`. The export work
+queue is "recipes with no `recipe_exports` row at the current
+`CONVERTER_VERSION`" — a `NOT EXISTS`, like every stage's queue.
 
-## Read surface — Barbot's P3 pull-by-slug
+## Read surface
 
-Barbot's menu-build import pulls each drink's bundle by its **slug** (the
-Spiritolo-owned join/sync key, D1). Hardened by
-[`20260711140000_recipegf_read_surface.sql`](../supabase/migrations/20260711140000_recipegf_read_surface.sql):
-
-- **`slug` is unique per `converter_version`** among `exported` rows (a partial
-  unique index; parked `uncertain` rows have null slug and are excluded), so a
-  slug is a safe join key.
-- **Slug-keyed pull** — `db.generate_bundle_by_slug(slug, converter_version)`
-  resolves `slug → cluster_id` then reuses `generate_bundle`. The offline path
-  (`--out` `<slug>.json` drop) and this live path project the same rows.
-- **Service-role RPCs** (SECURITY DEFINER, granted to `service_role` only — no
-  public/anon surface) give the live adapter a clean PostgREST read path:
-  - `recipegf_catalog(p_converter_version)` → the exported drinks
-    (`slug, title, technique, converter_version, exported_at`).
-  - `recipegf_bundle(slug, converter_version)` → the self-contained pin-2
-    bundle, assembled in SQL from the same relational rows **plus the
-    `recipegf_verb_defs` cache** (a copy of the in-repo `spiritolo/` verb-def
-    YAML, refreshed from it on every export by `db.sync_verb_defs`, so the
-    bundle stays self-contained with no drift). A DB parity test pins the RPC's
-    output equal to `generate_bundle_by_slug`, so the two projections never
-    diverge.
+`recipe_exports` is the frozen, published surface, indexed by `recipe_slug`. It
+carries RLS with an admin-only read policy (authenticated + `is_admin()`) and no
+anon/public grant; the `/ops` console browses frozen exports and can regenerate
+a live bundle on demand for any recipe. A consumer's import pulls a drink's
+bundle by its **slug** — the Spiritolo-owned, stable join/sync key written to
+`recipes.recipe_slug` and frozen into `recipe_exports.recipe_slug`.
 
 ## CLI
 
 ```bash
-# Convert every cluster lacking a current-version bundle. Writes bundles onto
-# recipe_clusters + parks uncertain drinks into recipegf_proposals.
-cd ingredients && uv run python -m ingredients.cli recipegf-export
+# Convert mapped recipes into verb-frame steps (writes recipe_steps + slug).
+cd ingredients && uv run python -m ingredients.cli convert
 
-# Scoped + capped; also dump each bundle as <slug>.json into a directory.
-cd ingredients && uv run python -m ingredients.cli recipegf-export \
-    --site punch --limit 50 --out data/recipegf
+# Freeze the pin-2 bundle for every recipe lacking one at the current version.
+cd ingredients && uv run python -m ingredients.cli export
 
-# Preview without touching the DB (still writes --out files if given).
-cd ingredients && uv run python -m ingredients.cli recipegf-export --dry-run --out /tmp/bundles
+# Scope either stage to one site, capped.
+cd ingredients && uv run python -m ingredients.cli export --site punch --limit 50
 
-# Run the eval set (real-recipe fixtures; no DB needed).
-cd ingredients && uv run python -m ingredients.cli recipegf-export --review
-
-# Walk the propose→review queue.
-cd ingredients && uv run python -m ingredients.cli recipegf-export review-proposals
-
-# After bumping CONVERTER_VERSION, re-export everything left at the old version.
-cd ingredients && uv run python -m ingredients.cli recipegf-export \
-    --reset --except-version v1 --yes
+# Run the whole pipeline in order ( … -> convert -> cluster -> export ).
+cd ingredients && uv run python -m ingredients.cli cold-build
 ```
 
-Bulk runs follow the local-restore-then-upload flow (see
-[docs/upload.md](upload.md)); writes go to whatever `SUPABASE_DB_URL` points at.
+Every subcommand takes only `--site` / `--limit`. To re-run a stage, delete its
+`stage_runs` rows or bump the version constant. Bulk runs follow the
+local-restore-then-upload flow (see [docs/upload.md](upload.md)); writes go to
+whatever `SUPABASE_DB_URL` points at.
 
 ## Versioning
 
@@ -225,7 +161,8 @@ Bulk runs follow the local-restore-then-upload flow (see
 [`recipegf/version.py`](../ingredients/src/ingredients/recipegf/version.py). Bump
 when conversion output would change for the same input (technique keywords, step
 templates, slug rules, unit handling, the spiritolo verb set, the id encoding
-version), then re-run with `--reset --except-version <prior>`.
+version), then re-run `convert` + `export`; recipes left at the old version
+re-queue as their `stage_runs` rows fall behind the current version.
 
 ## Eval set
 
@@ -233,5 +170,7 @@ version), then re-run with `--reset --except-version <prior>`.
 real cocktails (Old Fashioned, Negroni, Margarita, Daiquiri, Frozen Daiquiri,
 Gin & Tonic, Whiskey Highball) as should-export cases, plus should-abstain cases
 (Mojito → muddle, no-technique, untranslatable unit). The converter is pure, so
-the eval runs with no DB. Add a should-export case when you teach a new
-template/technique; add a should-abstain case when you find an over-conversion.
+the eval set needs no DB — the test suite
+([`ingredients/tests/`](../ingredients/tests)) exercises it. Add a should-export
+case when you teach a new template/technique; add a should-abstain case when you
+find an over-conversion.

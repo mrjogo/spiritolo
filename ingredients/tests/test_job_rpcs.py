@@ -1,4 +1,4 @@
-"""DB-side tests for the enqueue_job / approve_job SECURITY DEFINER RPCs (WS-B22).
+"""DB-side tests for the enqueue_job / approve_job SECURITY DEFINER RPCs.
 
 Both functions guard on ``public.is_admin()`` (reads profiles.is_admin filtered
 by ``auth.uid()``) and are the *sole* write path onto ``jobs`` — RLS is deny-all,

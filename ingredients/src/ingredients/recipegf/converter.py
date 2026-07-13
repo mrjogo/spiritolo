@@ -1,4 +1,4 @@
-"""JSON-LD + parsed-ingredients → a RecipeGF verb-frame ``recipe`` (D2).
+"""JSON-LD + parsed-ingredients → a RecipeGF verb-frame ``recipe``.
 
 The converter is deterministic and pure (no DB, no network): it takes a
 :class:`SourceRecipe` — a cluster's canonical name plus its representative
@@ -144,7 +144,7 @@ def _ingredient_name(ing: SourceIngredient) -> str | None:
     """The RecipeGF ingredient name for a row: the **registered** taxonomy slug
     the mapper resolved (the Barbot slug→object seam), or ``None``.
 
-    D6 identity governance: an ingredient token is an *identity*, so it must be
+    Identity governance: an ingredient token is an *identity*, so it must be
     a canonical slug registered in Spiritolo's taxonomy — never client-side
     slugified from free text (slugifying can collide and emits an ungoverned
     token). So there is **no** ``slugify(name)`` fallback: an ingredient the

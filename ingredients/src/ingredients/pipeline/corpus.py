@@ -7,8 +7,8 @@ one-time load: this module is strictly a reader — it exposes exactly one
 operation, ``CorpusReader.read_html``, and no put/write/delete surface.
 
 Keys are ``sha256(url)``, matching scripts/src/corpus_loader/keys.py exactly
-(same one-liner, deliberately not shared across the two packages — see
-docs/redesign.md §8.6 YAGNI: no shared test-utils/helper package up front).
+(the same one-liner, deliberately duplicated rather than shared across the two
+packages — not worth a shared helper package for a single line).
 """
 from __future__ import annotations
 

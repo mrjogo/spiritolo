@@ -50,7 +50,7 @@ def test_eval_set_all_pass():
 @pytest.mark.parametrize("case", [c for c in CASES if c.expect_slug], ids=lambda c: c.expect_slug)
 def test_each_exported_bundle_validates_under_core_union_spiritolo(case):
     res, bundle = _bundle_for(case.source)
-    # Validate exactly as Barbot (P3) would: core ∪ bundle["verbs"], nothing else.
+    # Validate exactly as a consumer (Barbot) would: core ∪ bundle["verbs"], nothing else.
     registry = VerbRegistry().load_overlay(bundle["verbs"])
     result = RecipeValidator(registry).validate({"recipe": bundle["recipe"]})
     assert result.valid, [(e.path, e.message) for e in result.errors]

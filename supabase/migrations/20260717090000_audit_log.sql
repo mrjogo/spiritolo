@@ -2,7 +2,7 @@
 --
 -- One generic AFTER-trigger (20260717091000_audit_triggers.sql) writes exactly
 -- one row here per content mutation, capturing actor (human | worker | system),
--- source, before/after snapshots, and changed_keys. See docs/redesign.md §4.
+-- source, before/after snapshots, and changed_keys.
 --
 -- We deliberately DO NOT adopt the supa_audit extension. Its fixed
 -- record_version schema stores (record, old_record, op, table_oid, record_id,

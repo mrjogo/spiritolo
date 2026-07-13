@@ -3,7 +3,8 @@
 Real cocktails modeled as :class:`SourceRecipe` fixtures (JSON-LD instructions +
 parsed/roled ingredients, exactly the shape ``db.build_source_recipe`` assembles
 from Supabase). The converter is pure, so — unlike the map/dedup evals — this
-runs with **no DB**: ``recipegf-export --review`` exercises it directly.
+runs with **no DB**: the eval suite (``ingredients/tests/test_recipegf_converter.py``,
+via ``run_eval``) exercises it directly.
 
 Two kinds of case:
   - should-export: converts to an ``Ok`` whose bundle validates under
@@ -136,9 +137,10 @@ _GIN_AND_TONIC = _recipe(
 
 # ---- should-abstain --------------------------------------------------------
 
-# D6 governance: an ingredient the mapper couldn't resolve to a *registered*
-# taxonomy slug (slug=None) does NOT fall back to a kebab-slug of the parsed
-# name — that would emit an ungoverned token. It abstains → propose→review.
+# Identity governance: an ingredient the mapper couldn't resolve to a
+# *registered* taxonomy slug (slug=None) does NOT fall back to a kebab-slug
+# of the parsed name — that would emit an ungoverned token. It abstains →
+# propose→review.
 _UNRESOLVED_INGREDIENT = _recipe(
     "Whiskey Highball", "https://example.com/whiskey-highball",
     "Build over ice in a highball glass: add the whiskey, then top with soda "
