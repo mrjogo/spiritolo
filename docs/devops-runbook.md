@@ -47,15 +47,17 @@ gh secret set RAILWAY_TOKEN  --body "<railway project token>"              # onl
 needed if you deploy via the workflow rather than Railway's native GitHub
 integration.
 
-## 3. Railway Storage Bucket — corpus
+## 3. Railway project + Storage Bucket
 
-One bucket holding gzipped HTML keyed `sha256(url)`: S3-compatible (Tigris-
-backed), $0.015/GB-month, free egress and free API operations. Write-once and
-read-only after the one-time load — the loader never overwrites or deletes a
-key, and the worker never re-scrapes.
+Create the Railway project (the bucket and the worker both live in it), then the
+corpus bucket. The bucket holds gzipped HTML keyed `sha256(url)`: S3-compatible
+(Tigris-backed), $0.015/GB-month, free egress and free API operations.
+Write-once and read-only after the one-time load — the loader never overwrites
+or deletes a key, and the worker never re-scrapes.
 
 ```bash
-# In the worker's project (§5's `railway init` creates it; `railway link` to it).
+railway login
+railway init --name spiritolo-worker    # creates the project; or `railway link` to an existing one
 railway bucket create spiritolo-corpus --region <region>   # e.g. --region sjc; prompted if omitted
 railway bucket credentials    # prints AWS_ENDPOINT_URL / AWS_ACCESS_KEY_ID /
                               # AWS_SECRET_ACCESS_KEY / AWS_S3_BUCKET_NAME / AWS_DEFAULT_REGION
@@ -81,9 +83,10 @@ barbot through a local SOCKS proxy; hosted APIs take the direct route.
 
 ## 5. Railway worker
 
+The project + bucket (§3) and the Tailscale key (§4) are ready — set the
+worker's variables and deploy:
+
 ```bash
-railway login
-railway init --name spiritolo-worker        # or `railway link` to an existing project
 railway variables \
   --set SUPABASE_DB_URL="postgresql://postgres.atvlzbgrquiseczzeczn:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres" \
   --set SCRAPERAPI_KEY=<key> \
