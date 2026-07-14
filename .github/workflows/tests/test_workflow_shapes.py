@@ -162,29 +162,6 @@ def test_web_ci_runs_vitest():
 
 
 # --------------------------------------------------------------------------- #
-# deploy-worker.yml — Railway deploy on staging pushes to worker paths          #
-# --------------------------------------------------------------------------- #
-
-def test_deploy_worker_paths():
-    doc = _yaml(".github/workflows/deploy-worker.yml")
-    on = _on(doc)
-    push = on["push"]
-    assert "staging" in push["branches"]
-    required = {
-        "ingredients/**", "common/**", "worker.Dockerfile",
-        "scripts/worker-entrypoint.sh", "railway.json", "uv.lock",
-    }
-    assert required.issubset(set(push["paths"])), (
-        f"missing trigger paths: {required - set(push['paths'])}"
-    )
-
-    job = next(iter(doc["jobs"].values()))
-    script = _all_run_scripts(job)
-    assert "railway up" in script
-    assert "--ci" in script
-
-
-# --------------------------------------------------------------------------- #
 # railway.json — declarative Dockerfile builder, single replica                 #
 # --------------------------------------------------------------------------- #
 

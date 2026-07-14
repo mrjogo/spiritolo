@@ -24,25 +24,31 @@ export RECIPEGF_TOKEN=      # read-only PAT for mrjogo/RecipeGF (skip if public)
 > The direct `db.<ref>` host is IPv6-only; the transaction pooler (6543) breaks
 > session DDL and `pg_dump`.
 
+**Required vs optional:** only `DB_URL` is required (the worker exits without
+it). `SCRAPERAPI_KEY` matters only if you re-scrape (the `fetch` stage). The
+hosted-LLM keys are optional — a missing one fails only that provider's jobs
+(not the worker), and none are read if the provider chain uses only local
+`barbot`.
+
 ---
 
 ## 1. Supabase Pro
 
 1. Dashboard → project `spiritolo-staging` → **Settings → Billing** → upgrade to **Pro**. Same project — don't recreate it (keeps the ref + every secret/Vercel env). Removes the 7-day pause + egress cap.
-2. Apply migrations:
+2. Link the CLI (for `supabase migration list` / ad-hoc ops):
 
    ```bash
    supabase login
    supabase link --project-ref atvlzbgrquiseczzeczn
-   supabase db push --db-url "$DB_URL" --include-all
    ```
+
+Migrations apply themselves — CI (`deploy-migrations.yml`) runs `supabase db push` to the Pro DB when you promote to `staging` (§9). No manual push.
 
 ## 2. Repo secrets
 
 ```bash
 gh secret set SUPABASE_STAGING_DB_URL --body "$DB_URL"
 gh secret set RECIPEGF_TOKEN          --body "$RECIPEGF_TOKEN"   # skip if RecipeGF is public
-gh secret set RAILWAY_TOKEN           --body "<railway project token>"   # only if using deploy-worker.yml
 ```
 
 ## 3. Tailscale auth key
@@ -64,24 +70,22 @@ eval "$(railway bucket credentials)"                        # loads AWS_ENDPOINT
 
 ## 5. Railway worker
 
-Deploy from the same shell as §4 (the `AWS_*` creds are loaded):
+1. Set the runtime variables (same shell as §4 — the `AWS_*` creds are loaded):
 
-```bash
-railway variables \
-  --set SUPABASE_DB_URL="$DB_URL" \
-  --set SCRAPERAPI_KEY="$SCRAPERAPI_KEY" \
-  --set OPENAI_API_KEY="$OPENAI_API_KEY" --set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" --set DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
-  --set TAILSCALE_AUTHKEY="$TAILSCALE_AUTHKEY" \
-  --set OLLAMA_BASE_URL="http://barbot:11434" \
-  --set S3_ENDPOINT="$AWS_ENDPOINT_URL" --set S3_REGION=auto \
-  --set S3_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" --set S3_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
-  --set S3_BUCKET="$AWS_S3_BUCKET_NAME"
-railway up --ci        # first deploy (worker.Dockerfile / railway.json)
-railway logs           # expect: tailscaled up, tailnet joined, poll loop started
-```
-
-- **`RECIPEGF_TOKEN` is a build arg**, not a runtime var — the CLI can't set it. Dashboard → the service → **Settings → Build → Build args** → add `RECIPEGF_TOKEN`. Skip if RecipeGF is public.
-- **Auto-deploy:** connect the repo in the Railway dashboard (watched branch `staging`), or use `deploy-worker.yml`.
+   ```bash
+   railway variables \
+     --set SUPABASE_DB_URL="$DB_URL" \
+     --set SCRAPERAPI_KEY="$SCRAPERAPI_KEY" \
+     --set OPENAI_API_KEY="$OPENAI_API_KEY" --set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" --set DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+     --set TAILSCALE_AUTHKEY="$TAILSCALE_AUTHKEY" \
+     --set OLLAMA_BASE_URL="http://barbot:11434" \
+     --set S3_ENDPOINT="$AWS_ENDPOINT_URL" --set S3_REGION=auto \
+     --set S3_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" --set S3_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+     --set S3_BUCKET="$AWS_S3_BUCKET_NAME"
+   ```
+2. **Build arg:** dashboard → the service → **Settings → Build → Build args** → add `RECIPEGF_TOKEN` (a build-time `ARG`, not a runtime var — the CLI can't set it). Skip if RecipeGF is public.
+3. **Connect the repo (Railway GitHub App):** dashboard → the service → **Settings → Source** → connect `mrjogo/spiritolo`, set the deploy branch to `staging`. Railway builds `worker.Dockerfile` (per `railway.json`) and redeploys on every push to `staging`.
+4. The first deploy runs when `staging` advances (§9). Then `railway logs` → tailscaled up, tailnet joined, poll loop started.
 
 ## 6. Vercel — web SPA
 
@@ -130,5 +134,5 @@ gh pr create --base staging --head main --title "Promote main → staging" --bod
 | `supabase/migrations/**` (push → staging) | `deploy-migrations.yml` push job | `supabase db push` to the Pro DB |
 | `ingredients/**`, `common/**` (PR → main) | `ingredients-ci.yml` | pytest gate |
 | `web/**` (PR → main) | `web-ci.yml` | Vitest gate |
-| worker code / image / config (push → staging) | Railway native, or `deploy-worker.yml` | `railway up` redeploys the worker |
+| worker code / image / config (push → staging) | Railway GitHub App | rebuilds `worker.Dockerfile` + redeploys the worker |
 | `web/**` (push → staging / any PR) | Vercel native | prod / preview deploy |
