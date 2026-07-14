@@ -12,12 +12,15 @@ port.
 **Fill in once** (paste real values; commands below reference these):
 
 ```bash
-export DB_URL="postgresql://postgres.atvlzbgrquiseczzeczn:<pw>@aws-0-<region>.pooler.supabase.com:5432/postgres"   # session pooler, port 5432
-export SCRAPERAPI_KEY=  OPENAI_API_KEY=  ANTHROPIC_API_KEY=  DEEPSEEK_API_KEY=
-export RECIPEGF_TOKEN=          # read-only PAT for mrjogo/RecipeGF (skip if public)
+export DB_URL="postgresql://postgres.atvlzbgrquiseczzeczn:<pw>@aws-1-us-east-2.pooler.supabase.com:5432/postgres"
+export SCRAPERAPI_KEY=
+export OPENAI_API_KEY=
+export ANTHROPIC_API_KEY=
+export DEEPSEEK_API_KEY=
+export RECIPEGF_TOKEN=      # read-only PAT for mrjogo/RecipeGF (skip if public)
 ```
 
-> Use the **session pooler** host (`aws-0-<region>.pooler.supabase.com:5432`).
+> Use the **session pooler** host (`aws-1-us-east-2.pooler.supabase.com:5432`).
 > The direct `db.<ref>` host is IPv6-only; the transaction pooler (6543) breaks
 > session DDL and `pg_dump`.
 
