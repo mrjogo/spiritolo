@@ -75,7 +75,7 @@ no rotation. The entrypoint (`scripts/worker-entrypoint.sh`) already passes
 railway login
 railway init --name spiritolo-worker                        # or `railway link` to an existing project
 railway bucket create spiritolo-corpus                      # pick a US-East region at the prompt (nearest Supabase us-east-2)
-eval "$(railway bucket credentials)"                        # loads AWS_ENDPOINT_URL / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_S3_BUCKET_NAME into this shell
+eval "$(railway bucket credentials --bucket spiritolo-corpus)"   # loads AWS_ENDPOINT_URL / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_S3_BUCKET_NAME into this shell
 ```
 
 - Corpus bucket: S3-compatible (Tigris), $0.015/GB, free egress. **No object-lock/versioning** → your local `data/html/` is the corpus's only other copy; keep it.
