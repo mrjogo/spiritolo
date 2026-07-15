@@ -83,7 +83,7 @@ eval "$(railway bucket credentials --bucket spiritolo-corpus | sed -nE 's/^(AWS_
    - Project canvas → **Create** → **GitHub Repo**.
    - If `mrjogo/spiritolo` isn't listed → grant the **Railway GitHub App** access to it on GitHub → back in Railway, **Refresh**.
    - Pick `mrjogo/spiritolo`.
-   - Service → **Settings**: **branch = `staging`**, **region = `us-east4-eqdc4a`**.
+   - Service → **Settings**: **branch = `staging`**, **region = `us-east4-eqdc4a`**. Leave build command / root dir / start command at defaults — `railway.json` + `worker.Dockerfile` pin the builder, replicas, and entrypoint.
    - Rename the environment **Production → staging** (environment settings).
 2. **Share the bucket creds** — worker service → **Variables** → add the `spiritolo-corpus` bucket via the **AWS SDK preset**. Railway injects `AWS_ENDPOINT_URL` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_S3_BUCKET_NAME` / `AWS_DEFAULT_REGION`, which the worker reads directly — nothing to copy.
 3. **Set the app variables** (`railway link` → the worker service, or the dashboard **Variables** tab). `RECIPEGF_TOKEN` is a normal variable here — `worker.Dockerfile`'s `ARG RECIPEGF_TOKEN` receives it at build:
