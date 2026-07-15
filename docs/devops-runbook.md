@@ -79,7 +79,7 @@ eval "$(railway bucket credentials --bucket spiritolo-corpus | sed -nE 's/^(AWS_
 
 ## 5. Railway worker
 
-1. **Connect the repo (Railway GitHub App):** dashboard → your project → **Create → GitHub Repo** → `mrjogo/spiritolo` (installs the app if prompted). This creates the worker **service**; on it set **deploy branch = `staging`** and **region = `us-east4-eqdc4a`**. Keep the default **Production** environment — that's just Railway's name for your one environment and is independent of the git branch, so you do **not** create a "staging" environment.
+1. **Connect the repo (Railway GitHub App):** dashboard → your project → **Create → GitHub Repo** → `mrjogo/spiritolo` (installs the app if prompted). This creates the worker **service**; on it set **deploy branch = `staging`** and **region = `us-east4-eqdc4a`**. **Rename** the default **Production** environment to **`staging`** (its settings → rename) so it matches the branch + Supabase + Vercel — keep it a single environment; don't add a second one.
 2. **Share the bucket creds** — worker service → **Variables** → add the `spiritolo-corpus` bucket via the **AWS SDK preset**. Railway injects `AWS_ENDPOINT_URL` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_S3_BUCKET_NAME` / `AWS_DEFAULT_REGION`, which the worker reads directly — nothing to copy.
 3. **Set the app variables** (`railway link` → the worker service, or the dashboard **Variables** tab). `RECIPEGF_TOKEN` is a normal variable here — `worker.Dockerfile`'s `ARG RECIPEGF_TOKEN` receives it at build:
 
