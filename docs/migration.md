@@ -14,12 +14,7 @@ export SUPABASE_DB_URL="postgresql://postgres.atvlzbgrquiseczzeczn:<pw>@aws-1-us
 export SUPABASE_STAGING_DB_URL="$SUPABASE_DB_URL"     # same DB (single env); used by the backup
 
 railway link                          # link to the worker's project (§4 of the runbook)
-eval "$(railway bucket credentials --bucket spiritolo-corpus)"  # loads the bucket's AWS_* creds
-export S3_ENDPOINT="$AWS_ENDPOINT_URL"
-export S3_REGION=auto
-export S3_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID"
-export S3_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY"
-export S3_BUCKET="$AWS_S3_BUCKET_NAME"
+eval "$(railway bucket credentials --bucket spiritolo-corpus | sed -nE 's/^(AWS_[A-Z_]+)=(.*)/export \1=\2/p')"  # exports AWS_ENDPOINT_URL / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_S3_BUCKET_NAME — the loader reads these directly
 ```
 
 Prereqs: infra up (devops-runbook), local `data/scraper.db` + `data/html/`

@@ -51,7 +51,7 @@ gh secret set SUPABASE_STAGING_DB_URL --body "$DB_URL"
 gh secret set RECIPEGF_TOKEN          --body "$RECIPEGF_TOKEN"   # skip if RecipeGF is public
 ```
 
-- **`RECIPEGF_TOKEN`** — a GitHub **fine-grained PAT** (Settings → Developer settings → Fine-grained tokens) scoped to **`mrjogo/RecipeGF` only**, permission **Contents: Read-only** (Metadata: Read auto-adds). It authenticates the private `recipegf` clone in `ingredients-ci.yml` and the Railway image build (also §5's build arg). Skip it entirely if RecipeGF is public. PATs expire → rotate the secret + the build arg when it lapses.
+- **`RECIPEGF_TOKEN`** — a GitHub **fine-grained PAT** (Settings → Developer settings → Fine-grained tokens) scoped to **`mrjogo/RecipeGF` only**, permission **Contents: Read-only** (Metadata: Read auto-adds). It authenticates the private `recipegf` clone in `ingredients-ci.yml` and in the Railway image build (set as a plain worker variable in §5 — `worker.Dockerfile`'s `ARG RECIPEGF_TOKEN` receives it at build). Skip it if RecipeGF is public. PATs expire → rotate the repo secret + the worker variable when it lapses.
 
 ## 3. Tailscale OAuth client
 
@@ -71,30 +71,30 @@ no rotation. The entrypoint (`scripts/worker-entrypoint.sh`) already passes
 railway login
 railway init --name spiritolo-worker                        # or `railway link` to an existing project
 railway bucket create spiritolo-corpus                      # pick a US-East region at the prompt (nearest Supabase us-east-2)
-eval "$(railway bucket credentials --bucket spiritolo-corpus)"   # loads AWS_ENDPOINT_URL / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_S3_BUCKET_NAME into this shell
+eval "$(railway bucket credentials --bucket spiritolo-corpus | sed -nE 's/^(AWS_[A-Z_]+)=(.*)/export \1=\2/p')"   # export AWS_ENDPOINT_URL / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_S3_BUCKET_NAME (skips the "> Bucket" header)
 ```
 
 - Corpus bucket: S3-compatible (Tigris), $0.015/GB, free egress. **No object-lock/versioning** → your local `data/html/` is the corpus's only other copy; keep it.
-- **Region:** put the bucket **and** the worker in **US-East** (nearest Supabase `us-east-2`) — pick US-East at the bucket prompt, and set the worker's region in the dashboard (service → **Settings → Region** → `us-east4-eqdc4a`).
+- **Region:** pick a **US-East** region at the bucket prompt (nearest Supabase `us-east-2`); the worker's region is set when its service is created in §5.
 
 ## 5. Railway worker
 
-1. Set the runtime variables (same shell as §4 — the `AWS_*` creds are loaded):
+1. **Connect the repo (Railway GitHub App):** dashboard → your project → **Create → GitHub Repo** → `mrjogo/spiritolo` (installs the app if prompted). This creates the worker **service**; on it set **deploy branch = `staging`** and **region = `us-east4-eqdc4a`**. Keep the default **Production** environment — that's just Railway's name for your one environment and is independent of the git branch, so you do **not** create a "staging" environment.
+2. **Share the bucket creds** — worker service → **Variables** → add the `spiritolo-corpus` bucket via the **AWS SDK preset**. Railway injects `AWS_ENDPOINT_URL` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_S3_BUCKET_NAME` / `AWS_DEFAULT_REGION`, which the worker reads directly — nothing to copy.
+3. **Set the app variables** (`railway link` → the worker service, or the dashboard **Variables** tab). `RECIPEGF_TOKEN` is a normal variable here — `worker.Dockerfile`'s `ARG RECIPEGF_TOKEN` receives it at build:
 
    ```bash
    railway variables \
      --set SUPABASE_DB_URL="$DB_URL" \
-     --set SCRAPERAPI_KEY="$SCRAPERAPI_KEY" \
-     --set OPENAI_API_KEY="$OPENAI_API_KEY" --set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" --set DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
      --set TAILSCALE_AUTHKEY="$TAILSCALE_AUTHKEY" \
      --set OLLAMA_BASE_URL="http://barbot:11434" \
-     --set S3_ENDPOINT="$AWS_ENDPOINT_URL" --set S3_REGION=auto \
-     --set S3_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" --set S3_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
-     --set S3_BUCKET="$AWS_S3_BUCKET_NAME"
+     --set RECIPEGF_TOKEN="$RECIPEGF_TOKEN" \
+     --set SCRAPERAPI_KEY="$SCRAPERAPI_KEY" \
+     --set OPENAI_API_KEY="$OPENAI_API_KEY" --set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" --set DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
    ```
-2. **Build arg:** dashboard → the service → **Settings → Build → Build args** → add `RECIPEGF_TOKEN` (a build-time `ARG`, not a runtime var — the CLI can't set it). Skip if RecipeGF is public.
-3. **Connect the repo (Railway GitHub App):** dashboard → the service → **Settings → Source** → connect `mrjogo/spiritolo`, set the deploy branch to `staging`. Railway builds `worker.Dockerfile` (per `railway.json`) and redeploys on every push to `staging`.
-4. The first deploy runs when `staging` advances (§9). Then `railway logs` → tailscaled up, tailnet joined, poll loop started.
+
+   Only `SUPABASE_DB_URL` is required — drop the scraper/LLM keys you don't use (see **Required vs optional** above).
+4. First deploy runs when `staging` advances (§9). Then `railway logs` → tailscaled up, tailnet joined, poll loop started.
 
 ## 6. Vercel — web SPA
 

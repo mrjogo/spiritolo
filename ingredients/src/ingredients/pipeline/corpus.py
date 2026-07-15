@@ -69,9 +69,11 @@ class CorpusReader:
 
 
 def default_reader() -> CorpusReader:
-    """Build the real corpus reader from the ``S3_*`` env vars (``S3_ENDPOINT``
-    / ``S3_ACCESS_KEY_ID`` / ``S3_SECRET_ACCESS_KEY`` / ``S3_BUCKET``, optional
-    ``S3_REGION``). Any S3-compatible object store works.
+    """Build the real corpus reader from the standard ``AWS_*`` env vars
+    (``AWS_ENDPOINT_URL`` / ``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY`` /
+    ``AWS_S3_BUCKET_NAME``, optional ``AWS_DEFAULT_REGION``) — the names Railway's
+    bucket "AWS SDK" preset injects and boto3 reads by convention. Any
+    S3-compatible object store works.
 
     Not exercised by any test — those inject a fake client instead (see
     ingredients/tests/test_corpus_reader.py). Used by the worker at runtime.
@@ -80,12 +82,12 @@ def default_reader() -> CorpusReader:
 
     raw = boto3.client(
         "s3",
-        endpoint_url=os.environ["S3_ENDPOINT"],
-        aws_access_key_id=os.environ["S3_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["S3_SECRET_ACCESS_KEY"],
-        region_name=os.environ.get("S3_REGION", "auto"),
+        endpoint_url=os.environ["AWS_ENDPOINT_URL"],
+        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+        region_name=os.environ.get("AWS_DEFAULT_REGION", "auto"),
     )
-    return CorpusReader(_NotFoundIsNoneAdapter(raw), bucket=os.environ["S3_BUCKET"])
+    return CorpusReader(_NotFoundIsNoneAdapter(raw), bucket=os.environ["AWS_S3_BUCKET_NAME"])
 
 
 class _NotFoundIsNoneAdapter:
