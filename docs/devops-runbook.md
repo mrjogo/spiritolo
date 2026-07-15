@@ -53,20 +53,23 @@ gh secret set RECIPEGF_TOKEN          --body "$RECIPEGF_TOKEN"   # skip if Recip
 
 ## 3. Tailscale auth key
 
-1. Tailscale dashboard → **Settings → Keys → Generate auth key** → check **Ephemeral + Pre-approved + Reusable**.
-2. Capture it: `export TAILSCALE_AUTHKEY=<the key>`.
-3. Confirm `barbot` is on the tailnet (MagicDNS resolves it → `http://barbot:11434`).
+Tailscale → **Settings → Keys → Generate auth key** → enable **Reusable + Ephemeral** (ignore "Pre-approved" — it only appears when device approval is on). Then `export TAILSCALE_AUTHKEY=<the key>`.
+
+- Keys expire in **≤90 days** (Tailscale's max — no perpetual keys), and the worker re-auths on every restart. Rotate before expiry (`railway variables --set TAILSCALE_AUTHKEY=…`), or the worker can't rejoin on its next deploy.
+- **To skip rotation:** use a Tailscale **OAuth client** (**Settings → OAuth clients**, `auth_keys` scope + a `tag:worker` tag; add `tag:worker` to your ACL `tagOwners`) and use its secret as `TAILSCALE_AUTHKEY` — OAuth client secrets don't expire. Needs a one-line `worker-entrypoint.sh` tag change (`--advertise-tags=tag:worker`) — ask me to wire it.
+- Confirm `barbot` is on the tailnet (`http://barbot:11434`).
 
 ## 4. Railway project + Storage Bucket
 
 ```bash
 railway login
 railway init --name spiritolo-worker                        # or `railway link` to an existing project
-railway bucket create spiritolo-corpus --region <region>    # prompted if --region omitted
+railway bucket create spiritolo-corpus                      # pick a US-East region at the prompt (nearest Supabase us-east-2)
 eval "$(railway bucket credentials)"                        # loads AWS_ENDPOINT_URL / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_S3_BUCKET_NAME into this shell
 ```
 
 - Corpus bucket: S3-compatible (Tigris), $0.015/GB, free egress. **No object-lock/versioning** → your local `data/html/` is the corpus's only other copy; keep it.
+- **Region:** put the bucket **and** the worker in **US-East** (nearest Supabase `us-east-2`) — pick US-East at the bucket prompt, and set the worker's region in the dashboard (service → **Settings → Region** → `us-east4-eqdc4a`).
 
 ## 5. Railway worker
 
