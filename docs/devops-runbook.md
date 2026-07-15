@@ -58,13 +58,7 @@ expires (plain auth keys cap at 90 days), so it re-auths on every boot forever �
 no rotation. The entrypoint (`scripts/worker-entrypoint.sh`) already passes
 `--advertise-tags=tag:worker ...?ephemeral=true&preauthorized=true`. One-time setup:
 
-1. **Define the tag.** Admin console → **Access controls** (<https://login.tailscale.com/admin/acls>) → add `tag:worker` to `tagOwners`, then **Save**:
-
-   ```json
-   "tagOwners": { "tag:worker": ["you@example.com"] }
-   ```
-
-   If you've tightened ACLs beyond the open default, also add a rule letting `tag:worker` reach barbot on `:11434`.
+1. **Define the tag.** Admin console → **Access controls → Tags → Create tag** → **Tag name** `tag:worker`, **Tag owner** = your Tailscale login email → **Save tag**. (If you've tightened access rules beyond the open default, also allow `tag:worker` → barbot on `:11434`.)
 2. **Create the OAuth client.** Admin console → **Settings → Trust credentials** (<https://login.tailscale.com/admin/settings/trust-credentials>) → **Credential** → **OAuth** → enable the **`auth_keys`** *Write* scope → attach tag **`tag:worker`** → **Generate credential** → copy the **secret** (shown once).
 3. **Capture it** — this is the worker's `TAILSCALE_AUTHKEY` (§5): `export TAILSCALE_AUTHKEY=<client secret>`.
 4. Confirm `barbot` is on the tailnet (`http://barbot:11434`). The worker joins tagged `tag:worker`, ephemeral, each boot.
