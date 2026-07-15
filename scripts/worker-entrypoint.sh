@@ -16,11 +16,16 @@ set -euo pipefail
   --socks5-server=localhost:1055 \
   --state=mem: &
 
-# 2. Join the tailnet with an ephemeral, pre-approved auth key. The :? guard
-#    (with set -u) fails fast if the key is missing rather than booting a worker
-#    that can never reach barbot.
+# 2. Join the tailnet using a Tailscale OAuth client secret (TAILSCALE_AUTHKEY).
+#    OAuth secrets don't expire, so the worker re-auths every boot forever with no
+#    key rotation. OAuth-minted nodes must be tagged (--advertise-tags), and the
+#    ?query makes the node ephemeral (auto-removed when offline, matching
+#    --state=mem:) and preauthorized (skips manual device approval). The :? guard
+#    fails fast if the secret is missing rather than booting a worker that can
+#    never reach barbot.
 /usr/local/bin/tailscale up \
-  --authkey="${TAILSCALE_AUTHKEY:?TAILSCALE_AUTHKEY required}" \
+  --authkey="${TAILSCALE_AUTHKEY:?TAILSCALE_AUTHKEY required}?ephemeral=true&preauthorized=true" \
+  --advertise-tags=tag:worker \
   --hostname="spiritolo-worker" \
   --accept-routes
 

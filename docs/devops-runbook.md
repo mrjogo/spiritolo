@@ -51,13 +51,23 @@ gh secret set SUPABASE_STAGING_DB_URL --body "$DB_URL"
 gh secret set RECIPEGF_TOKEN          --body "$RECIPEGF_TOKEN"   # skip if RecipeGF is public
 ```
 
-## 3. Tailscale auth key
+## 3. Tailscale OAuth client
 
-Tailscale → **Settings → Keys → Generate auth key** → enable **Reusable + Ephemeral** (ignore "Pre-approved" — it only appears when device approval is on). Then `export TAILSCALE_AUTHKEY=<the key>`.
+The worker authenticates with a Tailscale **OAuth client secret**, which never
+expires (plain auth keys cap at 90 days), so it re-auths on every boot forever —
+no rotation. The entrypoint (`scripts/worker-entrypoint.sh`) already passes
+`--advertise-tags=tag:worker ...?ephemeral=true&preauthorized=true`. One-time setup:
 
-- Keys expire in **≤90 days** (Tailscale's max — no perpetual keys), and the worker re-auths on every restart. Rotate before expiry (`railway variables --set TAILSCALE_AUTHKEY=…`), or the worker can't rejoin on its next deploy.
-- **To skip rotation:** use a Tailscale **OAuth client** (**Settings → OAuth clients**, `auth_keys` scope + a `tag:worker` tag; add `tag:worker` to your ACL `tagOwners`) and use its secret as `TAILSCALE_AUTHKEY` — OAuth client secrets don't expire. Needs a one-line `worker-entrypoint.sh` tag change (`--advertise-tags=tag:worker`) — ask me to wire it.
-- Confirm `barbot` is on the tailnet (`http://barbot:11434`).
+1. **Define the tag.** Admin console → **Access controls** (<https://login.tailscale.com/admin/acls>) → add `tag:worker` to `tagOwners`, then **Save**:
+
+   ```json
+   "tagOwners": { "tag:worker": ["you@example.com"] }
+   ```
+
+   If you've tightened ACLs beyond the open default, also add a rule letting `tag:worker` reach barbot on `:11434`.
+2. **Create the OAuth client.** Admin console → **Settings → Trust credentials** (<https://login.tailscale.com/admin/settings/trust-credentials>) → **Credential** → **OAuth** → enable the **`auth_keys`** *Write* scope → attach tag **`tag:worker`** → **Generate credential** → copy the **secret** (shown once).
+3. **Capture it** — this is the worker's `TAILSCALE_AUTHKEY` (§5): `export TAILSCALE_AUTHKEY=<client secret>`.
+4. Confirm `barbot` is on the tailnet (`http://barbot:11434`). The worker joins tagged `tag:worker`, ephemeral, each boot.
 
 ## 4. Railway project + Storage Bucket
 
