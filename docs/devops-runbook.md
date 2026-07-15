@@ -51,6 +51,8 @@ gh secret set SUPABASE_STAGING_DB_URL --body "$DB_URL"
 gh secret set RECIPEGF_TOKEN          --body "$RECIPEGF_TOKEN"   # skip if RecipeGF is public
 ```
 
+- **`RECIPEGF_TOKEN`** — a GitHub **fine-grained PAT** (Settings → Developer settings → Fine-grained tokens) scoped to **`mrjogo/RecipeGF` only**, permission **Contents: Read-only** (Metadata: Read auto-adds). It authenticates the private `recipegf` clone in `ingredients-ci.yml` and the Railway image build (also §5's build arg). Skip it entirely if RecipeGF is public. PATs expire → rotate the secret + the build arg when it lapses.
+
 ## 3. Tailscale OAuth client
 
 The worker authenticates with a Tailscale **OAuth client secret**, which never
