@@ -85,8 +85,7 @@ eval "$(railway bucket credentials --bucket spiritolo-corpus | sed -nE 's/^(AWS_
    - Pick `mrjogo/spiritolo`.
    - Service → **Settings**: **branch = `staging`**, **region = `us-east4-eqdc4a`**. Leave build command / root dir / start command at defaults — `railway.json` + `worker.Dockerfile` pin the builder, replicas, and entrypoint.
    - Rename the environment **Production → staging** (environment settings).
-2. **Share the bucket creds** — worker service → **Variables** → add the `spiritolo-corpus` bucket via the **AWS SDK preset**. Railway injects `AWS_ENDPOINT_URL` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` / `AWS_S3_BUCKET_NAME` / `AWS_DEFAULT_REGION`, which the worker reads directly — nothing to copy.
-3. **Set the app variables** (`railway link` → the worker service, or the dashboard **Variables** tab). `RECIPEGF_TOKEN` is a normal variable here — `worker.Dockerfile`'s `ARG RECIPEGF_TOKEN` receives it at build:
+2. **Set the variables** — `railway link` → the worker service (or set them in the dashboard **Variables** tab). Run in the **same shell as §4**, so `$AWS_*` are loaded from `railway bucket credentials`. `RECIPEGF_TOKEN` is a plain variable — `worker.Dockerfile`'s `ARG RECIPEGF_TOKEN` reads it at build.
 
    ```bash
    railway variables \
@@ -95,11 +94,14 @@ eval "$(railway bucket credentials --bucket spiritolo-corpus | sed -nE 's/^(AWS_
      --set OLLAMA_BASE_URL="http://barbot:11434" \
      --set RECIPEGF_TOKEN="$RECIPEGF_TOKEN" \
      --set SCRAPERAPI_KEY="$SCRAPERAPI_KEY" \
-     --set OPENAI_API_KEY="$OPENAI_API_KEY" --set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" --set DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
+     --set OPENAI_API_KEY="$OPENAI_API_KEY" --set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" --set DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
+     --set AWS_ENDPOINT_URL="$AWS_ENDPOINT_URL" --set AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-auto}" \
+     --set AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" --set AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
+     --set AWS_S3_BUCKET_NAME="$AWS_S3_BUCKET_NAME"
    ```
 
-   Only `SUPABASE_DB_URL` is required — drop the scraper/LLM keys you don't use (see **Required vs optional** above).
-4. First deploy runs when `staging` advances (§9). Then `railway logs` → tailscaled up, tailnet joined, poll loop started.
+   Only `SUPABASE_DB_URL` is required — drop the scraper/LLM keys you don't use (see **Required vs optional** above). (Railway also has a bucket "connect / AWS SDK preset" that can inject the `AWS_*` for you, but setting them here is the reliable path.)
+3. First deploy runs when `staging` advances (§9). Then `railway logs` → tailscaled up, tailnet joined, poll loop started.
 
 ## 6. Vercel — web SPA
 
