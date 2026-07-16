@@ -75,3 +75,51 @@ def mark_decided(
         (status, decided_by, proposal_id),
     )
     conn.commit()
+
+
+def approve_form_proposal(
+    conn: psycopg.Connection,
+    *,
+    proposal: dict[str, Any],
+    decided_by: str,
+    version: str,
+) -> int:
+    """Approve a form proposal: create the node + edge + alias, resolve the name.
+
+    Mirrors the brand auto-create for the human-reviewed case. Requires a parent
+    (a form node without one can't be attached) — raises if absent. The raw
+    string becomes an alias of the new node and the shared resolution points the
+    name at the new slug, so every recipe that uses it now maps. Returns the new
+    node id.
+    """
+    from ingredients.mapping.resolutions import write_resolution
+
+    parent_id = proposal.get("proposed_parent_id")
+    if not parent_id:
+        raise ValueError("cannot approve a form proposal without a parent")
+
+    slug = proposal["proposed_slug"]
+    display_name = proposal.get("proposed_display_name") or slug.replace("-", " ").title()
+    raw_string = proposal["raw_string"]
+
+    new_id = conn.execute(
+        "insert into taxonomy_nodes (slug, display_name) values (%s, %s) returning id",
+        (slug, display_name),
+    ).fetchone()[0]
+    conn.execute(
+        "insert into taxonomy_edges (parent_id, child_id) values (%s, %s)",
+        (parent_id, new_id),
+    )
+    conn.execute(
+        "insert into taxonomy_aliases (alias, node_id) values (%s, %s) on conflict do nothing",
+        (raw_string, new_id),
+    )
+    write_resolution(
+        conn,
+        normalized_name=raw_string,
+        taxonomy_slug=slug,
+        method="manual",
+        version=version,
+    )
+    mark_decided(conn, proposal_id=proposal["id"], status="approved", decided_by=decided_by)
+    return new_id

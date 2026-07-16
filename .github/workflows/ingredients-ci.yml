@@ -1,0 +1,101 @@
+# Ingredients CI — the PR gate for the spiritolo-ingredients test suite, which
+# runs only via local `uv` today. Guards it (pure-Python + DB-integration,
+# including the recipegf export / roundtrip / RPC tests) against silent
+# regression on a PR to `main`.
+#
+# The suite provisions its own schema: the ingredients conftest CREATEs the test
+# DB, stubs the Supabase surface a bare Postgres lacks (the anon/authenticated/
+# service_role roles + the `extensions` search_path pg_trgm needs), applies
+# `supabase/migrations/*.sql`, and truncates — so all CI needs is a reachable
+# Postgres, a CREATEDB superuser, and a `TEST_DB_URL` whose dbname contains
+# `test`. No Supabase CLI, Docker stack, or seeds required.
+#
+# recipegf is a git dependency (RecipeGF @ v0.3.0), so the runner needs git +
+# outbound network at `uv` install time. pytest is the `dev` extra, hence
+# `uv run --extra dev`.
+
+name: Ingredients CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ingredients/**'
+      - 'common/**'
+      - 'supabase/migrations/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/ingredients-ci.yml'
+
+permissions:
+  contents: read
+
+# Cancel a superseded run when new commits land on the same PR.
+concurrency:
+  group: ingredients-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ingredients:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      # The job runs on the runner host (not a container), so the service is
+      # reachable on localhost via its mapped port. dbname must contain `test`.
+      TEST_DB_URL: postgresql://postgres:postgres@localhost:5432/spiritolo_test
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      # Cache uv's downloaded/built wheels + the recipegf git checkout so repeat
+      # runs skip re-fetching. Keyed on the lockfile; loosely restored otherwise.
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Install uv
+        run: |
+          set -euo pipefail
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Authenticate git for the recipegf dependency
+        # recipegf is a git dependency on the (private) mrjogo/RecipeGF repo, which
+        # the default GITHUB_TOKEN can't reach. Provide a RECIPEGF_TOKEN secret (a
+        # read-only token for that repo) to authenticate the clone; if RecipeGF is
+        # public instead, no secret is needed and this is a no-op.
+        env:
+          RECIPEGF_TOKEN: ${{ secrets.RECIPEGF_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${RECIPEGF_TOKEN:-}" ]; then
+            git config --global \
+              url."https://x-access-token:${RECIPEGF_TOKEN}@github.com/".insteadOf \
+              "https://github.com/"
+            echo "Configured authenticated GitHub access for the recipegf git dependency."
+          else
+            echo "RECIPEGF_TOKEN not set — assuming mrjogo/RecipeGF is reachable anonymously."
+          fi
+
+      - name: Run ingredients suite (pure + DB, incl. recipegf export/RPC)
+        run: |
+          set -euo pipefail
+          cd ingredients
+          uv run --extra dev pytest

@@ -1,5 +1,5 @@
-"""Sync LLM provider Protocol used by the per-row resolve loops in
-mapping (Phase 2), dedup normalize-names (Phase 2), and scraper classify.
+"""Sync LLM provider Protocol used by the per-row resolve loops in the
+ingredient-map and name-normalization LLM tiers and in scraper classify.
 
 Implementations live in sibling modules: claude.py, ollama.py, openai.py.
 Tests inject stubs via the same Protocol.

@@ -15,8 +15,9 @@ def test_basic_count_noun_after_qualifier():
 
 
 def test_count_noun_no_qualifier():
+    # RecipeGF folds cube/piece into the generic count unit "each".
     _assert_parsed(parse("4 sugar cubes"),
-                   amount=4.0, unit="cube", name="sugar")
+                   amount=4.0, unit="each", name="sugar")
 
 
 def test_dried_star_anise_parses_via_qty_known_noun():

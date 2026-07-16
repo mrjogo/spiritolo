@@ -13,36 +13,31 @@ from __future__ import annotations
 
 from typing import Any
 
+from recipegf import UnitValidator
+
 # Volume in fluid ounces above which a "modifier" or "bitters" substance
 # in position 1 is reclassified as base_spirit. 1.5 oz is the rough
 # threshold between accent and structural; tighter thresholds over-fire
 # on Reverse Manhattans, looser thresholds miss Trinidad Sours.
 _BASE_SPIRIT_OZ = 1.5
 
-_OZ_PER_UNIT = {
-    "oz": 1.0, "ounce": 1.0, "ounces": 1.0,
-    "ml": 0.0338,
-    "cl": 0.338,
-    "tsp": 0.166, "teaspoon": 0.166,
-    "tbsp": 0.5, "tablespoon": 0.5,
-    "dash": 0.03125,  # ~1/32 oz, for sanity in heuristics
-    "dashes": 0.03125,
-    "drop": 0.001, "drops": 0.001,
-    "splash": 0.125,
-}
+# RecipeGF is the unit authority for the approximate-volume conversion too:
+# get_approx_ml gives a unit's conventional millilitres (None for ratio /
+# container units with no fixed volume, e.g. part / bottle), converted to oz.
+# The oz base is RecipeGF's own oz approx_ml, so an oz amount round-trips exactly.
+_UNITS = UnitValidator()
+_ML_PER_OZ = _UNITS.get_approx_ml("oz")
 
 _WASH_HINTS = ("rinse", "spritz", "wash", "mist", "spray")
 
 
 def _to_oz(amount: float | None, unit: str | None) -> float | None:
-    if amount is None:
+    if amount is None or not unit:
         return None
-    if not unit:
+    approx_ml = _UNITS.get_approx_ml(_UNITS.normalize(unit))
+    if approx_ml is None:
         return None
-    factor = _OZ_PER_UNIT.get(unit.lower())
-    if factor is None:
-        return None
-    return float(amount) * factor
+    return float(amount) * approx_ml / _ML_PER_OZ
 
 
 def classify_role(ing: dict[str, Any]) -> tuple[str, str]:

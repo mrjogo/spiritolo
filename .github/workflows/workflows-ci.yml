@@ -1,0 +1,48 @@
+# Workflows CI — the PR gate for the deploy-artifact shape tests
+# (.github/workflows/tests/test_workflow_shapes.py). Those tests parse the
+# committed CI YAML, railway.json, the worker Dockerfile + entrypoint, and the
+# devops runbook as text/YAML/JSON and assert the wiring that keeps the cloud
+# topology deployable — but nothing ran them, so a bad edit to a workflow or the
+# runbook could land unnoticed. This job runs them.
+#
+# The shape tests only read files (no DB, no recipegf git dependency), so this
+# job stays minimal: stock Python + PyYAML + pytest, no uv env. It re-runs when
+# any inspected artifact — or the test itself — changes.
+
+name: Workflows CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/**'
+      - 'worker.Dockerfile'
+      - 'scripts/worker-entrypoint.sh'
+      - 'railway.json'
+      - 'docs/devops-runbook.md'
+
+permissions:
+  contents: read
+
+# Cancel a superseded run when new commits land on the same PR.
+concurrency:
+  group: workflows-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  workflows-ci:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install PyYAML + pytest
+        run: python -m pip install --upgrade pyyaml pytest
+
+      - name: Run deploy-artifact shape tests
+        run: python -m pytest .github/workflows/tests/test_workflow_shapes.py -q

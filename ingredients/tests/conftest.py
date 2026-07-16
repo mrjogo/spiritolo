@@ -27,8 +27,13 @@ from dotenv import load_dotenv
 
 load_dotenv(pathlib.Path(__file__).resolve().parent.parent.parent / ".env")
 
+# Capture the REAL dev DB URL before we clobber it below, so the safety checks
+# in _validate_test_db_url can compare against it (otherwise they'd only ever
+# see the sentinel and the "don't nuke the dev DB" guard would be dead).
+_REAL_SUPABASE_DB_URL = os.environ.get("SUPABASE_DB_URL")
+
 # Defensive: any test that accidentally connects via SUPABASE_DB_URL
-# (e.g. SupabaseClient() with no explicit url) silently wipes the dev DB.
+# (e.g. a psycopg client built with no explicit url) silently wipes the dev DB.
 # Override with an invalid sentinel after .env loads so any such fall-back
 # fails loudly. Tests that need a real Postgres must use TEST_DB_URL.
 os.environ["SUPABASE_DB_URL"] = (
@@ -43,6 +48,14 @@ def _db_name(url: str) -> str:
     return urlparse(url).path.lstrip("/")
 
 
+def _conn_target(url: str) -> tuple:
+    """(host, port, dbname) — the physical database a URL addresses. Used to
+    catch a TEST_DB_URL that points at the dev DB via a differently-spelled URL
+    (different creds/params, same server + database)."""
+    p = urlparse(url)
+    return (p.hostname, p.port, p.path.lstrip("/"))
+
+
 def _admin_url(test_url: str) -> str:
     """Same connection as ``test_url`` but addressed at the cluster's
     default ``postgres`` DB. Needed because ``CREATE DATABASE`` can't run
@@ -53,19 +66,24 @@ def _admin_url(test_url: str) -> str:
 def _validate_test_db_url() -> str | None:
     """Return ``TEST_DB_URL`` if set and safe; ``None`` to signal skip.
 
-    Fails loudly (no skip) if the URL is set but unsafe — equal to
-    ``SUPABASE_DB_URL``, pointing at the default ``postgres`` DB, or
-    using a non-alphanumeric DB name we'd refuse to ``CREATE``.
+    The session wipes this database wholesale (every public table is truncated),
+    so the checks here are load-bearing safety, not cosmetics. Fails loudly (no
+    skip) if the URL is set but unsafe — the same physical database as the dev
+    ``SUPABASE_DB_URL``, the default ``postgres`` DB, a name we can't safely
+    quote, or a name that isn't marked as a disposable test DB.
     """
     test_url = os.environ.get("TEST_DB_URL")
     if not test_url:
         return None
 
-    sup_url = os.environ.get("SUPABASE_DB_URL")
-    if sup_url and test_url == sup_url:
+    # Never operate on the dev/staging database. Compare the physical target
+    # (host, port, dbname), so a differently-spelled URL for the same DB is
+    # still caught. (`_REAL_SUPABASE_DB_URL` is captured before the sentinel
+    # override, so this actually compares against the real dev URL.)
+    if _REAL_SUPABASE_DB_URL and _conn_target(test_url) == _conn_target(_REAL_SUPABASE_DB_URL):
         pytest.fail(
-            "TEST_DB_URL must not equal SUPABASE_DB_URL — refuse to truncate "
-            "the dev database. Configure a separate test DB.",
+            "TEST_DB_URL points at the same database as SUPABASE_DB_URL — refuse "
+            "to truncate the dev database. Configure a separate test DB.",
             pytrace=False,
         )
 
@@ -80,6 +98,16 @@ def _validate_test_db_url() -> str | None:
         pytest.fail(
             f"TEST_DB_URL database name {name!r} contains characters we won't "
             "quote into a CREATE DATABASE statement; pick a [A-Za-z0-9_] name.",
+            pytrace=False,
+        )
+    # Hard stop for the wholesale truncate: the database name must mark it as a
+    # throwaway test DB. Cheap insurance that a misconfigured TEST_DB_URL can't
+    # nuke a real database whose name happens to pass the checks above.
+    if "test" not in name.lower():
+        pytest.fail(
+            f"TEST_DB_URL database {name!r} is not marked as a test DB (its name "
+            "must contain 'test') — the suite truncates it wholesale each run. "
+            "Use e.g. `spiritolo_test`.",
             pytrace=False,
         )
     return test_url
@@ -105,13 +133,18 @@ def test_db_url() -> str:
 
 @pytest.fixture(scope="session", autouse=True)
 def _ensure_test_db_migrated() -> None:
-    """Create the test DB if missing; apply any new migrations.
+    """Create the test DB if missing; apply any new migrations; truncate all
+    data so each session starts clean.
 
     Runs once per pytest session. Re-applies only migration files not yet
     recorded in the ``_test_db_migrations`` manifest table — so adding a
-    new migration just causes the next test run to pick it up. Replacing
-    or editing an existing migration is *not* detected; if you need a
-    clean rebuild, drop the test DB and re-run pytest.
+    new migration just causes the next test run to pick it up. Then truncates
+    every public table (except the migration ledger) with RESTART IDENTITY, so
+    state cannot accumulate across runs of the persistent test DB.
+
+    Replacing or editing an existing migration's *SQL* is still not detected
+    (only its data is wiped, not its schema); for a schema rebuild after editing
+    a migration in place, drop the test DB and re-run pytest.
     """
     test_url = _validate_test_db_url()
     if test_url is None:
@@ -126,6 +159,30 @@ def _ensure_test_db_migrated() -> None:
             admin.execute(f'create database "{name}"')
 
     with psycopg.connect(test_url, autocommit=True) as conn:
+        # Stub the Supabase role surface our migrations reference. On a real
+        # Supabase cluster these roles are cluster-global and already exist (so
+        # this is a no-op there); on a bare Postgres (CI) they don't, and the
+        # migrations' `grant ... to anon/authenticated/service_role` would fail
+        # without them. service_role gets BYPASSRLS + USAGE on public to mirror
+        # Supabase, so the read-surface EXECUTE boundary tests deny/allow at the
+        # function-grant level, not incidentally at the schema level.
+        conn.execute(
+            """
+            do $$
+            begin
+                if not exists (select from pg_roles where rolname = 'anon')
+                    then create role anon nologin; end if;
+                if not exists (select from pg_roles where rolname = 'authenticated')
+                    then create role authenticated nologin; end if;
+                if not exists (select from pg_roles where rolname = 'service_role')
+                    then create role service_role nologin bypassrls; end if;
+            end $$
+            """
+        )
+        conn.execute(
+            "grant usage on schema public to anon, authenticated, service_role"
+        )
+
         # Stub the Supabase auth surface our migrations reference. The
         # real auth schema is provisioned by GoTrue (cloud) or by
         # `supabase start` (host); the test DB is bare Postgres, so we
@@ -150,6 +207,15 @@ def _ensure_test_db_migrated() -> None:
         # locally so migrations that move extensions into it
         # (`alter extension ... set schema extensions`) succeed.
         conn.execute("create schema if not exists extensions")
+        # Supabase also keeps `extensions` on the database search_path, so
+        # unqualified pg_trgm calls (similarity(), the mapping/dedup lexical
+        # layers) resolve after a security-lint migration relocates pg_trgm out
+        # of `public`. Mirror that database-level default here — new connections
+        # (the per-test fixtures) pick it up — else those tests fail on a bare
+        # Postgres with "function similarity(text, ...) does not exist".
+        conn.execute(
+            f'alter database "{name}" set search_path to "$user", public, extensions'
+        )
 
         conn.execute(
             """
@@ -174,6 +240,34 @@ def _ensure_test_db_migrated() -> None:
                     "insert into _test_db_migrations (filename) values (%s)",
                     (path.name,),
                 )
+
+        # Start every session from a clean slate. The test DB is persistent
+        # (created once, migrations applied incrementally), so without this,
+        # data written by one run leaks into the next — a fixture that inserts
+        # explicit ids then collides with leftovers, etc. Truncating all public
+        # tables (except the migration ledger) with RESTART IDENTITY resets both
+        # rows and sequences, so runs can't accumulate state. Per-test fixtures
+        # still handle within-run isolation.
+        #
+        # Belt-and-suspenders: re-assert we're on a disposable test DB right
+        # before the wholesale truncate, independent of _validate_test_db_url,
+        # so this destructive op can never touch the dev/staging database.
+        if "test" not in name.lower() or name == "postgres":
+            pytest.fail(
+                f"refusing to truncate {name!r}: not a disposable test DB", pytrace=False
+            )
+        data_tables = [
+            row[0] for row in conn.execute(
+                "select tablename from pg_tables "
+                "where schemaname = 'public' and tablename <> '_test_db_migrations'"
+            ).fetchall()
+        ]
+        if data_tables:
+            conn.execute(
+                "truncate table "
+                + ", ".join(f'public."{t}"' for t in data_tables)
+                + " restart identity cascade"
+            )
 
 
 @pytest.fixture

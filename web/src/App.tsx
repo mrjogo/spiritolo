@@ -16,6 +16,38 @@ const Taxonomy = lazy(() =>
   import('./pages/Taxonomy').then((m) => ({ default: m.Taxonomy })),
 );
 
+// Lazy-load the /ops console the same way — a separate chunk kept out of
+// the recipe-page bundle until an admin actually opens it.
+const OpsLayout = lazy(() =>
+  import('./pages/ops/OpsLayout').then((m) => ({ default: m.OpsLayout })),
+);
+const OpsDashboard = lazy(() =>
+  import('./pages/ops/Dashboard').then((m) => ({ default: m.Dashboard })),
+);
+const OpsRecipesBrowser = lazy(() =>
+  import('./pages/ops/RecipesBrowser').then((m) => ({ default: m.RecipesBrowser })),
+);
+const OpsStageRunsBrowser = lazy(() =>
+  import('./pages/ops/StageRunsBrowser').then((m) => ({ default: m.StageRunsBrowser })),
+);
+const OpsAuditLogBrowser = lazy(() =>
+  import('./pages/ops/AuditLogBrowser').then((m) => ({ default: m.AuditLogBrowser })),
+);
+const OpsClustersBrowser = lazy(() =>
+  import('./pages/ops/ClustersBrowser').then((m) => ({ default: m.ClustersBrowser })),
+);
+const OpsExportsBrowser = lazy(() =>
+  import('./pages/ops/ExportsBrowser').then((m) => ({ default: m.ExportsBrowser })),
+);
+
+function OpsChunkFallback() {
+  return (
+    <div role="status" aria-label="Loading ops console">
+      Loading…
+    </div>
+  );
+}
+
 // Self-contained fallback for the lazy chunk: matches the in-page
 // "settling" spinner so loading the chunk → loading data → settling
 // the d3 simulation all show the same affordance in the same spot,
@@ -76,6 +108,64 @@ export default function App() {
                 </Suspense>
               }
             />
+
+            <Route
+              path="/ops"
+              element={
+                <Suspense fallback={<OpsChunkFallback />}>
+                  <OpsLayout />
+                </Suspense>
+              }
+            >
+              <Route
+                index
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsDashboard />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="recipes"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsRecipesBrowser />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="stage-runs"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsStageRunsBrowser />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="audit-log"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsAuditLogBrowser />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="clusters"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsClustersBrowser />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="exports"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsExportsBrowser />
+                  </Suspense>
+                }
+              />
+            </Route>
           </Route>
         </Route>
       </Route>

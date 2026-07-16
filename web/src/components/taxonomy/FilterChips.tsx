@@ -3,12 +3,17 @@ import type { FilterKey } from './shapeData';
 
 export type { FilterKey };
 
-const ORDERED: FilterKey[] = [
+export interface ChipOption<K = string> {
+  key: K;
+  label: string;
+}
+
+const DEFAULT_ORDERED: FilterKey[] = [
   'substance', 'expression', 'brand',
   'cluster', 'orphan', 'no aliases', 'zero recipes',
 ];
 
-const LABELS: Record<FilterKey, string> = {
+const DEFAULT_LABELS: Record<FilterKey, string> = {
   substance: 'substance',
   expression: 'expression',
   brand: 'brand',
@@ -18,25 +23,39 @@ const LABELS: Record<FilterKey, string> = {
   'zero recipes': 'zero recipes',
 };
 
-interface Props {
-  active: Set<FilterKey>;
-  onToggle: (key: FilterKey) => void;
+const DEFAULT_OPTIONS: ChipOption<FilterKey>[] = DEFAULT_ORDERED.map((key) => ({
+  key,
+  label: DEFAULT_LABELS[key],
+}));
+
+interface Props<K = FilterKey> {
+  active: Set<K>;
+  onToggle: (key: K) => void;
+  /** Defaults to the taxonomy role/flag chip set. Pass a different set to
+   *  reuse this component for a different chip vocabulary (e.g. FilterBar's
+   *  outcome/confidence/state chips in /ops) without touching the taxonomy
+   *  default. */
+  options?: ChipOption<K>[];
+  groupLabel?: string;
 }
 
-export function FilterChips({ active, onToggle }: Props) {
+export function FilterChips<K = FilterKey>({
+  active, onToggle, options, groupLabel = 'Filter nodes by role and flag',
+}: Props<K>) {
+  const opts = options ?? (DEFAULT_OPTIONS as unknown as ChipOption<K>[]);
   return (
     <div
       role="group"
-      aria-label="Filter nodes by role and flag"
+      aria-label={groupLabel}
       style={{
         display: 'flex', flexWrap: 'wrap', gap: 4, maxWidth: 240,
       }}
     >
-      {ORDERED.map((key) => {
+      {opts.map(({ key, label }) => {
         const isActive = active.has(key);
         return (
           <button
-            key={key}
+            key={String(key)}
             type="button"
             aria-pressed={isActive}
             onClick={() => onToggle(key)}
@@ -52,7 +71,7 @@ export function FilterChips({ active, onToggle }: Props) {
               textTransform: 'uppercase',
             }}
           >
-            {LABELS[key]}
+            {label}
           </button>
         );
       })}

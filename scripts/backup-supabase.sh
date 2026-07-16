@@ -27,7 +27,7 @@ Options:
   -h, --help        Show this help.
 
 Reads SUPABASE_STAGING_DB_URL from the environment. Must be the Supavisor
-session-mode pooler (host: aws-0-<region>.pooler.supabase.com, port: 5432).
+session-mode pooler (host: aws-1-us-east-2.pooler.supabase.com, port: 5432).
 The free tier's direct connection (db.<ref>.supabase.co) is IPv6-only and
 the transaction pooler (port 6543) breaks pg_dump.
 EOF
@@ -64,7 +64,7 @@ if [[ "$HOST" == db.*.supabase.co ]]; then
 Error: SUPABASE_STAGING_DB_URL points at the direct connection ($HOST).
 On Supabase free tier this endpoint is IPv6-only and will fail from most
 networks. Use the Supavisor session pooler instead:
-  postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+  postgresql://postgres.<ref>:<password>@aws-1-us-east-2.pooler.supabase.com:5432/postgres
 EOF
   exit 1
 fi
@@ -110,8 +110,7 @@ META="${OUT}.meta.json"
 # during the snapshot window has updated_at <= T.
 TAKEN_AT=$(psql "$URL" -tAX -c "select to_char(now() at time zone 'utc', 'YYYY-MM-DD\"T\"HH24:MI:SS.MS\"Z\"')")
 
-# Migration list at backup time. Used by the uploader's schema-version
-# check.
+# Migration list at backup time — part of the dump's provenance record.
 MIGRATIONS_JSON=$(psql "$URL" -tAX -c "
   select json_agg(version order by version)
   from supabase_migrations.schema_migrations

@@ -1,15 +1,17 @@
-"""One-shot post-D substance promotion.
+"""One-shot substance promotion.
 
-D's mapper auto-creates node_kind='brand' or node_kind='expression' nodes
-for strings that aren't in the seed. Some of those strings are
-commercially-branded *but functionally definitional* substances (Campari,
-Aperol, Angostura, Peychaud's, etc.). E's antichain modeling expects them
-as node_kind=NULL substance nodes, with is_cluster_node=true.
+The ingredient → taxonomy mapper auto-creates node_kind='brand' or
+node_kind='expression' nodes for strings that aren't in the seed. Some of
+those strings are commercially-branded *but functionally definitional*
+substances (Campari, Aperol, Angostura, Peychaud's, etc.). The dedup
+antichain rollup expects them as node_kind=NULL substance nodes, with
+is_cluster_node=true.
 
 This module:
   - Holds the curator-reviewed allowlist of substance names.
   - Finds auto-created nodes matching the allowlist.
-  - Promotes each (interactively in the CLI; programmatically via promote_node).
+  - Promotes each (by hand, e.g. from a REPL or one-off script;
+    programmatically via promote_node).
 
 Auto-created brand nodes already have the right node_id (recipe_ingredients
 rows reference them); no row updates are needed. Only node_kind +

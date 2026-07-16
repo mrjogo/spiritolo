@@ -13,7 +13,7 @@
 -- Safety:
 --   - File is wired into supabase/config.toml's db.seed.sql_paths so
 --     it runs on `supabase db reset` (local) only. The staging
---     bootstrap (spec §6) uses explicit `psql -f` calls and does not
+--     bootstrap uses explicit `psql -f` calls and does not
 --     reference this file.
 --   - The DO block below short-circuits if it detects any real user
 --     accounts (any auth.users row whose email isn't in *.local.test

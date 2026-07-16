@@ -1,0 +1,16 @@
+# Spiritolo extension verb (registered `spiritolo` namespace; D2b).
+#
+# Self-describing: `verb` carries the fully-qualified `spiritolo/blend` name, so
+# this def can travel inside a pin-2 bundle and be layered onto the core
+# registry via VerbRegistry().load_overlay([...]) with no out-of-band namespace
+# info. Matches RecipeGF's own conformance overlay for spiritolo/blend, so a
+# future promotion to a core `blend` verb is a clean rename + alias.
+verb: spiritolo/blend
+description: Blend contents in place until smooth (frozen-drink technique).
+roles:
+  input:
+    required: true
+    type: element
+  using:
+    required: true
+    type: equipment

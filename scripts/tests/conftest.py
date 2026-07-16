@@ -1,147 +1,93 @@
-"""Test fixtures for the uploader.
+"""Fixtures for the pages-migration tooling tests.
 
-Spins up two ephemeral databases on the local Postgres cluster derived
-from TEST_DB_URL. They simulate the uploader's "local" and "staging"
-inputs end-to-end.
-
-If TEST_DB_URL is unset, DB-backed tests skip cleanly.
+``pg_conn`` connects to a throwaway Postgres derived from ``TEST_DB_URL``
+(database ``<base>_scripts``) with the ``pages`` migration applied; DB-backed
+tests skip cleanly when ``TEST_DB_URL`` is unset. ``sqlite_pages`` is an
+in-memory SQLite carrying the scraper's ``pages`` schema.
 """
 from __future__ import annotations
 
 import os
 import pathlib
+import sqlite3
 from urllib.parse import urlparse, urlunparse
 
 import psycopg
 import pytest
 from dotenv import load_dotenv
 
+_REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
+load_dotenv(_REPO_ROOT / ".env")
 
-load_dotenv(pathlib.Path(__file__).resolve().parent.parent.parent / ".env")
+_PAGES_MIGRATION = _REPO_ROOT / "supabase" / "migrations" / "20260715090000_pages.sql"
 
-# Defensive: see ingredients/tests/conftest.py for the same reasoning —
-# any code path that defaults to SUPABASE_DB_URL must fail loud, never
-# silently wipe the dev DB.
+# Defensive: any code path that falls back to SUPABASE_DB_URL must fail loudly
+# rather than touch the dev DB. Mirrors ingredients/tests/conftest.py.
 os.environ["SUPABASE_DB_URL"] = (
     "postgresql://invalid:invalid@127.0.0.1:1/SUPABASE_DB_URL_must_not_be_used_in_tests"
 )
 
-_REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
-_MIGRATIONS_DIR = _REPO_ROOT / "supabase" / "migrations"
+# The scraper's SQLite pages schema (scraper/src/scraper/db.py).
+_SQLITE_PAGES_DDL = """
+create table pages (
+    id integer primary key autoincrement,
+    site text not null,
+    url text not null unique,
+    status text not null default 'pending',
+    content_type text,
+    sitemap_source text,
+    attempts integer not null default 0,
+    discovered_at text not null,
+    fetched_at text,
+    fetch_error text,
+    html_path text,
+    disabled_reason text
+)
+"""
 
 
-def _base_url() -> str | None:
-    return os.environ.get("TEST_DB_URL")
-
-
-def _db_name(url: str) -> str:
-    return urlparse(url).path.lstrip("/")
-
-
-def _with_db(url: str, name: str) -> str:
-    return urlunparse(urlparse(url)._replace(path=f"/{name}"))
-
-
-def _admin_url(url: str) -> str:
-    return _with_db(url, "postgres")
-
-
-def _ensure_db(admin_url: str, name: str) -> None:
-    with psycopg.connect(admin_url, autocommit=True) as conn:
-        existed = conn.execute(
-            "select 1 from pg_database where datname = %s", (name,)
-        ).fetchone() is not None
-        if existed:
-            # Drop and recreate to guarantee clean state per session.
-            # Disconnect any clients first.
-            conn.execute(
-                "select pg_terminate_backend(pid) from pg_stat_activity "
-                "where datname = %s and pid <> pg_backend_pid()",
-                (name,),
-            )
-            conn.execute(f'drop database "{name}"')
-        conn.execute(f'create database "{name}"')
-
-
-def _bootstrap_supabase_stubs(conn: psycopg.Connection) -> None:
-    conn.execute("create schema if not exists auth")
-    conn.execute(
-        """
-        create table if not exists auth.users (
-            id uuid primary key default gen_random_uuid(),
-            email text
-        )
-        """
-    )
-    conn.execute(
-        "create or replace function auth.uid() returns uuid "
-        "language sql stable as 'select null::uuid'"
-    )
-    conn.execute("create schema if not exists extensions")
-    conn.execute(
-        "create schema if not exists supabase_migrations"
-    )
-    conn.execute(
-        """
-        create table if not exists
-            supabase_migrations.schema_migrations (
-            version text primary key,
-            name text,
-            statements text[]
-        )
-        """
-    )
-
-
-def _apply_migrations(url: str) -> list[str]:
-    versions: list[str] = []
-    with psycopg.connect(url, autocommit=True) as conn:
-        _bootstrap_supabase_stubs(conn)
-        for path in sorted(_MIGRATIONS_DIR.glob("*.sql")):
-            sql = path.read_text()
-            with conn.transaction():
-                conn.execute(sql)
-                version = path.stem.split("_", 1)[0]
-                conn.execute(
-                    "insert into supabase_migrations.schema_migrations "
-                    "(version, name) values (%s, %s) on conflict do nothing",
-                    (version, path.stem),
-                )
-                versions.append(version)
-    return versions
+def _scripts_db_url() -> str | None:
+    base = os.environ.get("TEST_DB_URL")
+    if not base:
+        return None
+    p = urlparse(base)
+    return urlunparse(p._replace(path=f"/{p.path.lstrip('/')}_scripts"))
 
 
 @pytest.fixture(scope="session")
-def db_pair():
-    """Yield (local_url, staging_url) for two freshly-migrated DBs.
-    Skips the test if TEST_DB_URL is unset."""
-    base = _base_url()
-    if not base:
-        pytest.skip("TEST_DB_URL not set; skipping DB-backed test")
-
-    base_name = _db_name(base)
-    local_name = f"{base_name}_upload_local"
-    staging_name = f"{base_name}_upload_staging"
-
-    admin = _admin_url(base)
-    _ensure_db(admin, local_name)
-    _ensure_db(admin, staging_name)
-
-    local_url = _with_db(base, local_name)
-    staging_url = _with_db(base, staging_name)
-    _apply_migrations(local_url)
-    _apply_migrations(staging_url)
-
-    yield local_url, staging_url
+def _scripts_db() -> str:
+    url = _scripts_db_url()
+    if not url:
+        pytest.skip("TEST_DB_URL not set; DB-integration tests skip")
+    name = urlparse(url).path.lstrip("/")
+    if "test" not in name.lower() or name == "postgres":
+        pytest.fail(f"refusing non-test DB {name!r}", pytrace=False)
+    admin = urlunparse(urlparse(url)._replace(path="/postgres"))
+    with psycopg.connect(admin, autocommit=True) as conn:
+        if not conn.execute(
+            "select 1 from pg_database where datname = %s", (name,)
+        ).fetchone():
+            conn.execute(f'create database "{name}"')
+    with psycopg.connect(url, autocommit=True) as conn:
+        conn.execute("drop table if exists pages cascade")
+        conn.execute(_PAGES_MIGRATION.read_text())
+    return url
 
 
 @pytest.fixture
-def fresh_db_pair(db_pair):
-    """Truncate every owned table in both DBs before yielding."""
-    from upload_to_staging.tables import OWNED_TABLES
-    local_url, staging_url = db_pair
-    table_list = ", ".join(t.name for t in OWNED_TABLES)
-    for url in (local_url, staging_url):
-        with psycopg.connect(url, autocommit=True) as conn:
-            conn.execute(f"truncate {table_list} restart identity cascade")
-    yield local_url, staging_url
+def pg_conn(_scripts_db):
+    conn = psycopg.connect(_scripts_db, autocommit=True)
+    conn.execute("truncate table pages restart identity cascade")
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+@pytest.fixture
+def sqlite_pages():
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(_SQLITE_PAGES_DDL)
+    yield conn
+    conn.close()

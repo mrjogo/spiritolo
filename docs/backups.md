@@ -22,11 +22,6 @@ Platform-managed; not our data.
 If a future `public` table FKs to `auth.users`, either exclude it the
 same way or denormalize an `email` column onto it as a recovery anchor.
 
-> **Pushing edits back to staging?** After restoring a backup locally,
-> running pipelines, and wanting to upload the diff, see
-> [docs/upload.md](upload.md). The backup script writes a sidecar
-> metadata file alongside the .dump that the uploader requires.
-
 ## Run a backup
 
 **Manual:**
@@ -39,7 +34,7 @@ cd ~/somewhere-outside-the-repo                       # default dest is cwd
 ```
 
 `SUPABASE_STAGING_DB_URL` must be the **Supavisor session pooler**
-(`aws-0-<region>.pooler.supabase.com:5432`). The script refuses the
+(`aws-1-us-east-2.pooler.supabase.com:5432`). The script refuses the
 IPv6-only direct connection and the transaction pooler (port 6543).
 
 **GitHub Action:** Actions tab → "Backup staging database" → Run workflow.

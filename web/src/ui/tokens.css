@@ -1,0 +1,46 @@
+/* Form-kit tokens — LIFTED verbatim from the .taxonomy-page block to :root so
+   .tx-btn/.tx-input/.tx-select/.tx-toggle/EditableField/ModalShell render
+   identically inside and outside the taxonomy canvas. Taxonomy keeps its own
+   deco tokens (walnut gradient, Cinzel, gold) scoped to .taxonomy-page — see
+   components/taxonomy/taxonomy.css. */
+:root {
+  --tx-form-h: 36px;
+  --tx-form-radius: 3px;
+  --tx-form-border: #c4c4c4;
+  --tx-form-border-focus: #6b7cff;
+  --tx-form-bg: #fff;
+  --tx-form-bg-hover: #fafafa;
+  --tx-form-disabled-fg: rgba(34, 34, 34, 0.45);
+  --tx-focus-ring: 0 0 0 2px rgba(107, 124, 255, 0.28);
+  --tx-danger: #b23b2e;
+  --tx-brown-ink: #222;
+}
+
+/* Ops workbench surface + semantic status palette. Plain, high-legibility,
+   directly mapped to the data — the deliberate opposite of the taxonomy
+   deco canvas. */
+.ops {
+  --ops-bg: #f6f7f9;
+  --ops-surface: #fff;
+  --ops-border: #e3e5e9;
+  --ops-ink: #1c1e21;
+  --ops-muted: #6a6f76;
+  --ops-accent: #4959e0;
+
+  /* stage_run outcomes */
+  --st-resolved: #2e7d54;
+  --st-abstain: #b8860b;
+  --st-pending: #6a6f76;
+  --st-failed: #b23b2e;
+  --st-proposes-new: #7a4fd0;
+
+  /* job states */
+  --job-queued: #6a6f76;
+  --job-running: #4959e0;
+  --job-done: #2e7d54;
+  --job-error: #b23b2e;
+
+  font-family: system-ui, -apple-system, sans-serif;
+  color: var(--ops-ink);
+  background: var(--ops-bg);
+}

@@ -17,7 +17,8 @@ def test_canonicalize_unit_volume_aliases():
     assert canonicalize_unit("cl") == "cl"
     assert canonicalize_unit("tsp") == "tsp"
     assert canonicalize_unit("teaspoon") == "tsp"
-    assert canonicalize_unit("tablespoons") == "tbsp"
+    # RecipeGF's canonical tablespoon spelling is "Tbs".
+    assert canonicalize_unit("tablespoons") == "Tbs"
     assert canonicalize_unit("cup") == "cup"
     assert canonicalize_unit("cups") == "cup"
 
@@ -41,12 +42,14 @@ def test_canonicalize_unit_bartending():
 
 
 def test_canonicalize_unit_volume_extended():
-    assert canonicalize_unit("pint") == "pint"
-    assert canonicalize_unit("pints") == "pint"
-    assert canonicalize_unit("pt") == "pint"
-    assert canonicalize_unit("quart") == "quart"
-    assert canonicalize_unit("quarts") == "quart"
-    assert canonicalize_unit("qt") == "quart"
+    # RecipeGF canonicals: pint -> pnt, quart -> qt, gallon -> gal.
+    assert canonicalize_unit("pint") == "pnt"
+    assert canonicalize_unit("pints") == "pnt"
+    assert canonicalize_unit("pt") == "pnt"
+    assert canonicalize_unit("quart") == "qt"
+    assert canonicalize_unit("quarts") == "qt"
+    assert canonicalize_unit("qt") == "qt"
+    assert canonicalize_unit("gallon") == "gal"
     assert canonicalize_unit("milliliter") == "ml"
     assert canonicalize_unit("Milliliters") == "ml"
 
@@ -83,7 +86,8 @@ def test_canonicalize_count_noun():
     assert canonicalize_count_noun("leaves") == "leaf"
     assert canonicalize_count_noun("Slice") == "slice"
     assert canonicalize_count_noun("wedges") == "wedge"
-    assert canonicalize_count_noun("cubes") == "cube"
+    # RecipeGF folds cube/piece into the generic count unit "each".
+    assert canonicalize_count_noun("cubes") == "each"
     assert canonicalize_count_noun("sprigs") == "sprig"
     assert canonicalize_count_noun("clove") == "clove"
     assert canonicalize_count_noun("cloves") == "clove"

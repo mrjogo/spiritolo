@@ -1,4 +1,4 @@
-"""Dedup eval cases. Drives both --review (CI) and ad-hoc spot-checks.
+"""Dedup eval cases. Drives both the eval test suite (CI) and ad-hoc spot-checks.
 
 Each case fixes:
   - raw_name        : what the recipe is titled
@@ -8,7 +8,8 @@ Each case fixes:
                           must end up in the same cluster after compute.
 
 The fixture taxonomy (eval_fixture.py) is the only DB state these cases
-depend on. Run --review against TEST_DB_URL.
+depend on. The eval suite (ingredients/tests/test_dedup_eval.py, via run_eval)
+runs it against TEST_DB_URL.
 """
 
 from __future__ import annotations
@@ -147,13 +148,16 @@ def _evaluate_case(
         ).fetchone()
         default_role, is_def_garnish = node_row
         ing = {
-            "taxonomy_node_slug": slug, "taxonomy_node_id": node_id,
+            "taxonomy_slug": slug,
             "default_role": default_role, "is_defining_garnish": is_def_garnish,
             "amount": amount, "unit": unit, "position": pos, "raw_text": "",
         }
         role, _ = classify_role(ing)
         ing["role"] = role
-        ing["antichain_node_id"] = roll_up_to_antichain(conn, node_id)
+        antichain_id = roll_up_to_antichain(conn, node_id)
+        ing["antichain_slug"] = conn.execute(
+            "select slug from taxonomy_nodes where id = %s", (antichain_id,)
+        ).fetchone()[0]
         ings.append(ing)
 
     # 3. Cluster key expectation.

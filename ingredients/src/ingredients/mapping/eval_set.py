@@ -1,5 +1,6 @@
-"""Checked-in golden cases for the mapper. Bumping MAPPER_VERSION should
-be paired with re-running --review until it passes.
+"""Checked-in golden cases for the mapper, exercised by the eval test suite
+(ingredients/tests/test_mapping_eval.py, via run_eval). Bumping MAPPER_VERSION
+should be paired with re-running the eval suite until it passes.
 
 Cases run against the fixture taxonomy in ingredients/tests/fixtures/
 (NOT the production seed). Add cases when:

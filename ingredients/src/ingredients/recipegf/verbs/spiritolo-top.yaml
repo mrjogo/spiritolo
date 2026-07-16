@@ -1,0 +1,16 @@
+# Spiritolo extension verb (registered `spiritolo` namespace; D2b).
+#
+# "Top" a built drink with an (usually effervescent) ingredient added last,
+# without further mixing — the highball/spritz finishing move. Distinct from
+# core `add` (which implies combining into a working vessel) because the
+# ordering + no-mix semantics matter to the executor. Self-describing so it can
+# travel inside a pin-2 bundle and be overlay-loaded.
+verb: spiritolo/top
+description: Top a drink with an (usually effervescent) ingredient, added last without mixing.
+roles:
+  input:
+    required: true
+    type: ingredient
+  to:
+    required: true
+    type: element

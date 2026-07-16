@@ -1,10 +1,10 @@
 import os
 
 # Defensive: any test that accidentally falls back to SUPABASE_DB_URL
-# (e.g. via SupabaseClient() with no explicit url) silently wipes the dev
-# DB if the sentinel isn't set. This burned us multiple times — every
-# `truncate_recipes` call hit the live data. Setting an invalid sentinel
-# forces such code paths to fail loudly. Tests that need a real Postgres
+# (e.g. a psycopg client built with no explicit url) silently wipes the dev
+# DB if the sentinel isn't set. This burned us multiple times. Setting an
+# invalid sentinel forces such code paths to fail loudly. Tests that need a
+# real Postgres
 # must explicitly use TEST_DB_URL. python-dotenv's load_dotenv() defaults
 # to override=False, so the sentinel survives any later .env reload.
 # This must run BEFORE any conftest import that might trigger load_dotenv.
