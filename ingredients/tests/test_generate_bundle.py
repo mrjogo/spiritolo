@@ -182,3 +182,25 @@ def test_generate_bundles_matches_per_recipe(conn):
     assert isinstance(by_id[noslug_id], BundleError)
     # Vanished recipe: None, same as generate_bundle.
     assert by_id[999999] is None
+
+
+def test_slugless_and_unresolved_raises_bundle_error_first(conn):
+    # A recipe that is BOTH slugless AND has an unresolved ingredient must surface
+    # as BundleError (a permanent seam violation -> export 'failed'), NOT the
+    # softer UnresolvedIngredient (-> 'pending', implying it'll retry). The slug
+    # check runs before ingredient assembly, matching the original per-field order.
+    recipe_id = conn.execute(
+        "insert into recipes (source_url, site, source, title, canonical_name, "
+        "recipe_slug, equipment) values ('https://ex.test/su', 'ex', '{}'::jsonb, "
+        "NULL, NULL, NULL, array[]::text[]) returning id"
+    ).fetchone()[0]
+    conn.execute(
+        "insert into recipe_ingredients (recipe_id, position, name, amount, unit, "
+        "raw_text) values (%s, 0, 'Unobtanium', 1, 'oz', '1 oz unobtanium')",
+        (recipe_id,),
+    )
+    at = "2026-07-12T00:00:00+00:00"
+    with pytest.raises(BundleError):
+        generate_bundle(conn, recipe_id, imported_at=at)
+    ((_, result),) = generate_bundles(conn, [recipe_id], imported_at=at)
+    assert isinstance(result, BundleError)

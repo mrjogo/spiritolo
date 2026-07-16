@@ -137,19 +137,20 @@ def _load_steps(conn: psycopg.Connection, recipe_id: int) -> list[dict[str, Any]
 
 def _build_recipe_bundle(
     header: dict[str, Any],
+    slug: str,
     ingredients: list[dict[str, Any]],
     steps: list[dict[str, Any]],
     imported_at: str,
 ) -> dict[str, Any]:
-    """Mint the slug/id, assemble the RecipeGF recipe object from pre-loaded
-    ingredients + steps, and build+validate the bundle. Raises
-    :class:`~.bundle.BundleError` on a seam violation (no slug to mint, failed
-    validation). Pure given its inputs (no DB)."""
-    slug = _recipe_slug(header)
-    if slug is None:
-        raise BundleError(
-            f"recipe {header['id']} has no canonical name to mint a slug from"
-        )
+    """Assemble + validate the bundle from a header, its already-validated
+    non-null ``slug``, and pre-loaded ingredients + steps, then build+validate.
+    Raises :class:`~.bundle.BundleError` on a validation seam violation. Pure
+    given its inputs (no DB).
+
+    The slug-None check is the CALLER's job and must run BEFORE ingredients are
+    assembled, so a slugless recipe raises BundleError ahead of any
+    UnresolvedIngredient — preserving generate_bundle's original per-field
+    order (slug first, then ingredients)."""
     recipe = {
         "schema": RECIPE_SCHEMA,
         "id": format_recipe_id(RecipeId(RECIPE_AUTHORITY, slug, RECIPE_ENCODING_VERSION)),
@@ -188,9 +189,14 @@ def generate_bundle(
     header = _load_header(conn, recipe_id)
     if header is None:
         return None
+    slug = _recipe_slug(header)
+    if slug is None:
+        raise BundleError(
+            f"recipe {recipe_id} has no canonical name to mint a slug from"
+        )
     ingredients = _load_ingredients(conn, recipe_id)
     steps = _load_steps(conn, recipe_id)
-    return _build_recipe_bundle(header, ingredients, steps, imported_at)
+    return _build_recipe_bundle(header, slug, ingredients, steps, imported_at)
 
 
 def generate_bundles(
@@ -241,10 +247,15 @@ def generate_bundles(
             results.append((recipe_id, None))
             continue
         try:
+            slug = _recipe_slug(header)
+            if slug is None:
+                raise BundleError(
+                    f"recipe {recipe_id} has no canonical name to mint a slug from"
+                )
             ingredients = _ingredients_from_rows(ingredients_by_recipe.get(recipe_id, []))
             steps = _steps_from_rows(steps_by_recipe.get(recipe_id, []))
             results.append(
-                (recipe_id, _build_recipe_bundle(header, ingredients, steps, imported_at))
+                (recipe_id, _build_recipe_bundle(header, slug, ingredients, steps, imported_at))
             )
         except (UnresolvedIngredient, BundleError) as exc:
             results.append((recipe_id, exc))
