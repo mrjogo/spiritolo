@@ -85,19 +85,17 @@ railway bucket create spiritolo-corpus   # pick a US-East region at the prompt (
    - Service → **Settings**: **branch = `staging`**, **region = `us-east4-eqdc4a`**. Leave build command / root dir / start command at defaults — `railway.json` + `worker.Dockerfile` pin the builder, replicas, and entrypoint.
    - Rename the environment **Production → staging** (environment settings).
 2. **Connect the bucket → the worker** — the `spiritolo-corpus` bucket → **Credentials** → **Add to service** → Service **`worker`**, Style **AWS SDK (Generic)** → **Add Variables**. This injects `AWS_ENDPOINT_URL` / `AWS_S3_BUCKET_NAME` / `AWS_DEFAULT_REGION` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` as auto-syncing references — the worker reads these directly.
-3. **Set the app variables** — `railway link` → the `worker` service (or the dashboard **Variables** tab). `RECIPEGF_TOKEN` is a plain variable — `worker.Dockerfile`'s `ARG RECIPEGF_TOKEN` reads it at build:
+3. **Set the app variables** — `railway link` → the `worker` service. **Set only the ones you have a value for; omit the rest** — Railway rejects an empty `KEY=`. (`RECIPEGF_TOKEN` is a plain variable; `worker.Dockerfile`'s `ARG RECIPEGF_TOKEN` reads it at build.)
 
    ```bash
    railway variables \
      --set SUPABASE_DB_URL="$DB_URL" \
      --set TAILSCALE_AUTHKEY="$TAILSCALE_AUTHKEY" \
      --set OLLAMA_BASE_URL="http://barbot:11434" \
-     --set RECIPEGF_TOKEN="$RECIPEGF_TOKEN" \
-     --set SCRAPERAPI_KEY="$SCRAPERAPI_KEY" \
-     --set OPENAI_API_KEY="$OPENAI_API_KEY" --set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" --set DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
+     --set RECIPEGF_TOKEN="$RECIPEGF_TOKEN"
    ```
 
-   Only `SUPABASE_DB_URL` is required — drop the scraper/LLM keys you don't use (see **Required vs optional** above).
+   Add the hosted-LLM / scraper keys you actually use, e.g. `--set OPENAI_API_KEY="$OPENAI_API_KEY" --set SCRAPERAPI_KEY="$SCRAPERAPI_KEY"`. Only `SUPABASE_DB_URL` is strictly required (see **Required vs optional** above).
 4. First deploy runs when `staging` advances (§9). Then `railway logs` → tailscaled up, tailnet joined, poll loop started.
 
 ## 6. Vercel — web SPA
