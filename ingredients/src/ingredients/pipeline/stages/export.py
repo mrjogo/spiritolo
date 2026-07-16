@@ -20,7 +20,7 @@ import psycopg
 from psycopg.types.json import Json
 
 from ingredients.recipegf.bundle import BundleError
-from ingredients.recipegf.generate import UnresolvedIngredient, generate_bundle
+from ingredients.recipegf.generate import UnresolvedIngredient, generate_bundles
 from ingredients.recipegf.version import CONVERTER_VERSION
 
 from . import base
@@ -53,9 +53,9 @@ def export_stage_fn(
 ) -> dict[str, Any]:
     """Generate + freeze the bundle for every queued recipe.
 
-    ``generate_bundle`` stays per-recipe (its reads are out of scope); only the
-    writes are batched — each chunk collects its recipe_exports UPSERTs, slug
-    UPDATEs, and ledger rows and flushes them in one transaction.
+    Both halves are batched per chunk: ``generate_bundles`` does three bulk reads
+    for the chunk (no per-recipe reads), and the recipe_exports UPSERTs, slug
+    UPDATEs, and ledger rows flush together in one transaction.
     """
     site, limit = base.scope(job)
     recipe_ids = base.recipe_queue(
@@ -69,13 +69,19 @@ def export_stage_fn(
         slug_updates: list[tuple[Any, ...]] = []
         records: list[dict[str, Any]] = []
         with conn.transaction():
-            for recipe_id in chunk:
-                outcome: str
+            for recipe_id, result in generate_bundles(conn, chunk, imported_at=imported_at):
+                if result is None:
+                    continue  # recipe vanished between queue and process
                 error_code: str | None = None
-                try:
-                    bundle = generate_bundle(conn, recipe_id, imported_at=imported_at)
-                    if bundle is None:
-                        continue  # recipe vanished between queue and process
+                if isinstance(result, UnresolvedIngredient):
+                    outcome = "pending"
+                    counts["pending"] += 1
+                elif isinstance(result, BundleError):
+                    outcome = "failed"
+                    error_code = "bundle_error"
+                    counts["failed"] += 1
+                else:
+                    bundle = result
                     recipe = bundle["recipe"]
                     slug = bundle["meta"]["slug"]
                     export_rows.append(
@@ -84,14 +90,6 @@ def export_stage_fn(
                     slug_updates.append((slug, recipe_id, slug))
                     outcome = "resolved"
                     counts["exported"] += 1
-                except UnresolvedIngredient:
-                    outcome = "pending"
-                    counts["pending"] += 1
-                except BundleError as exc:
-                    outcome = "failed"
-                    error_code = "bundle_error"
-                    counts["failed"] += 1
-                    _ = exc
                 records.append(
                     {
                         "recipe_id": recipe_id,
