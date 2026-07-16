@@ -108,6 +108,7 @@ vercel env add VITE_SUPABASE_URL preview
 vercel env add VITE_SUPABASE_PUBLISHABLE_KEY preview
 ```
 
+- `production` / `preview` are Vercel's fixed environment **types** (not free-form like Railway's) — `production` = the live deployment. The `staging` branch feeds it via **Project Settings → Git → Production Branch = `staging`** (already set, since the project deploys on staging pushes). Keep `production` here; don't rename it.
 - `/ops` ships inside the same SPA behind the admin gate. Deploys are native: push `staging` = production, PR = preview.
 
 ## 7. RecipeGF v0.4.0 pin
