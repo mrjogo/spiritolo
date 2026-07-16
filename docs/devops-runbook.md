@@ -69,9 +69,8 @@ no rotation. The entrypoint (`scripts/worker-entrypoint.sh`) already passes
 
 ```bash
 railway login
-railway init --name spiritolo-worker                        # or `railway link` to an existing project
-railway bucket create spiritolo-corpus                      # pick a US-East region at the prompt (nearest Supabase us-east-2)
-eval "$(railway bucket credentials --bucket spiritolo-corpus | sed -nE 's/^(AWS_[A-Z_]+)=(.*)/export \1=\2/p')"   # export AWS_ENDPOINT_URL / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_S3_BUCKET_NAME (skips the "> Bucket" header)
+railway init --name spiritolo            # the project (holds the worker service + the bucket); or `railway link` to an existing one
+railway bucket create spiritolo-corpus   # pick a US-East region at the prompt (nearest Supabase us-east-2)
 ```
 
 - Corpus bucket: S3-compatible (Tigris), $0.015/GB, free egress. **No object-lock/versioning** → your local `data/html/` is the corpus's only other copy; keep it.
@@ -82,10 +81,11 @@ eval "$(railway bucket credentials --bucket spiritolo-corpus | sed -nE 's/^(AWS_
 1. **Connect the repo** — creates the worker service (auto-deploys on push):
    - Project canvas → **Create** → **GitHub Repo**.
    - If `mrjogo/spiritolo` isn't listed → grant the **Railway GitHub App** access to it on GitHub → back in Railway, **Refresh**.
-   - Pick `mrjogo/spiritolo`.
+   - Pick `mrjogo/spiritolo`; rename the service to **`worker`**.
    - Service → **Settings**: **branch = `staging`**, **region = `us-east4-eqdc4a`**. Leave build command / root dir / start command at defaults — `railway.json` + `worker.Dockerfile` pin the builder, replicas, and entrypoint.
    - Rename the environment **Production → staging** (environment settings).
-2. **Set the variables** — `railway link` → the worker service (or set them in the dashboard **Variables** tab). Run in the **same shell as §4**, so `$AWS_*` are loaded from `railway bucket credentials`. `RECIPEGF_TOKEN` is a plain variable — `worker.Dockerfile`'s `ARG RECIPEGF_TOKEN` reads it at build.
+2. **Connect the bucket → the worker** — the `spiritolo-corpus` bucket → **Credentials** → **Add to service** → Service **`worker`**, Style **AWS SDK (Generic)** → **Add Variables**. This injects `AWS_ENDPOINT_URL` / `AWS_S3_BUCKET_NAME` / `AWS_DEFAULT_REGION` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` as auto-syncing references — the worker reads these directly.
+3. **Set the app variables** — `railway link` → the `worker` service (or the dashboard **Variables** tab). `RECIPEGF_TOKEN` is a plain variable — `worker.Dockerfile`'s `ARG RECIPEGF_TOKEN` reads it at build:
 
    ```bash
    railway variables \
@@ -94,14 +94,11 @@ eval "$(railway bucket credentials --bucket spiritolo-corpus | sed -nE 's/^(AWS_
      --set OLLAMA_BASE_URL="http://barbot:11434" \
      --set RECIPEGF_TOKEN="$RECIPEGF_TOKEN" \
      --set SCRAPERAPI_KEY="$SCRAPERAPI_KEY" \
-     --set OPENAI_API_KEY="$OPENAI_API_KEY" --set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" --set DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" \
-     --set AWS_ENDPOINT_URL="$AWS_ENDPOINT_URL" --set AWS_DEFAULT_REGION="${AWS_DEFAULT_REGION:-auto}" \
-     --set AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" --set AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
-     --set AWS_S3_BUCKET_NAME="$AWS_S3_BUCKET_NAME"
+     --set OPENAI_API_KEY="$OPENAI_API_KEY" --set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" --set DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY"
    ```
 
-   Only `SUPABASE_DB_URL` is required — drop the scraper/LLM keys you don't use (see **Required vs optional** above). (Railway also has a bucket "connect / AWS SDK preset" that can inject the `AWS_*` for you, but setting them here is the reliable path.)
-3. First deploy runs when `staging` advances (§9). Then `railway logs` → tailscaled up, tailnet joined, poll loop started.
+   Only `SUPABASE_DB_URL` is required — drop the scraper/LLM keys you don't use (see **Required vs optional** above).
+4. First deploy runs when `staging` advances (§9). Then `railway logs` → tailscaled up, tailnet joined, poll loop started.
 
 ## 6. Vercel — web SPA
 
