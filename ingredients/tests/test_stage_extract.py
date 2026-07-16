@@ -45,7 +45,7 @@ def _page(conn, url, content_type="likely_drink_recipe", key=None):
     if key is None:
         key = hashlib.sha256(url.encode()).hexdigest()
     conn.execute(
-        "insert into pages (url, site, r2_key, content_type) values (%s, 'ex', %s, %s)",
+        "insert into pages (url, site, corpus_key, content_type) values (%s, 'ex', %s, %s)",
         (url, key, content_type),
     )
     return key

@@ -7,8 +7,8 @@ This is the one-time move of per-URL crawl state — the URLs, their LLM
 to work from without re-crawling or re-classifying.
 
 The HTML bytes are NOT touched here; those go to the object store via
-``load_corpus``, which also sets ``pages.r2_key``. This importer leaves
-``r2_key`` NULL by design: a page becomes extractable (``r2_key`` non-null)
+``load_corpus``, which also sets ``pages.corpus_key``. This importer leaves
+``corpus_key`` NULL by design: a page becomes extractable (``corpus_key`` non-null)
 only once its HTML is confirmed in the object store.
 
 Idempotent: re-running UPSERTs by ``url``, so a re-import after a fix is safe.
@@ -38,7 +38,7 @@ def map_row(row: dict[str, Any]) -> dict[str, Any]:
       domain (``ok`` / ``blocked`` / ``failed``), or NULL for a still-``pending``
       page. A blocked page stays ``blocked`` even though it has saved HTML — that
       HTML is the block page, not content, so it must never be extracted.
-    - ``r2_key`` is omitted (stays NULL); ``load_corpus`` sets it once the page's
+    - ``corpus_key`` is omitted (stays NULL); ``load_corpus`` sets it once the page's
       HTML is in the object store.
     """
     status = row.get("status")

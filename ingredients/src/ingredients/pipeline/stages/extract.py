@@ -64,7 +64,7 @@ def _page_queue(
     EXTRACTOR_VERSION."""
     clauses = [
         "p.content_type = any(%s)",
-        "p.r2_key is not null",
+        "p.corpus_key is not null",
         """not exists (
             select 1 from stage_runs r
             where r.entity_type = 'page' and r.entity_id = p.id
@@ -75,13 +75,13 @@ def _page_queue(
     if site is not None:
         clauses.append("p.site = %s")
         params.append(site)
-    sql = "select p.id, p.url, p.site, p.r2_key from pages p where " + " and ".join(clauses)
+    sql = "select p.id, p.url, p.site, p.corpus_key from pages p where " + " and ".join(clauses)
     sql += " order by p.id"
     if limit is not None:
         sql += " limit %s"
         params.append(limit)
     return [
-        {"id": r[0], "url": r[1], "site": r[2], "r2_key": r[3]}
+        {"id": r[0], "url": r[1], "site": r[2], "corpus_key": r[3]}
         for r in conn.execute(sql, params).fetchall()
     ]
 
@@ -127,7 +127,7 @@ def _read_html(
     on CorpusMiss. Only the thread-safe reader is touched here — never `conn`.
     Any other read error propagates and fails the stage, as before."""
     try:
-        return page, reader.read_html(page["r2_key"])
+        return page, reader.read_html(page["corpus_key"])
     except corpus.CorpusMiss:
         return page, None
 

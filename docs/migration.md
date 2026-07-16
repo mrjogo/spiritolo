@@ -14,7 +14,7 @@ export SUPABASE_DB_URL="postgresql://postgres.atvlzbgrquiseczzeczn:<pw>@aws-1-us
 export SUPABASE_STAGING_DB_URL="$SUPABASE_DB_URL"     # same DB (single env); used by the backup
 
 railway link                          # link to the worker's project (§4 of the runbook)
-eval "$(railway bucket credentials --bucket spiritolo-corpus | sed -nE 's/^(AWS_[A-Z_]+)=(.*)/export \1=\2/p')"  # exports AWS_ENDPOINT_URL / AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_S3_BUCKET_NAME — the loader reads these directly
+export $(railway bucket credentials --bucket spiritolo-corpus | grep '^AWS_' | xargs)   # AWS_ENDPOINT_URL / _ACCESS_KEY_ID / _SECRET_ACCESS_KEY / _S3_BUCKET_NAME / _DEFAULT_REGION — the loader reads these directly. NOTE: unquoted + grep on purpose — quoting `"$(…)"` jams every pair into AWS_ENDPOINT_URL.
 ```
 
 Prereqs: infra up (devops-runbook), local `data/scraper.db` + `data/html/`
@@ -49,7 +49,7 @@ cd scripts && uv run python -m corpus_loader import-pages --sqlite ../data/scrap
 
 ```bash
 cd scripts && uv run python -m corpus_loader load-corpus --sqlite ../data/scraper.db --html-dir ../data/html
-# → uploaded=N skipped_existing=N missing=N r2_key_set=N not_in_pg=N
+# → uploaded=N skipped_existing=N missing=N corpus_key_set=N not_in_pg=N
 ```
 
 - `missing` ≈ 0 (a large value → wrong `--html-dir`). `not_in_pg` = 0 (if >0, step 3 was skipped — run it, then re-run this).
@@ -76,7 +76,7 @@ psql "$SUPABASE_DB_URL" -c "
     (select count(*) from pages) as pages,
     (select count(*) from pages
        where content_type in ('likely_drink_recipe','confirmed_drink')
-         and r2_key is not null) as extractable,
+         and corpus_key is not null) as extractable,
     (select count(*) from recipes) as recipes,
     (select count(*) from recipe_exports) as exports;"
 ```

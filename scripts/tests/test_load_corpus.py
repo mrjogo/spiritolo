@@ -1,5 +1,5 @@
 """Tests for the local-HTML -> object-store corpus upload that also marks pages
-extractable (sets ``pages.r2_key``). Needs TEST_DB_URL (skips otherwise); the
+extractable (sets ``pages.corpus_key``). Needs TEST_DB_URL (skips otherwise); the
 S3 client is a fake.
 """
 from __future__ import annotations
@@ -38,9 +38,9 @@ def _seed(sqlite_pages, tmp_path, *, url, rel, html="<html>x</html>",
         p.write_text(html)
 
 
-def test_uploads_fetched_html_and_sets_r2_key(sqlite_pages, pg_conn, tmp_path):
+def test_uploads_fetched_html_and_sets_corpus_key(sqlite_pages, pg_conn, tmp_path):
     _seed(sqlite_pages, tmp_path, url="https://x/1", rel="x/1.html")
-    import_pages(sqlite_pages, pg_conn)  # rows must exist for the r2_key update
+    import_pages(sqlite_pages, pg_conn)  # rows must exist for the corpus_key update
 
     s3 = FakeS3()
     stats = load_corpus(sqlite_pages, pg_conn, s3, "corpus", tmp_path)
@@ -48,7 +48,7 @@ def test_uploads_fetched_html_and_sets_r2_key(sqlite_pages, pg_conn, tmp_path):
     assert stats["uploaded"] == 1
     assert ("corpus", sha256_key("https://x/1")) in s3.objects
     r2 = pg_conn.execute(
-        "select r2_key from pages where url = 'https://x/1'"
+        "select corpus_key from pages where url = 'https://x/1'"
     ).fetchone()[0]
     assert r2 == sha256_key("https://x/1")
 
@@ -65,7 +65,7 @@ def test_denylisted_pages_are_skipped(sqlite_pages, pg_conn, tmp_path):
     assert stats["uploaded"] == 0
     assert s3.objects == {}
     r2s = [
-        r[0] for r in pg_conn.execute("select r2_key from pages").fetchall()
+        r[0] for r in pg_conn.execute("select corpus_key from pages").fetchall()
     ]
     assert r2s == [None, None]  # neither becomes extractable
 
@@ -78,10 +78,10 @@ def test_missing_local_file_is_counted_not_fatal(sqlite_pages, pg_conn, tmp_path
 
     assert stats == {
         "uploaded": 0, "skipped_existing": 0, "missing": 1,
-        "r2_key_set": 0, "not_in_pg": 0,
+        "corpus_key_set": 0, "not_in_pg": 0,
     }
     r2 = pg_conn.execute(
-        "select r2_key from pages where url = 'https://x/gone'"
+        "select corpus_key from pages where url = 'https://x/gone'"
     ).fetchone()[0]
     assert r2 is None
 
@@ -89,7 +89,7 @@ def test_missing_local_file_is_counted_not_fatal(sqlite_pages, pg_conn, tmp_path
 def test_load_before_import_is_reported_not_silently_lost(sqlite_pages, pg_conn, tmp_path):
     # Running load-corpus before import-pages: the HTML uploads, but there's no
     # Postgres row to mark, so it's flagged not_in_pg rather than counted as a
-    # silent r2_key_set — the operator learns to run import-pages first.
+    # silent corpus_key_set — the operator learns to run import-pages first.
     _seed(sqlite_pages, tmp_path, url="https://x/1", rel="x/1.html")  # no import_pages()
 
     s3 = FakeS3()
@@ -97,11 +97,11 @@ def test_load_before_import_is_reported_not_silently_lost(sqlite_pages, pg_conn,
 
     assert stats["uploaded"] == 1
     assert stats["not_in_pg"] == 1
-    assert stats["r2_key_set"] == 0
+    assert stats["corpus_key_set"] == 0
     assert pg_conn.execute("select count(*) from pages").fetchone()[0] == 0
 
 
-def test_write_once_existing_key_still_sets_r2_key(sqlite_pages, pg_conn, tmp_path):
+def test_write_once_existing_key_still_sets_corpus_key(sqlite_pages, pg_conn, tmp_path):
     _seed(sqlite_pages, tmp_path, url="https://x/1", rel="x/1.html")
     import_pages(sqlite_pages, pg_conn)
 
@@ -113,14 +113,14 @@ def test_write_once_existing_key_still_sets_r2_key(sqlite_pages, pg_conn, tmp_pa
     assert stats["uploaded"] == 0
     assert s3.objects[("corpus", sha256_key("https://x/1"))] == b"already-there"  # not overwritten
     r2 = pg_conn.execute(
-        "select r2_key from pages where url = 'https://x/1'"
+        "select corpus_key from pages where url = 'https://x/1'"
     ).fetchone()[0]
     assert r2 == sha256_key("https://x/1")  # still marked extractable
 
 
 def test_load_batches_and_threads_across_chunks(sqlite_pages, pg_conn, tmp_path):
     # More rows than chunk_size, >1 worker: exercises the threaded upload + the
-    # batched r2_key flush, and asserts every key still lands exactly once.
+    # batched corpus_key flush, and asserts every key still lands exactly once.
     for i in range(5):
         _seed(sqlite_pages, tmp_path, url=f"https://x/{i}", rel=f"x/{i}.html")
     import_pages(sqlite_pages, pg_conn)
@@ -129,7 +129,7 @@ def test_load_batches_and_threads_across_chunks(sqlite_pages, pg_conn, tmp_path)
     stats = load_corpus(sqlite_pages, pg_conn, s3, "corpus", tmp_path, workers=3, chunk_size=2)
 
     assert stats["uploaded"] == 5
-    assert stats["r2_key_set"] == 5
+    assert stats["corpus_key_set"] == 5
     assert len(s3.objects) == 5
-    keys = {r[0] for r in pg_conn.execute("select r2_key from pages").fetchall()}
+    keys = {r[0] for r in pg_conn.execute("select corpus_key from pages").fetchall()}
     assert keys == {sha256_key(f"https://x/{i}") for i in range(5)}

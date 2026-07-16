@@ -3,11 +3,11 @@ extractable.
 
 The corpus is write-once — ``load`` skips any key already present. A page
 becomes extractable only here: after its HTML is confirmed in the object
-store do we set ``pages.r2_key``. Denylisted pages (blocked / disabled) and
-pages with no saved HTML are skipped and never get an ``r2_key``, so
+store do we set ``pages.corpus_key``. Denylisted pages (blocked / disabled) and
+pages with no saved HTML are skipped and never get an ``corpus_key``, so
 ``extract`` never reads a block page or a missing object.
 
-Run ``import_pages`` first — the ``r2_key`` update targets rows by ``url``, so
+Run ``import_pages`` first — the ``corpus_key`` update targets rows by ``url``, so
 the Postgres ``pages`` rows must already exist.
 """
 from __future__ import annotations
@@ -26,7 +26,7 @@ select url, html_path from pages
 where html_path is not null and status <> 'blocked' and disabled_reason is null
 """
 
-# Concurrent uploads (network-bound S3 round-trips) and rows per r2_key-update
+# Concurrent uploads (network-bound S3 round-trips) and rows per corpus_key-update
 # batch. Threads do only the S3 work; the DB writes stay on the main thread.
 _WORKERS = 24
 _CHUNK_SIZE = 1000
@@ -43,16 +43,16 @@ def load_corpus(
     chunk_size: int = _CHUNK_SIZE,
 ) -> dict[str, int]:
     """Upload every fetched page's HTML to the object store and set
-    ``pages.r2_key``.
+    ``pages.corpus_key``.
 
     Uploads run across a ``workers``-wide thread pool (the work is network-bound
-    S3 round-trips); the deterministic ``r2_key`` writes are batched ``chunk_size``
+    S3 round-trips); the deterministic ``corpus_key`` writes are batched ``chunk_size``
     at a time as uploads land. Only the main thread touches ``pg_conn`` (a psycopg
     connection is not shared across threads), so the DB stays single-writer.
 
     ``html_root`` is the base directory the SQLite ``html_path`` values are
     relative to (``data/html``). Idempotent: ``load`` skips keys already in
-    the object store, and the ``r2_key`` update is deterministic. A page whose
+    the object store, and the ``corpus_key`` update is deterministic. A page whose
     local file is missing is counted and skipped, not fatal.
     """
     root = pathlib.Path(html_root)
@@ -62,7 +62,7 @@ def load_corpus(
         for row in sqlite_conn.execute(_FETCHED_NOT_DENYLISTED)
     ]
 
-    uploaded = skipped_existing = missing = r2_key_set = not_in_pg = 0
+    uploaded = skipped_existing = missing = corpus_key_set = not_in_pg = 0
     pending: list[str] = []
 
     def _upload(item: tuple[str, str]) -> tuple[str, str]:
@@ -73,22 +73,22 @@ def load_corpus(
         return url, "uploaded" if load(s3_client, bucket, url, path.read_bytes()) else "skipped"
 
     def _flush() -> None:
-        # Set r2_key for the batch in one statement. rowcount is the rows that
+        # Set corpus_key for the batch in one statement. rowcount is the rows that
         # existed (import ran first); the rest are reported not_in_pg rather than
         # counted as a silent success.
-        nonlocal r2_key_set, not_in_pg
+        nonlocal corpus_key_set, not_in_pg
         if not pending:
             return
         keys = [sha256_key(u) for u in pending]
         with pg_conn.transaction(), pg_conn.cursor() as cur:
             cur.execute(
-                "update pages p set r2_key = d.k "
+                "update pages p set corpus_key = d.k "
                 "from unnest(%s::text[], %s::text[]) as d(url, k) "
                 "where p.url = d.url",
                 (pending, keys),
             )
             updated = cur.rowcount
-        r2_key_set += updated
+        corpus_key_set += updated
         not_in_pg += len(pending) - updated
         pending.clear()
 
@@ -110,6 +110,6 @@ def load_corpus(
         "uploaded": uploaded,
         "skipped_existing": skipped_existing,
         "missing": missing,
-        "r2_key_set": r2_key_set,
+        "corpus_key_set": corpus_key_set,
         "not_in_pg": not_in_pg,
     }
