@@ -116,3 +116,20 @@ def test_write_once_existing_key_still_sets_r2_key(sqlite_pages, pg_conn, tmp_pa
         "select r2_key from pages where url = 'https://x/1'"
     ).fetchone()[0]
     assert r2 == sha256_key("https://x/1")  # still marked extractable
+
+
+def test_load_batches_and_threads_across_chunks(sqlite_pages, pg_conn, tmp_path):
+    # More rows than chunk_size, >1 worker: exercises the threaded upload + the
+    # batched r2_key flush, and asserts every key still lands exactly once.
+    for i in range(5):
+        _seed(sqlite_pages, tmp_path, url=f"https://x/{i}", rel=f"x/{i}.html")
+    import_pages(sqlite_pages, pg_conn)
+
+    s3 = FakeS3()
+    stats = load_corpus(sqlite_pages, pg_conn, s3, "corpus", tmp_path, workers=3, chunk_size=2)
+
+    assert stats["uploaded"] == 5
+    assert stats["r2_key_set"] == 5
+    assert len(s3.objects) == 5
+    keys = {r[0] for r in pg_conn.execute("select r2_key from pages").fetchall()}
+    assert keys == {sha256_key(f"https://x/{i}") for i in range(5)}

@@ -91,22 +91,47 @@ def _iter_sqlite_pages(sqlite_conn: sqlite3.Connection):
         yield dict(row)
 
 
-def import_pages(sqlite_conn: sqlite3.Connection, pg_conn) -> dict[str, int]:
+# Rows per UPSERT batch. A chunked ``executemany`` inside one transaction per
+# chunk replaces a per-row execute+commit — on a half-million-row import over a
+# remote pooler that is the difference between minutes and hours.
+_CHUNK_SIZE = 5000
+
+
+def import_pages(
+    sqlite_conn: sqlite3.Connection, pg_conn, *, chunk_size: int = _CHUNK_SIZE
+) -> dict[str, int]:
     """UPSERT every SQLite ``pages`` row into Postgres ``pages`` (keyed ``url``).
 
-    ``pg_conn`` is a psycopg connection whose transaction the caller manages.
+    Rows are UPSERTed in chunks of ``chunk_size`` via ``executemany`` (one
+    transaction per chunk) rather than one autocommit statement per row — same
+    result, but round-trips and commits amortize across the chunk.
+
     Returns a summary: total ``read``, how many carry a recipe verdict
     (``extractable`` — what ``extract`` picks up once the HTML is in the
     object store), and how many are ``denylisted`` — a quick sanity check for
     the operator.
     """
     read = extractable = denylisted = 0
+    batch: list[dict[str, Any]] = []
     for sqlite_row in _iter_sqlite_pages(sqlite_conn):
         mapped = map_row(sqlite_row)
-        pg_conn.execute(_UPSERT, mapped)
         read += 1
         if mapped["content_type"] in _RECIPE_LABELS:
             extractable += 1
         if mapped["denylist"]:
             denylisted += 1
+        batch.append(mapped)
+        if len(batch) >= chunk_size:
+            _upsert_batch(pg_conn, batch)
+            batch = []
+    if batch:
+        _upsert_batch(pg_conn, batch)
     return {"read": read, "extractable": extractable, "denylisted": denylisted}
+
+
+def _upsert_batch(pg_conn, batch: list[dict[str, Any]]) -> None:
+    """UPSERT one chunk in a single transaction. ``pg_conn.transaction()`` opens
+    an explicit block even on an autocommit connection, so the whole chunk
+    commits once instead of once per row."""
+    with pg_conn.transaction(), pg_conn.cursor() as cur:
+        cur.executemany(_UPSERT, batch)
