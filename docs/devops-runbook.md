@@ -117,7 +117,8 @@ vercel env add VITE_SUPABASE_PUBLISHABLE_KEY preview
 cd ~/code-projects/RecipeGF && git checkout main && git pull
 (cd python && uv run pytest) && (cd spec/conformance && npm test)      # green before tagging
 git tag -a v0.4.0 -m "Ingredient seams + unit registry as sole authority" && git push origin v0.4.0
-gh release create v0.4.0 --title v0.4.0 --notes "Optional-additive; schema const unchanged."
+# Optional (release notes only — the uv git dep resolves the TAG; nothing consumes the GitHub release):
+# gh release create v0.4.0 --title v0.4.0 --notes "Optional-additive; schema const unchanged."
 cd ~/code-projects/spiritolo && uv lock --upgrade-package recipegf
 (cd ingredients && uv run --extra dev pytest)
 ```
