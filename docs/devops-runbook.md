@@ -96,7 +96,7 @@ railway bucket create spiritolo-corpus   # pick a US-East region at the prompt (
    ```
 
    Add the hosted-LLM / scraper keys you actually use, e.g. `--set OPENAI_API_KEY="$OPENAI_API_KEY" --set SCRAPERAPI_KEY="$SCRAPERAPI_KEY"`. Only `SUPABASE_DB_URL` is strictly required (see **Required vs optional** above).
-4. First deploy runs when `staging` advances (§9). Then `railway logs` → tailscaled up, tailnet joined, poll loop started.
+4. **Builds fail until you promote (§9)** — `railway.json` + `worker.Dockerfile` are on `main`, not yet on `staging`, so Railway falls back to Railpack auto-detect and errors with "no start command." That's expected. Once `main → staging` lands, Railway builds `worker.Dockerfile` (its `ENTRYPOINT` is the start command) and `railway logs` shows: tailscaled up, tailnet joined, poll loop started. (To smoke-test the image before promoting, point the deploy branch at `main`, build, then switch back to `staging`.)
 
 ## 6. Vercel — web SPA
 
