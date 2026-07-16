@@ -19,7 +19,14 @@ from dotenv import load_dotenv
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 load_dotenv(_REPO_ROOT / ".env")
 
-_PAGES_MIGRATION = _REPO_ROOT / "supabase" / "migrations" / "20260715090000_pages.sql"
+# The pages table, then the rename that gives it its current column name —
+# applied in order so the scripts test DB matches production's `pages`
+# (corpus_key, not r2_key). Extend this if a later migration reshapes `pages`.
+_PAGES_MIGRATIONS = (
+    _REPO_ROOT / "supabase" / "migrations" / "20260715090000_pages.sql",
+    _REPO_ROOT / "supabase" / "migrations"
+    / "20260722090000_rename_pages_r2_key_to_corpus_key.sql",
+)
 
 # Defensive: any code path that falls back to SUPABASE_DB_URL must fail loudly
 # rather than touch the dev DB. Mirrors ingredients/tests/conftest.py.
@@ -70,7 +77,8 @@ def _scripts_db() -> str:
             conn.execute(f'create database "{name}"')
     with psycopg.connect(url, autocommit=True) as conn:
         conn.execute("drop table if exists pages cascade")
-        conn.execute(_PAGES_MIGRATION.read_text())
+        for migration in _PAGES_MIGRATIONS:
+            conn.execute(migration.read_text())
     return url
 
 

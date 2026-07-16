@@ -80,7 +80,7 @@ def conn(test_db_url: str):
         url = "https://ex.test/old-fashioned"
         key = hashlib.sha256(url.encode()).hexdigest()
         c.execute(
-            "insert into pages (url, site, r2_key, content_type) "
+            "insert into pages (url, site, corpus_key, content_type) "
             "values (%s, 'ex', %s, 'likely_drink_recipe')",
             (url, key),
         )

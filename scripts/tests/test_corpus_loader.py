@@ -1,5 +1,5 @@
 """Corpus loader: gzip + write-once upload of cached HTML to the object store,
-and the pages.r2_key backfill. Every test here stubs the S3-compat client — no
+and the pages.corpus_key backfill. Every test here stubs the S3-compat client — no
 network, no live object store (see CLAUDE.md hard rules).
 """
 from __future__ import annotations
@@ -102,40 +102,40 @@ class FakePagesDB:
     ``backfill_pages`` can be unit-tested with no TEST_DB_URL / network."""
 
     def __init__(self, rows):
-        # rows: list of dicts with at least id/url/r2_key/site keys.
+        # rows: list of dicts with at least id/url/corpus_key/site keys.
         self.rows = {row["id"]: dict(row) for row in rows}
 
     def execute(self, sql, params=()):
         normalized = " ".join(sql.split()).lower()
-        if normalized.startswith("select id, url from pages where r2_key is null"):
+        if normalized.startswith("select id, url from pages where corpus_key is null"):
             matched = [
                 (row["id"], row["url"])
                 for row in self.rows.values()
-                if row["r2_key"] is None
+                if row["corpus_key"] is None
             ]
             return _FakeCursor(matched)
-        if normalized.startswith("update pages set r2_key"):
-            r2_key, row_id = params
-            self.rows[row_id]["r2_key"] = r2_key
+        if normalized.startswith("update pages set corpus_key"):
+            corpus_key, row_id = params
+            self.rows[row_id]["corpus_key"] = corpus_key
             return _FakeCursor([])
         raise AssertionError(f"unexpected SQL in FakePagesDB: {sql!r}")
 
 
-def test_backfill_pages_sets_r2_key():
+def test_backfill_pages_sets_corpus_key():
     rows = [
-        {"id": 1, "url": "https://a.example/x", "r2_key": None, "site": "a"},
-        {"id": 2, "url": "https://b.example/y", "r2_key": None, "site": "b"},
-        {"id": 3, "url": "https://c.example/z", "r2_key": "already-set", "site": "c"},
+        {"id": 1, "url": "https://a.example/x", "corpus_key": None, "site": "a"},
+        {"id": 2, "url": "https://b.example/y", "corpus_key": None, "site": "b"},
+        {"id": 3, "url": "https://c.example/z", "corpus_key": "already-set", "site": "c"},
     ]
     db = FakePagesDB(rows)
 
     updated = backfill_pages(db)
 
     assert updated == 2
-    assert db.rows[1]["r2_key"] == sha256_key("https://a.example/x")
-    assert db.rows[2]["r2_key"] == sha256_key("https://b.example/y")
-    # Every row not lacking r2_key, and every other column, is left untouched.
-    assert db.rows[3]["r2_key"] == "already-set"
+    assert db.rows[1]["corpus_key"] == sha256_key("https://a.example/x")
+    assert db.rows[2]["corpus_key"] == sha256_key("https://b.example/y")
+    # Every row not lacking corpus_key, and every other column, is left untouched.
+    assert db.rows[3]["corpus_key"] == "already-set"
     assert db.rows[1]["site"] == "a"
     assert db.rows[2]["site"] == "b"
     assert db.rows[3]["site"] == "c"

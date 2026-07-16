@@ -35,7 +35,7 @@ def test_pages_columns(db_conn):
 
     assert cols["url"][:2] == ("text", "NO")
     assert cols["site"][:2] == ("text", "NO")
-    assert cols["r2_key"][:2] == ("text", "YES")
+    assert cols["corpus_key"][:2] == ("text", "YES")
     assert cols["content_type"][:2] == ("text", "YES")
     assert cols["denylist"][:2] == ("boolean", "NO")
     assert "false" in (cols["denylist"][2] or "").lower()
