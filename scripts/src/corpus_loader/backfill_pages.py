@@ -1,9 +1,9 @@
-"""One-time backfill: set ``pages.r2_key`` for every row that lacks one.
+"""One-time backfill: set ``pages.corpus_key`` for every row that lacks one.
 
 Run once after the corpus loader has uploaded the pre-staged HTML cache
 (so every url in ``pages`` has a matching object in the object store, keyed
 the same way — see keys.sha256_key / load.load). Idempotent: rows that
-already have an r2_key are left untouched.
+already have an corpus_key are left untouched.
 """
 from __future__ import annotations
 
@@ -20,17 +20,17 @@ class Executable(Protocol):
 
 
 def backfill_pages(conn: Executable) -> int:
-    """Set ``r2_key = sha256(url)`` on every ``pages`` row missing one.
+    """Set ``corpus_key = sha256(url)`` on every ``pages`` row missing one.
 
-    Returns the number of rows updated. Only ``r2_key`` is touched; every
+    Returns the number of rows updated. Only ``corpus_key`` is touched; every
     other column on every row is left exactly as-is.
     """
     rows = conn.execute(
-        "select id, url from pages where r2_key is null"
+        "select id, url from pages where corpus_key is null"
     ).fetchall()
     for row_id, url in rows:
         conn.execute(
-            "update pages set r2_key = %s where id = %s",
+            "update pages set corpus_key = %s where id = %s",
             (sha256_key(url), row_id),
         )
     return len(rows)

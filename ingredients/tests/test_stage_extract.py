@@ -45,7 +45,7 @@ def _page(conn, url, content_type="likely_drink_recipe", key=None):
     if key is None:
         key = hashlib.sha256(url.encode()).hexdigest()
     conn.execute(
-        "insert into pages (url, site, r2_key, content_type) values (%s, 'ex', %s, %s)",
+        "insert into pages (url, site, corpus_key, content_type) values (%s, 'ex', %s, %s)",
         (url, key, content_type),
     )
     return key
@@ -100,3 +100,19 @@ def test_extract_skips_non_recipe_pages(conn):
     extract.set_corpus_reader(_FakeCorpus({}))
     counts = extract_stage_fn(_job(), conn, None)
     assert counts == {"extracted": 0, "no_recipe": 0, "html_missing": 0}
+
+
+def test_extract_threads_reads_across_window(conn):
+    # More pages than the window, with >1 worker: exercises the threaded windowed
+    # read path and asserts every recipe + ledger row still lands exactly once.
+    keys = {}
+    for i in range(5):
+        keys[_page(conn, f"https://ex.test/r{i}")] = _HTML
+    extract.set_corpus_reader(_FakeCorpus(keys))
+    counts = extract_stage_fn(_job(), conn, None, workers=3, window=2)
+    assert counts["extracted"] == 5
+    assert conn.execute("select count(*) from recipes").fetchone()[0] == 5
+    resolved = conn.execute(
+        "select count(*) from stage_runs where stage='extract' and outcome='resolved'"
+    ).fetchone()[0]
+    assert resolved == 5

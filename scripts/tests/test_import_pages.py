@@ -34,7 +34,7 @@ def test_fetched_page_maps_to_ok_not_denylisted():
     assert m["fetch_status"] == "ok"
     assert m["denylist"] is False
     assert m["content_type"] == "likely_drink_recipe"
-    assert "r2_key" not in m  # stays NULL; load_corpus sets it
+    assert "corpus_key" not in m  # stays NULL; load_corpus sets it
 
 
 def test_blocked_page_stays_blocked_and_denylisted_even_with_html():
@@ -77,7 +77,7 @@ def _seed(sqlite_pages, **kw):
     )
 
 
-def test_import_copies_rows_with_r2_key_null(sqlite_pages, pg_conn):
+def test_import_copies_rows_with_corpus_key_null(sqlite_pages, pg_conn):
     _seed(sqlite_pages, url="https://x/1", content_type="likely_drink_recipe")
     _seed(sqlite_pages, url="https://x/2", status="failed", html_path=None, content_type=None)
     stats = import_pages(sqlite_pages, pg_conn)
@@ -86,13 +86,13 @@ def test_import_copies_rows_with_r2_key_null(sqlite_pages, pg_conn):
     rows = {
         r[0]: r
         for r in pg_conn.execute(
-            "select url, content_type, fetch_status, r2_key, denylist, discovered_at "
+            "select url, content_type, fetch_status, corpus_key, denylist, discovered_at "
             "from pages"
         ).fetchall()
     }
     assert rows["https://x/1"][1] == "likely_drink_recipe"
     assert rows["https://x/1"][2] == "ok"
-    assert rows["https://x/1"][3] is None  # r2_key NULL until HTML is in R2
+    assert rows["https://x/1"][3] is None  # corpus_key NULL until HTML is in the object store
     assert rows["https://x/1"][5] is not None  # discovered_at coerced to timestamptz
     assert rows["https://x/2"][2] == "failed"
 
@@ -115,11 +115,20 @@ def test_reimport_updates_changed_fields(sqlite_pages, pg_conn):
     assert ct == "confirmed_drink"
 
 
-def test_reimport_never_clobbers_r2_key(sqlite_pages, pg_conn):
-    # If load_corpus already set r2_key, a re-import must not reset it to NULL.
+def test_reimport_never_clobbers_corpus_key(sqlite_pages, pg_conn):
+    # If load_corpus already set corpus_key, a re-import must not reset it to NULL.
     _seed(sqlite_pages, url="https://x/1")
     import_pages(sqlite_pages, pg_conn)
-    pg_conn.execute("update pages set r2_key='deadbeef' where url='https://x/1'")
+    pg_conn.execute("update pages set corpus_key='deadbeef' where url='https://x/1'")
     import_pages(sqlite_pages, pg_conn)
-    r2 = pg_conn.execute("select r2_key from pages where url='https://x/1'").fetchone()[0]
+    r2 = pg_conn.execute("select corpus_key from pages where url='https://x/1'").fetchone()[0]
     assert r2 == "deadbeef"
+
+
+def test_import_batches_across_chunks(sqlite_pages, pg_conn):
+    # chunk_size below the row count exercises the multi-chunk executemany path.
+    for i in range(5):
+        _seed(sqlite_pages, url=f"https://x/{i}", content_type="likely_drink_recipe")
+    stats = import_pages(sqlite_pages, pg_conn, chunk_size=2)
+    assert stats == {"read": 5, "extractable": 5, "denylisted": 0}
+    assert pg_conn.execute("select count(*) from pages").fetchone()[0] == 5

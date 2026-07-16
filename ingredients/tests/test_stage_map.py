@@ -107,3 +107,45 @@ def test_map_is_idempotent_via_ledger(conn):
     _recipe(conn, "https://ex.test/i", ["Bourbon"])
     assert map_stage_fn(_job(), conn, None)["resolved"] == 1
     assert map_stage_fn(_job(), conn, None) == {"resolved": 0, "pending": 0}
+
+
+def test_chunk_boundary_matches_single_chunk(conn):
+    # Several recipes spanning multiple chunk_size=2 chunks; mix of resolvable
+    # (bourbon alias) and unresolvable names, plus a shared name across recipes.
+    specs = [
+        ("https://ex.test/c0", ["Bourbon"]),
+        ("https://ex.test/c1", ["Unobtanium"]),
+        ("https://ex.test/c2", ["Bourbon", "Unobtanium"]),
+        ("https://ex.test/c3", ["Bourbon"]),
+        ("https://ex.test/c4", ["Unobtanium"]),
+    ]
+    rids = [_recipe(conn, url, names) for url, names in specs]
+
+    counts = map_stage_fn(_job(), conn, None, chunk_size=2)
+
+    # c0 + c3 resolve (bourbon); c1, c2, c4 pending (unobtanium unresolved).
+    assert counts == {"resolved": 2, "pending": 3}
+
+    outcomes = {
+        rid: conn.execute(
+            "select outcome from stage_runs where entity_id=%s and stage='map'", (rid,)
+        ).fetchone()[0]
+        for rid in rids
+    }
+    assert outcomes == {
+        rids[0]: "resolved",
+        rids[1]: "pending",
+        rids[2]: "pending",
+        rids[3]: "resolved",
+        rids[4]: "pending",
+    }
+
+    # Shared, name-keyed: exactly one row per distinct name regardless of chunking.
+    rows = conn.execute(
+        "select normalized_name, taxonomy_slug, method from ingredient_resolutions "
+        "order by normalized_name"
+    ).fetchall()
+    assert rows == [
+        ("bourbon", "bourbon", "alias"),
+        ("unobtanium", None, "abstain"),
+    ]

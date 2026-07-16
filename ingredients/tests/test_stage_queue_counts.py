@@ -113,11 +113,11 @@ def _insert_recipe(conn, source_url: str) -> int:
     ).fetchone()[0]
 
 
-def _insert_page(conn, url: str, *, content_type: str | None, r2_key: str | None) -> int:
+def _insert_page(conn, url: str, *, content_type: str | None, corpus_key: str | None) -> int:
     return conn.execute(
-        "insert into pages (url, site, content_type, r2_key) values (%s, 'ex', %s, %s) "
+        "insert into pages (url, site, content_type, corpus_key) values (%s, 'ex', %s, %s) "
         "returning id",
-        (url, content_type, r2_key),
+        (url, content_type, corpus_key),
     ).fetchone()[0]
 
 
@@ -169,9 +169,9 @@ def test_recipes_backed_stage_counts_rows_with_no_run_at_current_version(clean):
 def test_pages_backed_stage_requires_recipe_content_type_and_corpus_key(clean):
     conn = clean
     _become(conn, admin=True)
-    _insert_page(conn, "https://ex.test/a", content_type="likely_drink_recipe", r2_key="k1")
-    _insert_page(conn, "https://ex.test/b", content_type="confirmed_drink", r2_key=None)
-    _insert_page(conn, "https://ex.test/c", content_type="likely_drink_article", r2_key="k3")
+    _insert_page(conn, "https://ex.test/a", content_type="likely_drink_recipe", corpus_key="k1")
+    _insert_page(conn, "https://ex.test/b", content_type="confirmed_drink", corpus_key=None)
+    _insert_page(conn, "https://ex.test/c", content_type="likely_drink_article", corpus_key="k3")
     conn.commit()
 
     rows = dict(conn.execute("select stage, queue_depth from stage_queue_counts()").fetchall())

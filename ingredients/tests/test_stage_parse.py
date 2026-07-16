@@ -81,6 +81,47 @@ def test_parse_stores_unparseable_row_but_abstains(conn):
     assert outcome == "abstain"
 
 
+def test_parse_batches_across_chunk_boundary(conn):
+    # Five recipes with chunk_size=2 → chunks of [2, 2, 1]. The batched writes
+    # must produce the SAME counts and DB rows as a single-chunk run.
+    specs = [
+        ("https://ex.test/c1", ["2 oz gin", "0.5 oz lime juice"]),
+        ("https://ex.test/c2", ["1 oz rum"]),
+        ("https://ex.test/c3", ["???"]),
+        ("https://ex.test/c4", ["1.5 oz vodka", "0.75 oz triple sec"]),
+        ("https://ex.test/c5", ["3 dashes bitters"]),
+    ]
+    rids = [_seed_recipe(conn, url, ings) for url, ings in specs]
+
+    counts = parse_stage_fn(_job(), conn, None, chunk_size=2)
+    # c3 (???) abstains → empty; the other four structure at least one row.
+    assert counts == {"parsed": 4, "empty": 1}
+
+    # Every recipe got its ingredient rows and exactly one stage_runs row.
+    for rid, (_, ings) in zip(rids, specs):
+        n_rows = conn.execute(
+            "select count(*) from recipe_ingredients where recipe_id=%s", (rid,)
+        ).fetchone()[0]
+        assert n_rows == len(ings)
+    total_runs = conn.execute(
+        "select count(*) from stage_runs where stage='parse'"
+    ).fetchone()[0]
+    assert total_runs == len(rids)
+
+    # Spot-check one structured row and one abstain outcome survived batching.
+    row = conn.execute(
+        "select name, amount, unit from recipe_ingredients "
+        "where recipe_id=%s order by position",
+        (rids[3],),
+    ).fetchall()
+    assert row[0] == ("vodka", 1.5, "oz")
+    abstain = conn.execute(
+        "select outcome from stage_runs where entity_id=%s and stage='parse'",
+        (rids[2],),
+    ).fetchone()[0]
+    assert abstain == "abstain"
+
+
 def test_parse_scopes_by_site(conn):
     a = _seed_recipe(conn, "https://ex.test/d", ["1 oz gin"])
     conn.execute("update recipes set site='other' where id=%s", (a,))

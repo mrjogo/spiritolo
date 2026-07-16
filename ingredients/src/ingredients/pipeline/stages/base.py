@@ -8,13 +8,24 @@ NOT-EXISTS-a-run-at-this-version predicate over a content table.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterable, Iterator, Sequence
 
 import psycopg
 
 from ingredients.pipeline import ledger
 
 ENTITY_RECIPE = "recipe"
+
+# Recipes per transaction/batch. A stage collects a chunk's writes, flushes them
+# with bulk statements + one ledger executemany, and commits once — turning ~N
+# per-recipe round-trips into ~a handful per chunk over the remote pooler.
+CHUNK_SIZE = 200
+
+
+def chunked(seq: Sequence[Any], size: int = CHUNK_SIZE) -> Iterator[list[Any]]:
+    """Yield ``seq`` in lists of at most ``size``."""
+    for i in range(0, len(seq), size):
+        yield list(seq[i : i + size])
 
 
 def scope(job: dict[str, Any]) -> tuple[str | None, int | None]:
@@ -86,4 +97,22 @@ def record(
         model_id=model_id,
         error_code=error_code,
         payload=payload,
+    )
+
+
+def record_many(conn: psycopg.Connection, records: Iterable[dict[str, Any]]) -> None:
+    """Batch form of ``record`` for a chunk of recipes. Each dict carries
+    ``recipe_id`` plus the same keywords ``record`` takes (stage, version,
+    outcome, method, and optional job_id/payload/error_code/…); they UPSERT in
+    one ``executemany``. Wrap the chunk in ``conn.transaction()`` to commit once."""
+    ledger.record_runs(
+        conn,
+        [
+            {
+                "entity_type": ENTITY_RECIPE,
+                "entity_id": r["recipe_id"],
+                **{k: v for k, v in r.items() if k != "recipe_id"},
+            }
+            for r in records
+        ],
     )

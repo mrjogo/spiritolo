@@ -7,8 +7,8 @@ This is the one-time move of per-URL crawl state — the URLs, their LLM
 to work from without re-crawling or re-classifying.
 
 The HTML bytes are NOT touched here; those go to the object store via
-``load_corpus``, which also sets ``pages.r2_key``. This importer leaves
-``r2_key`` NULL by design: a page becomes extractable (``r2_key`` non-null)
+``load_corpus``, which also sets ``pages.corpus_key``. This importer leaves
+``corpus_key`` NULL by design: a page becomes extractable (``corpus_key`` non-null)
 only once its HTML is confirmed in the object store.
 
 Idempotent: re-running UPSERTs by ``url``, so a re-import after a fix is safe.
@@ -38,7 +38,7 @@ def map_row(row: dict[str, Any]) -> dict[str, Any]:
       domain (``ok`` / ``blocked`` / ``failed``), or NULL for a still-``pending``
       page. A blocked page stays ``blocked`` even though it has saved HTML — that
       HTML is the block page, not content, so it must never be extracted.
-    - ``r2_key`` is omitted (stays NULL); ``load_corpus`` sets it once the page's
+    - ``corpus_key`` is omitted (stays NULL); ``load_corpus`` sets it once the page's
       HTML is in the object store.
     """
     status = row.get("status")
@@ -91,22 +91,47 @@ def _iter_sqlite_pages(sqlite_conn: sqlite3.Connection):
         yield dict(row)
 
 
-def import_pages(sqlite_conn: sqlite3.Connection, pg_conn) -> dict[str, int]:
+# Rows per UPSERT batch. A chunked ``executemany`` inside one transaction per
+# chunk replaces a per-row execute+commit — on a half-million-row import over a
+# remote pooler that is the difference between minutes and hours.
+_CHUNK_SIZE = 5000
+
+
+def import_pages(
+    sqlite_conn: sqlite3.Connection, pg_conn, *, chunk_size: int = _CHUNK_SIZE
+) -> dict[str, int]:
     """UPSERT every SQLite ``pages`` row into Postgres ``pages`` (keyed ``url``).
 
-    ``pg_conn`` is a psycopg connection whose transaction the caller manages.
+    Rows are UPSERTed in chunks of ``chunk_size`` via ``executemany`` (one
+    transaction per chunk) rather than one autocommit statement per row — same
+    result, but round-trips and commits amortize across the chunk.
+
     Returns a summary: total ``read``, how many carry a recipe verdict
     (``extractable`` — what ``extract`` picks up once the HTML is in the
     object store), and how many are ``denylisted`` — a quick sanity check for
     the operator.
     """
     read = extractable = denylisted = 0
+    batch: list[dict[str, Any]] = []
     for sqlite_row in _iter_sqlite_pages(sqlite_conn):
         mapped = map_row(sqlite_row)
-        pg_conn.execute(_UPSERT, mapped)
         read += 1
         if mapped["content_type"] in _RECIPE_LABELS:
             extractable += 1
         if mapped["denylist"]:
             denylisted += 1
+        batch.append(mapped)
+        if len(batch) >= chunk_size:
+            _upsert_batch(pg_conn, batch)
+            batch = []
+    if batch:
+        _upsert_batch(pg_conn, batch)
     return {"read": read, "extractable": extractable, "denylisted": denylisted}
+
+
+def _upsert_batch(pg_conn, batch: list[dict[str, Any]]) -> None:
+    """UPSERT one chunk in a single transaction. ``pg_conn.transaction()`` opens
+    an explicit block even on an autocommit connection, so the whole chunk
+    commits once instead of once per row."""
+    with pg_conn.transaction(), pg_conn.cursor() as cur:
+        cur.executemany(_UPSERT, batch)

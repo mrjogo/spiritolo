@@ -56,6 +56,27 @@ def load(client: S3Client, bucket: str, url: str, html: bytes) -> bool:
     return True
 
 
+def _s3_config():
+    """boto3 client config for an S3-compatible store that isn't AWS S3.
+
+    - ``addressing_style`` virtual-host (``<bucket>.<endpoint>``): boto3 defaults
+      to path-style for a custom ``endpoint_url``, which Tigris/Railway reject
+      with a request timeout. ``AWS_S3_URL_STYLE=path`` forces path-style if a
+      future store ever needs it.
+    - retries + timeouts so a transient or hung request retries instead of
+      aborting a long bulk upload.
+    """
+    from botocore.config import Config
+
+    style = "path" if os.environ.get("AWS_S3_URL_STYLE", "").startswith("path") else "virtual"
+    return Config(
+        s3={"addressing_style": style},
+        retries={"max_attempts": 8, "mode": "standard"},
+        connect_timeout=15,
+        read_timeout=60,
+    )
+
+
 def default_client():
     """Build the real S3 client from the standard ``AWS_*`` env vars
     (``AWS_ENDPOINT_URL`` / ``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY``,
@@ -74,6 +95,7 @@ def default_client():
         aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
         aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
         region_name=os.environ.get("AWS_DEFAULT_REGION", "auto"),
+        config=_s3_config(),
     )
     return _NotFoundIsNoneAdapter(raw)
 

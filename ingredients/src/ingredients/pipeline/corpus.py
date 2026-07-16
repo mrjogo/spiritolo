@@ -68,6 +68,27 @@ class CorpusReader:
         return gzip.decompress(raw).decode("utf-8")
 
 
+def _s3_config():
+    """boto3 client config for an S3-compatible store that isn't AWS S3.
+
+    Virtual-host addressing (``<bucket>.<endpoint>``): boto3 defaults to
+    path-style for a custom ``endpoint_url``, which Tigris/Railway reject with a
+    request timeout. ``AWS_S3_URL_STYLE=path`` forces path-style if ever needed.
+    Retries + timeouts keep a transient miss from failing an extract read.
+    (Duplicated from scripts/src/corpus_loader/load.py — one small helper isn't
+    worth a shared package across the two zones; see key_for's note.)
+    """
+    from botocore.config import Config
+
+    style = "path" if os.environ.get("AWS_S3_URL_STYLE", "").startswith("path") else "virtual"
+    return Config(
+        s3={"addressing_style": style},
+        retries={"max_attempts": 8, "mode": "standard"},
+        connect_timeout=15,
+        read_timeout=60,
+    )
+
+
 def default_reader() -> CorpusReader:
     """Build the real corpus reader from the standard ``AWS_*`` env vars
     (``AWS_ENDPOINT_URL`` / ``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY`` /
@@ -86,6 +107,7 @@ def default_reader() -> CorpusReader:
         aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
         aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
         region_name=os.environ.get("AWS_DEFAULT_REGION", "auto"),
+        config=_s3_config(),
     )
     return CorpusReader(_NotFoundIsNoneAdapter(raw), bucket=os.environ["AWS_S3_BUCKET_NAME"])
 
