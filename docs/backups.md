@@ -34,7 +34,7 @@ cd ~/somewhere-outside-the-repo                       # default dest is cwd
 ```
 
 `SUPABASE_STAGING_DB_URL` must be the **Supavisor session pooler**
-(`aws-0-<region>.pooler.supabase.com:5432`). The script refuses the
+(`aws-1-us-east-2.pooler.supabase.com:5432`). The script refuses the
 IPv6-only direct connection and the transaction pooler (port 6543).
 
 **GitHub Action:** Actions tab → "Backup staging database" → Run workflow.

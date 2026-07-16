@@ -6,8 +6,8 @@
 ``import-pages`` moves the SQLite ``pages`` work-queue into Postgres ``pages``;
 ``load-corpus`` uploads each fetched page's HTML to the object store and sets
 ``pages.r2_key``. Postgres comes from ``SUPABASE_DB_URL``; object storage from
-the ``S3_*`` env vars (see docs/migration.md). Run ``import-pages`` before
-``load-corpus``.
+the standard ``AWS_*`` env vars (see docs/migration.md). Run ``import-pages``
+before ``load-corpus``.
 """
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     p_load = sub.add_parser("load-corpus", help="Local HTML -> R2; set pages.r2_key.")
     p_load.add_argument("--sqlite", default="data/scraper.db")
     p_load.add_argument("--html-dir", default="data/html")
-    p_load.add_argument("--bucket", default=os.environ.get("S3_BUCKET"))
+    p_load.add_argument("--bucket", default=os.environ.get("AWS_S3_BUCKET_NAME"))
 
     args = parser.parse_args(argv)
     sqlite_conn = sqlite3.connect(args.sqlite)
