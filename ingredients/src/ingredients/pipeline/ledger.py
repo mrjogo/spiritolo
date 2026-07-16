@@ -33,8 +33,34 @@ from typing import Any, Sequence
 from psycopg.types.json import Json
 
 
-def record_run(
-    conn,
+_RECORD_RUN_SQL = """
+    insert into stage_runs (
+        entity_type, entity_id, stage, version, outcome, method,
+        confidence, model_id, cost_cents, error_code, batch_id, job_id,
+        payload, finished_at
+    )
+    values (
+        %s, %s, %s, %s, %s, %s,
+        %s, %s, %s, %s, %s, %s,
+        %s, coalesce(%s, now())
+    )
+    on conflict (entity_type, entity_id, stage) do update set
+        version     = excluded.version,
+        outcome     = excluded.outcome,
+        method      = excluded.method,
+        confidence  = excluded.confidence,
+        model_id    = excluded.model_id,
+        cost_cents  = excluded.cost_cents,
+        error_code  = excluded.error_code,
+        batch_id    = excluded.batch_id,
+        job_id      = excluded.job_id,
+        payload     = excluded.payload,
+        started_at  = now(),
+        finished_at = excluded.finished_at
+"""
+
+
+def _record_run_params(
     *,
     entity_type: str,
     entity_id: int,
@@ -50,46 +76,37 @@ def record_run(
     job_id: int | None = None,
     payload: Any | None = None,
     finished_at: Any | None = None,
-) -> None:
+) -> tuple:
+    return (
+        entity_type, entity_id, stage, version, outcome, method,
+        confidence, model_id, cost_cents, error_code, batch_id, job_id,
+        Json(payload) if payload is not None else None, finished_at,
+    )
+
+
+def record_run(conn, **kwargs) -> None:
     """UPSERT the latest run for ``(entity_type, entity_id, stage)``.
 
     On conflict the row is overwritten in place (version/outcome/method/… all
     take the new values), so exactly one row per (entity, stage) ever exists.
     ``finished_at`` defaults to now() when not supplied — a recorded run is a
-    completed run.
+    completed run. See ``_record_run_params`` for the accepted keywords.
     """
-    conn.execute(
-        """
-        insert into stage_runs (
-            entity_type, entity_id, stage, version, outcome, method,
-            confidence, model_id, cost_cents, error_code, batch_id, job_id,
-            payload, finished_at
-        )
-        values (
-            %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s,
-            %s, coalesce(%s, now())
-        )
-        on conflict (entity_type, entity_id, stage) do update set
-            version     = excluded.version,
-            outcome     = excluded.outcome,
-            method      = excluded.method,
-            confidence  = excluded.confidence,
-            model_id    = excluded.model_id,
-            cost_cents  = excluded.cost_cents,
-            error_code  = excluded.error_code,
-            batch_id    = excluded.batch_id,
-            job_id      = excluded.job_id,
-            payload     = excluded.payload,
-            started_at  = now(),
-            finished_at = excluded.finished_at
-        """,
-        (
-            entity_type, entity_id, stage, version, outcome, method,
-            confidence, model_id, cost_cents, error_code, batch_id, job_id,
-            Json(payload) if payload is not None else None, finished_at,
-        ),
-    )
+    conn.execute(_RECORD_RUN_SQL, _record_run_params(**kwargs))
+
+
+def record_runs(conn, rows: Sequence[dict[str, Any]]) -> None:
+    """Batch form of ``record_run``: UPSERT one stage_runs row per dict in
+    ``rows`` (each dict is the keyword set ``record_run`` takes) in a single
+    ``executemany``. psycopg pipelines the batch, so a chunk of N recipes is one
+    round-trip's worth of latency instead of N — the whole point of chunking a
+    stage's ledger writes. The caller owns the transaction (wrap a chunk in
+    ``conn.transaction()`` so it commits once)."""
+    params = [_record_run_params(**row) for row in rows]
+    if not params:
+        return
+    with conn.cursor() as cur:
+        cur.executemany(_RECORD_RUN_SQL, params)
 
 
 def work_queue(
