@@ -16,8 +16,12 @@ import psycopg
 import pytest
 from recipegf import RecipeDocument, parse_ingredient_ref, parse_recipe_id
 
-from ingredients.recipegf.bundle import validate_bundle
-from ingredients.recipegf.generate import UnresolvedIngredient, generate_bundle
+from ingredients.recipegf.bundle import BundleError, validate_bundle
+from ingredients.recipegf.generate import (
+    UnresolvedIngredient,
+    generate_bundle,
+    generate_bundles,
+)
 
 
 @pytest.fixture()
@@ -141,3 +145,62 @@ def test_generate_bundle_unresolved_ingredient_raises(conn):
     )
     with pytest.raises(UnresolvedIngredient):
         generate_bundle(conn, recipe_id, imported_at="2026-07-12T00:00:00+00:00")
+
+
+def test_generate_bundles_matches_per_recipe(conn):
+    # A chunk spanning every outcome: a valid bundle, an unresolved ingredient,
+    # a slug-less recipe (BundleError), and a vanished id.
+    ok_id = _seed_stirred_old_fashioned(conn)
+    unresolved_id = conn.execute(
+        "insert into recipes (source_url, site, source, title, canonical_name, "
+        "recipe_slug, equipment) values ('https://ex.test/u2','ex','{}'::jsonb,"
+        "'Mystery','mystery','mystery', array[]::text[]) returning id"
+    ).fetchone()[0]
+    conn.execute(
+        "insert into recipe_ingredients (recipe_id, position, name, amount, unit, "
+        "raw_text) values (%s, 0, 'Unobtanium', 1, 'oz', '1 oz unobtanium')",
+        (unresolved_id,),
+    )
+    noslug_id = conn.execute(
+        "insert into recipes (source_url, site, source, title, canonical_name, "
+        "recipe_slug, equipment) values ('https://ex.test/n', 'ex', '{}'::jsonb, "
+        "NULL, NULL, NULL, array[]::text[]) returning id"
+    ).fetchone()[0]
+    ids = [ok_id, unresolved_id, noslug_id, 999999]
+
+    at = "2026-07-12T00:00:00+00:00"
+    results = generate_bundles(conn, ids, imported_at=at)
+
+    # Order + coverage preserved (one entry per input id, in order).
+    assert [rid for rid, _ in results] == ids
+    by_id = dict(results)
+    # Valid recipe: byte-identical to the per-recipe call.
+    single = generate_bundle(conn, ok_id, imported_at=at)
+    assert json.dumps(by_id[ok_id], sort_keys=True) == json.dumps(single, sort_keys=True)
+    # Unresolved / slug-less: the exceptions are returned (caught), not raised.
+    assert isinstance(by_id[unresolved_id], UnresolvedIngredient)
+    assert isinstance(by_id[noslug_id], BundleError)
+    # Vanished recipe: None, same as generate_bundle.
+    assert by_id[999999] is None
+
+
+def test_slugless_and_unresolved_raises_bundle_error_first(conn):
+    # A recipe that is BOTH slugless AND has an unresolved ingredient must surface
+    # as BundleError (a permanent seam violation -> export 'failed'), NOT the
+    # softer UnresolvedIngredient (-> 'pending', implying it'll retry). The slug
+    # check runs before ingredient assembly, matching the original per-field order.
+    recipe_id = conn.execute(
+        "insert into recipes (source_url, site, source, title, canonical_name, "
+        "recipe_slug, equipment) values ('https://ex.test/su', 'ex', '{}'::jsonb, "
+        "NULL, NULL, NULL, array[]::text[]) returning id"
+    ).fetchone()[0]
+    conn.execute(
+        "insert into recipe_ingredients (recipe_id, position, name, amount, unit, "
+        "raw_text) values (%s, 0, 'Unobtanium', 1, 'oz', '1 oz unobtanium')",
+        (recipe_id,),
+    )
+    at = "2026-07-12T00:00:00+00:00"
+    with pytest.raises(BundleError):
+        generate_bundle(conn, recipe_id, imported_at=at)
+    ((_, result),) = generate_bundles(conn, [recipe_id], imported_at=at)
+    assert isinstance(result, BundleError)

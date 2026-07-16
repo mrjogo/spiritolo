@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import pathlib
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 
 from .keys import sha256_key
 from .load import S3Client, load
@@ -25,6 +26,11 @@ select url, html_path from pages
 where html_path is not null and status <> 'blocked' and disabled_reason is null
 """
 
+# Concurrent uploads (network-bound S3 round-trips) and rows per r2_key-update
+# batch. Threads do only the S3 work; the DB writes stay on the main thread.
+_WORKERS = 24
+_CHUNK_SIZE = 1000
+
 
 def load_corpus(
     sqlite_conn: sqlite3.Connection,
@@ -32,9 +38,17 @@ def load_corpus(
     s3_client: S3Client,
     bucket: str,
     html_root: str | pathlib.Path,
+    *,
+    workers: int = _WORKERS,
+    chunk_size: int = _CHUNK_SIZE,
 ) -> dict[str, int]:
     """Upload every fetched page's HTML to the object store and set
     ``pages.r2_key``.
+
+    Uploads run across a ``workers``-wide thread pool (the work is network-bound
+    S3 round-trips); the deterministic ``r2_key`` writes are batched ``chunk_size``
+    at a time as uploads land. Only the main thread touches ``pg_conn`` (a psycopg
+    connection is not shared across threads), so the DB stays single-writer.
 
     ``html_root`` is the base directory the SQLite ``html_path`` values are
     relative to (``data/html``). Idempotent: ``load`` skips keys already in
@@ -43,28 +57,55 @@ def load_corpus(
     """
     root = pathlib.Path(html_root)
     sqlite_conn.row_factory = sqlite3.Row
+    rows = [
+        (row["url"], row["html_path"])
+        for row in sqlite_conn.execute(_FETCHED_NOT_DENYLISTED)
+    ]
+
     uploaded = skipped_existing = missing = r2_key_set = not_in_pg = 0
-    for row in sqlite_conn.execute(_FETCHED_NOT_DENYLISTED):
-        url, html_path = row["url"], row["html_path"]
+    pending: list[str] = []
+
+    def _upload(item: tuple[str, str]) -> tuple[str, str]:
+        url, html_path = item
         path = root / html_path
         if not path.exists():
-            missing += 1
-            continue
-        if load(s3_client, bucket, url, path.read_bytes()):
-            uploaded += 1
-        else:
-            skipped_existing += 1
-        # r2_key is set only if the page's Postgres row exists (import ran first).
-        # A 0-row update means the HTML is in the object store but the page
-        # isn't imported yet, so it's reported (not_in_pg) rather than counted
-        # as a silent success.
-        cur = pg_conn.execute(
-            "update pages set r2_key = %s where url = %s", (sha256_key(url), url)
-        )
-        if cur.rowcount:
-            r2_key_set += 1
-        else:
-            not_in_pg += 1
+            return url, "missing"
+        return url, "uploaded" if load(s3_client, bucket, url, path.read_bytes()) else "skipped"
+
+    def _flush() -> None:
+        # Set r2_key for the batch in one statement. rowcount is the rows that
+        # existed (import ran first); the rest are reported not_in_pg rather than
+        # counted as a silent success.
+        nonlocal r2_key_set, not_in_pg
+        if not pending:
+            return
+        keys = [sha256_key(u) for u in pending]
+        with pg_conn.transaction(), pg_conn.cursor() as cur:
+            cur.execute(
+                "update pages p set r2_key = d.k "
+                "from unnest(%s::text[], %s::text[]) as d(url, k) "
+                "where p.url = d.url",
+                (pending, keys),
+            )
+            updated = cur.rowcount
+        r2_key_set += updated
+        not_in_pg += len(pending) - updated
+        pending.clear()
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for url, status in pool.map(_upload, rows):
+            if status == "missing":
+                missing += 1
+                continue
+            if status == "uploaded":
+                uploaded += 1
+            else:
+                skipped_existing += 1
+            pending.append(url)
+            if len(pending) >= chunk_size:
+                _flush()
+    _flush()
+
     return {
         "uploaded": uploaded,
         "skipped_existing": skipped_existing,

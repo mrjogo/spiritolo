@@ -15,6 +15,8 @@ runtime it defaults to the env-configured object-store reader.
 
 from __future__ import annotations
 
+import functools
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import psycopg
@@ -33,6 +35,14 @@ EXTRACTOR_VERSION = "v1"
 # recipe verdicts (mirrors scraper.db.EXTRACT_CONTENT_TYPES; ingredients doesn't
 # depend on scraper, so the values are duplicated rather than imported).
 RECIPE_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink")
+
+# Corpus GETs are the extract bottleneck (one network round-trip per page), so
+# they run across a thread pool, `_READ_WINDOW` pages at a time — the window
+# bounds how much HTML is buffered at once. Only the reads are threaded; parsing,
+# the LLM tier, and every DB write run on the calling thread, so `conn` and
+# `providers` are never shared across threads.
+_READ_WORKERS = 24
+_READ_WINDOW = 256
 
 _corpus_reader: corpus.CorpusReader | None = None
 
@@ -110,36 +120,67 @@ def _record(conn, page_id, *, outcome, method, job, error_code=None):
     )
 
 
-def extract_stage_fn(job: dict[str, Any], conn: psycopg.Connection, providers: Any) -> dict[str, Any]:
-    """Extract a `recipes` row from each queued page's cached HTML."""
+def _read_html(
+    reader: corpus.CorpusReader, page: dict[str, Any]
+) -> tuple[dict[str, Any], str | None]:
+    """Fetch one page's HTML in a worker thread: (page, html), or (page, None)
+    on CorpusMiss. Only the thread-safe reader is touched here — never `conn`.
+    Any other read error propagates and fails the stage, as before."""
+    try:
+        return page, reader.read_html(page["r2_key"])
+    except corpus.CorpusMiss:
+        return page, None
+
+
+def _windows(seq: list[Any], size: int):
+    for i in range(0, len(seq), size):
+        yield seq[i : i + size]
+
+
+def extract_stage_fn(
+    job: dict[str, Any],
+    conn: psycopg.Connection,
+    providers: Any,
+    *,
+    workers: int = _READ_WORKERS,
+    window: int = _READ_WINDOW,
+) -> dict[str, Any]:
+    """Extract a `recipes` row from each queued page's cached HTML.
+
+    Corpus GETs — the bottleneck — run across a `workers`-wide thread pool, a
+    `window` of pages at a time so buffered HTML stays bounded. Parsing, the LLM
+    tier, and every DB write run on the calling thread in queue order.
+    """
     site, limit = base.scope(job)
     pages = _page_queue(conn, site, limit)
     counts = {"extracted": 0, "no_recipe": 0, "html_missing": 0}
-    reader = _reader() if pages else None
+    if not pages:
+        return counts
 
-    for page in pages:
-        try:
-            html = reader.read_html(page["r2_key"])
-        except corpus.CorpusMiss:
-            counts["html_missing"] += 1
-            _record(conn, page["id"], outcome="failed", method="deterministic",
-                    job=job, error_code="html_missing")
-            continue
+    fetch = functools.partial(_read_html, _reader())
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        for chunk in _windows(pages, window):
+            for page, html in pool.map(fetch, chunk):
+                if html is None:
+                    counts["html_missing"] += 1
+                    _record(conn, page["id"], outcome="failed", method="deterministic",
+                            job=job, error_code="html_missing")
+                    continue
 
-        recipe = jsonld.find_recipe_jsonld(html)
-        method = "deterministic"
-        if recipe is None and providers is not None:
-            recipe = _llm_synthesize(providers, page, html)
-            method = "llm"
+                recipe = jsonld.find_recipe_jsonld(html)
+                method = "deterministic"
+                if recipe is None and providers is not None:
+                    recipe = _llm_synthesize(providers, page, html)
+                    method = "llm"
 
-        if recipe is None:
-            counts["no_recipe"] += 1
-            _record(conn, page["id"], outcome="abstain", method="deterministic", job=job)
-            continue
+                if recipe is None:
+                    counts["no_recipe"] += 1
+                    _record(conn, page["id"], outcome="abstain", method="deterministic", job=job)
+                    continue
 
-        _upsert_recipe(conn, page, recipe)
-        counts["extracted"] += 1
-        _record(conn, page["id"], outcome="resolved", method=method, job=job)
+                _upsert_recipe(conn, page, recipe)
+                counts["extracted"] += 1
+                _record(conn, page["id"], outcome="resolved", method=method, job=job)
     return counts
 
 

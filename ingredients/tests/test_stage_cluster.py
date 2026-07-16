@@ -98,6 +98,38 @@ def test_ice_is_off_the_cluster_key(conn):
     assert rows[0] == rows[1]
 
 
+def test_chunk_boundary_matches_single_chunk(conn):
+    # Five recipes across three sites (two distinct sources), forcing chunk_size=2
+    # so the run spans three chunks (2 + 2 + 1). Batched writes must produce the
+    # exact counts + DB end state a single chunk would.
+    sites = ["punch", "imbibe", "punch", "imbibe", "punch"]
+    rids = [
+        _negroni(conn, f"https://ex.test/c{i}", site, _BASE)
+        for i, site in enumerate(sites)
+    ]
+    counts = cluster_stage_fn(_job(), conn, None, chunk_size=2)
+    assert counts == {"clustered": 5, "skipped": 0}
+
+    # All five collapse to one cluster + variant.
+    rows = conn.execute(
+        "select cluster_id, variant_key from recipes where id = any(%s) order by id", (rids,)
+    ).fetchall()
+    assert len({r[0] for r in rows}) == 1
+    assert len({r[1] for r in rows}) == 1
+
+    cluster = conn.execute(
+        "select recipe_count, source_count from recipe_clusters"
+    ).fetchone()
+    assert cluster == (5, 2)
+
+    # One resolved stage_run per recipe at the current version.
+    runs = conn.execute(
+        "select entity_id, outcome, version from stage_runs where stage='cluster' order by entity_id"
+    ).fetchall()
+    assert [r[0] for r in runs] == sorted(rids)
+    assert all(r[1] == "resolved" and r[2] == DEDUP_VERSION for r in runs)
+
+
 def test_cluster_is_idempotent_via_ledger(conn):
     _negroni(conn, "https://ex.test/x", "punch", _BASE)
     assert cluster_stage_fn(_job(), conn, None)["clustered"] == 1

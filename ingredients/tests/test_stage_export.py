@@ -32,20 +32,21 @@ def conn(test_db_url: str):
 def _resolve(conn, name, slug):
     conn.execute(
         "insert into ingredient_resolutions (normalized_name, taxonomy_slug, method, version) "
-        "values (%s, %s, 'alias', 'v1')",
+        "values (%s, %s, 'alias', 'v1') on conflict (normalized_name) do nothing",
         (name, slug),
     )
 
 
-def _seed_ready_recipe(conn) -> int:
+def _seed_ready_recipe(conn, suffix: str = "") -> int:
     rid = conn.execute(
         """
         insert into recipes (source_url, site, source, title, canonical_name,
                              equipment)
-        values ('https://ex.test/of', 'ex', '{}'::jsonb, 'Old Fashioned',
+        values (%s, 'ex', '{}'::jsonb, 'Old Fashioned',
                 'old fashioned', array['mixing_glass','bar_spoon','rocks_glass'])
         returning id
-        """
+        """,
+        (f"https://ex.test/of{suffix}",),
     ).fetchone()[0]
     ings = [
         (0, "Bourbon", 2.0, "oz", "bourbon"),
@@ -120,3 +121,32 @@ def test_export_is_idempotent_via_ledger(conn):
     assert export_stage_fn(_job(), conn, None)["exported"] == 1
     counts = export_stage_fn(_job(), conn, None)
     assert counts["exported"] == 0
+
+
+def test_export_batches_across_chunk_boundary(conn):
+    # Seed several ready recipes so a small chunk_size forces >1 chunk. Two share
+    # the same canonical name (→ same slug) to exercise the slug UPDATE guard.
+    rids = [_seed_ready_recipe(conn, suffix=str(i)) for i in range(5)]
+
+    counts = export_stage_fn(_job(), conn, None, chunk_size=2)
+
+    # Same counts a single chunk would produce.
+    assert counts == {"exported": 5, "pending": 0, "failed": 0}
+
+    # Every recipe frozen + slug pinned + ledger 'resolved'.
+    assert conn.execute("select count(*) from recipe_exports").fetchone()[0] == 5
+    for rid in rids:
+        exp = conn.execute(
+            "select recipe_slug, converter_version from recipe_exports where recipe_id=%s",
+            (rid,),
+        ).fetchone()
+        assert exp[0] == "old-fashioned"
+        assert exp[1] == CONVERTER_VERSION
+        assert (
+            conn.execute("select recipe_slug from recipes where id=%s", (rid,)).fetchone()[0]
+            == "old-fashioned"
+        )
+        outcome = conn.execute(
+            "select outcome from stage_runs where entity_id=%s and stage='export'", (rid,)
+        ).fetchone()[0]
+        assert outcome == "resolved"

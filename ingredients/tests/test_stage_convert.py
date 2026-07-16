@@ -34,15 +34,16 @@ def conn(test_db_url: str):
             c.execute(f"truncate {t} restart identity cascade")
 
 
-def _old_fashioned(conn, resolve_all=True):
+def _old_fashioned(conn, resolve_all=True, url="https://ex.test/of"):
     rid = conn.execute(
         """
         insert into recipes (source_url, site, source, title, canonical_name)
-        values ('https://ex.test/of', 'ex',
+        values (%s, 'ex',
                 '{"recipeInstructions":"Stir with ice and strain into a rocks glass."}'::jsonb,
                 'Old Fashioned', 'old fashioned')
         returning id
-        """
+        """,
+        (url,),
     ).fetchone()[0]
     ings = [("Bourbon", 2.0, "oz"), ("Simple Syrup", 0.25, "oz"),
             ("Angostura Bitters", 2.0, "dash")]
@@ -78,6 +79,30 @@ def test_convert_writes_steps_and_equipment(conn):
         "select outcome, version from stage_runs where entity_id=%s and stage='convert'", (rid,)
     ).fetchone()
     assert run == ("resolved", CONVERTER_VERSION)
+
+
+def test_convert_batches_across_chunk_boundary(conn):
+    # Three resolvable recipes. With chunk_size=2 the queue spans two chunks
+    # ([r1, r2], [r3]); the batched result must match a single chunk's.
+    # (ingredient_resolutions is shared/name-keyed, so all three resolve.)
+    rids = [_old_fashioned(conn, url=f"https://ex.test/of/{i}") for i in range(3)]
+
+    counts = convert_stage_fn(_job(), conn, None, chunk_size=2)
+    assert counts == {"converted": 3, "pending": 0, "proposes_new": 0}
+
+    for rid in rids:
+        verbs = conn.execute(
+            "select verb from recipe_steps where recipe_id=%s order by step_index", (rid,)
+        ).fetchall()
+        assert [v[0] for v in verbs] == ["add", "stir", "strain"]
+        equip = conn.execute(
+            "select equipment, recipe_slug from recipes where id=%s", (rid,)
+        ).fetchone()
+        assert "mixing_glass" in equip[0]
+        assert equip[1] == "old-fashioned"
+        assert conn.execute(
+            "select outcome from stage_runs where entity_id=%s and stage='convert'", (rid,)
+        ).fetchone()[0] == "resolved"
 
 
 def test_convert_pending_when_ingredient_unresolved(conn):
