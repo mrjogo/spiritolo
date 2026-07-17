@@ -181,6 +181,11 @@ def extract_stage_fn(
                 _upsert_recipe(conn, page, recipe)
                 counts["extracted"] += 1
                 _record(conn, page["id"], outcome="resolved", method=method, job=job)
+
+    # Point extract's live version so needs_review / the dashboard track it.
+    # (Extract is page-keyed and its reviews are recipe-keyed, so per-recipe
+    # override re-apply isn't wired here — extract header overrides are rare.)
+    ledger.set_live_version(conn, stage=STAGE, version=EXTRACTOR_VERSION)
     return counts
 
 

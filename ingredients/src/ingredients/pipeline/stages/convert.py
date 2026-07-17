@@ -199,4 +199,8 @@ def convert_stage_fn(
                         equipment_updates,
                     )
             base.record_many(conn, records)
+            base.finalize_run(
+                conn, stage=STAGE, version=CONVERTER_VERSION,
+                ids=[str(r) for r in chunk],
+            )
     return counts

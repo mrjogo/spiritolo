@@ -94,7 +94,7 @@ describe('<ClustersBrowser>', () => {
       [{ id: 10, name: 'The Old Fashioned', site: 'punch' }],
     );
     renderBrowser(makeClient());
-    const row = await screen.findByRole('button');
+    const row = await within(await screen.findByRole('table')).findByRole('button');
     await userEvent.click(row);
     await waitFor(() => expect(detailEq).toHaveBeenCalledWith('cluster_key', 'abc123'));
     expect(await screen.findByText('"bourbon"')).toBeInTheDocument();

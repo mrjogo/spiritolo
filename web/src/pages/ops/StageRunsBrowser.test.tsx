@@ -85,7 +85,7 @@ describe('<StageRunsBrowser>', () => {
       { id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse', version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null, payload: { structured: 3 } },
     );
     renderBrowser(makeClient());
-    const row = await screen.findByRole('button');
+    const row = await within(await screen.findByRole('table')).findByRole('button');
     await userEvent.click(row);
     await waitFor(() => expect(detailEq).toHaveBeenCalledWith('id', 1));
     expect(await screen.findByText(/structured/)).toBeInTheDocument();

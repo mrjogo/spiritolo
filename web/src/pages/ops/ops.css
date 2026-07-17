@@ -1,0 +1,198 @@
+/* Light, functional styling for the /ops workbench — scoped under .ops, built
+   on the tokens in ui/tokens.css. Deliberately restrained: a tab bar, framed
+   tables with a quiet header + row hover, consistent controls, and a pager. */
+
+/* --- shell + sub-nav as a tab bar --- */
+.ops > nav[aria-label='ops'] {
+  border-bottom: 1px solid var(--ops-border);
+  background: var(--ops-surface);
+}
+.ops > nav[aria-label='ops'] ul {
+  list-style: none;
+  margin: 0 auto;
+  padding: 0 16px;
+  max-width: 1240px;
+  display: flex;
+  gap: 2px;
+  flex-wrap: wrap;
+}
+.ops > nav[aria-label='ops'] a {
+  display: inline-block;
+  padding: 11px 14px;
+  font-size: 13.5px;
+  color: var(--ops-muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  border-radius: 6px 6px 0 0;
+}
+.ops > nav[aria-label='ops'] a:hover {
+  color: var(--ops-ink);
+  background: var(--ops-bg);
+}
+.ops > nav[aria-label='ops'] a.active {
+  color: var(--ops-accent);
+  border-bottom-color: var(--ops-accent);
+  font-weight: 600;
+}
+
+.ops-content {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 20px 16px 56px;
+}
+.ops-content > div > h2 {
+  font-size: 17px;
+  margin: 0 0 14px;
+}
+
+/* --- filter rows + form controls --- */
+.ops select,
+.ops input[type='text'],
+.ops input:not([type]) {
+  height: 32px;
+  padding: 0 10px;
+  font-size: 13px;
+  color: var(--ops-ink);
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-border);
+  border-radius: 6px;
+}
+.ops select:focus,
+.ops input:focus {
+  outline: none;
+  border-color: var(--ops-accent);
+  box-shadow: 0 0 0 3px rgba(73, 89, 224, 0.16);
+}
+
+/* --- buttons (Run queue, Resolve/Dismiss, Pager, Preview…) --- */
+.ops button {
+  height: 32px;
+  padding: 0 12px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--ops-ink);
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-border);
+  border-radius: 6px;
+}
+.ops button:hover:not(:disabled) {
+  background: var(--ops-bg);
+  border-color: var(--ops-muted);
+}
+.ops button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ops button:focus-visible {
+  outline: none;
+  border-color: var(--ops-accent);
+  box-shadow: 0 0 0 3px rgba(73, 89, 224, 0.16);
+}
+
+/* --- data tables --- */
+.ops .data-table__wrapper {
+  border: 1px solid var(--ops-border);
+  border-radius: 8px;
+  background: var(--ops-surface);
+  box-shadow: 0 1px 2px rgba(20, 25, 40, 0.04);
+}
+.ops table.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.ops .data-table thead th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ops-muted);
+  padding: 9px 14px;
+  background: var(--ops-surface);
+  border-bottom: 1px solid var(--ops-border);
+  white-space: nowrap;
+}
+.ops .data-table tbody td {
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--ops-border);
+  color: var(--ops-ink);
+  vertical-align: middle;
+}
+.ops .data-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.ops .data-table tbody tr[role='button'] {
+  cursor: pointer;
+}
+.ops .data-table tbody tr[role='button']:hover {
+  background: var(--ops-bg);
+}
+.ops .data-table tbody tr[role='button']:focus-visible {
+  outline: 2px solid var(--ops-accent);
+  outline-offset: -2px;
+}
+
+/* --- pager --- */
+.ops-pager {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 2px;
+  font-size: 12.5px;
+  color: var(--ops-muted);
+}
+.ops-pager button {
+  height: 28px;
+  padding: 0 10px;
+}
+.ops-pager__count {
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- cross-links between browsers --- */
+.ops-xlink {
+  color: var(--ops-accent);
+  text-decoration: none;
+}
+.ops-xlink:hover {
+  text-decoration: underline;
+}
+
+/* --- detail pane (right side of a split view): a framed white panel so it
+       reads as a surface, not floating text --- */
+.ops .detail-pane {
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-border);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(20, 25, 40, 0.04);
+  padding: 16px 18px;
+  min-height: 140px;
+}
+.ops .detail-pane > :first-child {
+  margin-top: 0;
+}
+.ops .detail-pane h3 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+.ops .detail-pane h4 {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ops-muted);
+  margin: 16px 0 6px;
+}
+.ops .detail-pane dl {
+  margin: 0;
+}
+.ops .detail-pane dt {
+  font-size: 11px;
+  color: var(--ops-muted);
+  margin-top: 8px;
+}
+.ops .detail-pane dd {
+  margin: 0 0 2px;
+}

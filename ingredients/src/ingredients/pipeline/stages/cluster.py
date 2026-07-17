@@ -208,6 +208,10 @@ def cluster_stage_fn(
                 if recipe_updates:
                     cur.executemany(_UPDATE_CLUSTER_SQL, recipe_updates)
             base.record_many(conn, records)
+            base.finalize_run(
+                conn, stage=STAGE, version=DEDUP_VERSION,
+                ids=[str(r) for r in chunk],
+            )
 
     _recompute_counts(conn)
     return counts

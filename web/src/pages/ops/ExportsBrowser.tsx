@@ -5,6 +5,8 @@ import { DataTable, type DataTableColumn } from '../../ui/DataTable';
 import { SplitView, DetailPane } from '../../ui/SplitView';
 import { JsonView } from '../../ui/JsonView';
 import { usePagedQuery } from '../../ui/hooks/usePagedQuery';
+import { Pager } from '../../ui/Pager';
+import { CrossLink, recipeHref } from '../../ui/opsLinks';
 import {
   assembleBundlePreview,
   type BundlePreview,
@@ -38,17 +40,21 @@ const COLUMNS: DataTableColumn<ExportListRow>[] = [
 // bundle), and a preview panel that assembles the pin-2 shape on demand
 // for a recipe that hasn't been frozen yet (bundlePreview.ts — a client-
 // side, unvalidated mirror of the export stage's generate_bundle).
+const PAGE_SIZE = 50;
+
 export function ExportsBrowser() {
-  const { rows } = usePagedQuery<ExportListRow>({
+  const [page, setPage] = useState(1);
+  const { rows, total } = usePagedQuery<ExportListRow>({
     table: 'recipe_exports',
     select: LIST_SELECT,
     order: { col: 'exported_at', asc: false },
-    page: 1,
-    pageSize: 50,
+    page,
+    pageSize: PAGE_SIZE,
   });
 
   return (
     <div className="ops-exports">
+      <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="exports" />
       <SplitView
         list={({ select }) => (
           <DataTable
@@ -88,6 +94,9 @@ function ExportDetail({ id }: { id: string | null }) {
   return (
     <DetailPane>
       <h3>{row.recipe_ref} @ {row.converter_version}</h3>
+      <p style={{ fontSize: 12, opacity: 0.7 }}>
+        recipe <CrossLink to={recipeHref(row.recipe_id)}>#{row.recipe_id}</CrossLink>
+      </p>
       <JsonView value={row.bundle} name="bundle" collapseAtDepth={2} />
     </DetailPane>
   );
