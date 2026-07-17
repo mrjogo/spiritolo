@@ -158,12 +158,26 @@ Add CSS:
 ### 7. Modals fit the screen
 
 `CostConfirmModal` (the metered-cost approval gate — a priority phone task) uses
-`ModalShell` → `.tx-modal` (`max-width: 400px`, defined in
-`web/src/components/taxonomy/taxonomy.css`). Below 640px add
-`width: calc(100vw - 24px); max-height: calc(100vh - 32px); overflow-y: auto` so
-it fits and scrolls internally. Scoped inside the mobile media query so desktop
-and the taxonomy modals that share `.tx-modal` are untouched at desktop widths
-(and only improved on mobile).
+`ModalShell` → `.tx-modal`. Correction after reading the code: `.tx-modal`
+(in `taxonomy.css`) is **already** `width: calc(100vw - 48px)` capped at
+`max-width: 400px`, so it is already mobile-width-safe — it only lacks a
+`max-height`/scroll for very short screens, and its `.tx-input`/`.tx-select`
+are 14px (iOS focus-zoom).
+
+Also note: `taxonomy.css` is imported **only** by the lazy Taxonomy page, not
+globally and not on the `/ops` route; only `styles.css` + `tokens.css` are
+global and `ops.css` loads with `OpsLayout`. **The adversarial review confirmed
+this is worse than "lacks a max-height": the modal's *entire* base styling
+(`.tx-modal` panel, `.tx-input`, `.tx-btn`, `.tx-field*`) lives in the taxonomy
+chunk, so on a fresh `/ops` session the cost-approval modal renders unstyled —
+and half those rules pull deco tokens (`--tx-gold` etc.) scoped to
+`.taxonomy-page`, so merely relocating them wouldn't resolve.** So this pass
+gives the modal an **ops-native baseline** scoped under `.ops` in `ops.css`: a
+plain white card on `--ops-*` tokens (panel + title + `.tx-field`/`.tx-input`/
+`.tx-form-actions`), sized `calc(100vw - 40px)`/`max-width: 420px` with a mobile
+`max-height` + internal scroll. Scoped to `.ops`, so the taxonomy deco modal is
+untouched; works on both viewports; no `taxonomy.css` edit. (A fuller shared
+form-kit extraction is a separate, cross-cutting follow-up.)
 
 ### Dashboard (no structural change)
 
@@ -188,10 +202,10 @@ single tidy row and the Sign-out button is a comfortable tap target. Conservativ
 | `web/src/components/reviews/ReviewCard.tsx` | Move textarea styling inline→CSS; allow header row to wrap |
 | `web/src/pages/ops/StageRunsBrowser.tsx` | Add a class to the inline filter group so it wraps on mobile |
 | `web/src/pages/ops/AuditLogBrowser.tsx` | Same |
+| `web/src/pages/ops/OpsLayout.tsx` | Add nav ref + active-tab-into-view (mobile-gated) |
 | `web/src/styles.css` | `.site-header` mobile tightening |
-| `web/src/components/taxonomy/taxonomy.css` | `.tx-modal` mobile width/height (inside the mobile media query only) |
 
-No new dependencies.
+`taxonomy.css` is **not** touched (see piece 7). No new dependencies.
 
 ## Testing
 
@@ -206,6 +220,31 @@ No new dependencies.
   including: table→card rendering, tap-row→detail→Back, the cost-confirm modal,
   a deep JSON-LD detail pane, and filter stacking. (A showboat walkthrough with
   Playwright at a mobile viewport is a good proof artifact — optional.)
+
+## Adversarial review outcome
+
+A multi-lens review (CSS-specificity / regression / a11y, each finding
+independently verified) ran over the committed diff. 7 raw findings → 3
+confirmed, 4 refuted (e.g. FilterChips 44px was a dead path — chips don't render
+inside `.ops`; the stuck-list overflow can't trigger — entity ids aren't
+unbreakable; the `.split-view__back` 44px override was correctly present).
+
+Confirmed → addressed:
+
+1. **Cost modal unstyled on `/ops`** — fixed via the ops-native modal baseline
+   (see piece 7).
+2. **Card chevron polluted the row-button's accessible name** — the `›` was
+   `::after { content }`, which the accname spec folds into a `role="button"`
+   element's name. Re-implemented as a `background-image` (excluded from accname).
+3. **`display:block` card layout strips implicit table/row/cell roles at
+   ≤640px** — acknowledged, **not** applying the suggested
+   `role="table/row/cell"` fix: rows already carry an intentional
+   `role="button"` (they navigate to the detail), and a table can't contain
+   button-rows without malformed ARIA. The card is a *list of labelled buttons*,
+   and because `td::before` generated content *is* included in the accessible
+   name, each card-button announces its field labels + values (arguably richer
+   than the desktop row-button). Treated as an accepted trade-off of the
+   interactive-row + responsive-card pattern.
 
 ## Decisions locked
 

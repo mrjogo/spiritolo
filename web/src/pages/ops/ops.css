@@ -192,6 +192,67 @@
   margin-top: 4px;
 }
 
+/* --- cost-confirm modal (ModalShell → .tx-modal, opened from a metered
+       stage's TriggerBar). Its base .tx-* styling lives in the taxonomy chunk,
+       which the /ops route never loads — and half of it pulls deco tokens
+       (--tx-gold etc.) scoped to .taxonomy-page. So give the modal an
+       ops-native baseline here: a plain white card on ops tokens, scoped to
+       .ops so the taxonomy deco modal is untouched. (Buttons inherit the .ops
+       button look already.) --- */
+.ops .tx-modal {
+  background: var(--ops-surface);
+  color: var(--ops-ink);
+  border: 1px solid var(--ops-border);
+  border-radius: 10px;
+  padding: 20px;
+  box-shadow: 0 12px 40px rgba(20, 25, 40, 0.28);
+  width: calc(100vw - 40px);
+  max-width: 420px;
+  font-family: system-ui, -apple-system, sans-serif;
+}
+.ops .tx-modal__title {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 14px;
+}
+.ops .tx-modal .tx-field {
+  margin-bottom: 12px;
+}
+.ops .tx-modal .tx-field__label {
+  display: block;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ops-muted);
+  margin-bottom: 4px;
+}
+.ops .tx-modal .tx-input {
+  width: 100%;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--ops-border);
+  border-radius: 6px;
+  background: var(--ops-surface);
+  color: var(--ops-ink);
+  font-size: 14px;
+}
+.ops .tx-modal .tx-input:focus {
+  outline: none;
+  border-color: var(--ops-accent);
+  box-shadow: 0 0 0 3px rgba(73, 89, 224, 0.16);
+}
+.ops .tx-modal .tx-field__error {
+  font-size: 12px;
+  color: var(--st-failed);
+  margin-top: 4px;
+}
+.ops .tx-modal .tx-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 /* --- detail pane (right side of a split view): a framed white panel so it
        reads as a surface, not floating text --- */
 .ops .detail-pane {
@@ -357,16 +418,13 @@
   }
   .ops .data-table tbody tr[role='button'] {
     padding-right: 30px;
-  }
-  .ops .data-table tbody tr[role='button']::after {
-    content: '›';
-    position: absolute;
-    top: 50%;
-    right: 12px;
-    transform: translateY(-50%);
-    color: var(--ops-muted);
-    font-size: 20px;
-    line-height: 1;
+    /* Chevron as a background image, NOT ::after content — CSS generated
+       content is concatenated into a role=button element's accessible name,
+       so a decorative '›' would be read out by screen readers. A background
+       image is excluded from the accname computation. */
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='14' viewBox='0 0 8 14'%3E%3Cpath d='M1 1l6 6-6 6' fill='none' stroke='%236a6f76' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
   }
   .ops .data-table tbody td {
     display: block;
