@@ -38,6 +38,8 @@ Use `migration up` when you want to add new migrations without losing local proc
 
 (If you ever need to invoke the `supabase` CLI from inside the devcontainer — uncommon — its Go resolver picks an IPv6 form of `host.docker.internal` that isn't routable, and it defaults to TLS which the local Postgres rejects. Both surface as `tls error (server refused TLS connection)`. Workaround: pass `--db-url` with your container's gateway IPv4 plus `?sslmode=disable`. The literal varies by environment — `getent hosts host.docker.internal` and `ip route` show what's reachable from your container.)
 
+**Bringing the local stack up — and the shared-ports gotcha.** Supabase-local binds fixed ports `54321` (API) / `54322` (DB) / `54323` (Studio) / `54324` (Mailpit/Inbucket), and **only one Supabase project can hold them at a time.** On a shared box another repo's stack may already own them — check `docker ps --format '{{.Names}}' | grep supabase` (the container suffix is that project's `project_id` from its `supabase/config.toml`). To hand the ports to spiritolo, run `supabase stop` **from that other project's directory** (find it: `grep -rl 'project_id = "<name>"' ~ --include=config.toml`; often a sibling like `…/<repo>/cloud`) — its data survives in a docker volume — then `supabase start` here. **Be a good citizen: stop whatever you start; don't restart someone else's stack unless asked.** Paths/projects vary by machine, so discover them rather than hardcoding. `supabase start` prints the keys (`API_URL`, `PUBLISHABLE_KEY` = `sb_publishable_…`, `SERVICE_ROLE_KEY`, `JWT_SECRET`, Mailpit URL); `supabase status` re-prints them but errors if the running containers belong to a different project (use the start output then). A restored volume can predate the branch's migrations — `supabase db reset` replays all migrations + the `admin@local.test` seed to get current. The web app then needs `web/.env.local` (`VITE_SUPABASE_URL=http://localhost:54321`, `VITE_SUPABASE_PUBLISHABLE_KEY=<from start>`); `cd web && npm run dev` serves it on `:5173`.
+
 **Test DB.** DB-integration tests (`ingredients/tests/test_stage_map.py`, the upload smoke tests in `scripts/tests/`, et al) run against `TEST_DB_URL` — a *separate* Postgres database from `SUPABASE_DB_URL` — so `pytest` can `TRUNCATE … CASCADE` freely without nuking the dev data. Add this to `.env`:
 
 ```
@@ -239,3 +241,14 @@ npm test                           # Vitest + @testing-library/react
 ```
 
 Main suite: [normalizeRecipe.test.ts](web/src/normalizeRecipe.test.ts) covers messy Schema.org Recipe variants. Supabase must be running on the host for the dev server to load data.
+
+## Walkthroughs (showboat)
+
+`uvx showboat` builds an *executable* markdown doc — commentary (`note`), captured code blocks (`exec`), and screenshots (`image`) — that doubles as reproducible proof: `showboat verify` re-runs every code block and diffs the output. Use it to demo UI/pipeline work. Paths differ per machine, so keep the throwaway bits (Playwright project, screenshots, the doc) in the session scratchpad, not the repo.
+
+Recipe for a UI walkthrough:
+
+1. **Local stack + fake data.** Bring the stack up (see Local environment), `supabase db reset`, then seed *fake* data straight into the tables the views read — plain `INSERT`s, no staging restore needed for a demo. For `/ops`: `recipes` / `recipe_ingredients` / `recipe_steps` / `stage_runs` (+ one `stage_live_version` row per stage at that stage's version constant, or the dashboard/reviews views show nothing) / `recipe_clusters` / `recipe_exports` / `stage_reviews`; audit-log rows generate themselves via the table triggers.
+2. **Serve.** `web/.env.local` + `cd web && npm run dev` (`:5173`).
+3. **Headless admin auth (no email).** `POST http://127.0.0.1:54321/auth/v1/admin/generate_link` with the `service_role` key, body `{"type":"magiclink","email":"admin@local.test","options":{"redirect_to":"http://localhost:5173/auth/callback"}}` → navigate the returned `action_link` in Playwright to land an authenticated session (`redirect_to` must be allow-listed — see `additional_redirect_urls` in `supabase/config.toml`). Then `page.goto` each route + `screenshot({ fullPage: true })`. Install Playwright + chromium in the scratchpad.
+4. **Assemble + prove.** `showboat init/note/exec/image` (an `exec` psql row-count block makes good re-runnable proof), then `showboat verify`. Optionally render to a self-contained HTML artifact (inline the PNGs as `data:` URIs) for viewing.

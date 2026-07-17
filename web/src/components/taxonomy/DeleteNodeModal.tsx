@@ -44,7 +44,7 @@ export function DeleteNodeModal({ node, fetchBlockers, onCancel, onConfirm }: Pr
     );
   }
 
-  const blocked = b.children > 0 || b.recipe_ingredients > 0 || b.taxonomy_proposals > 0;
+  const blocked = b.children > 0 || b.recipe_ingredients > 0 || b.form_proposals > 0;
   const cascade: string[] = [];
   if (b.parents > 0) cascade.push(`${b.parents} parent edge${b.parents === 1 ? '' : 's'}`);
   if (b.aliases > 0) cascade.push(`${b.aliases} alias${b.aliases === 1 ? '' : 'es'}`);
@@ -53,7 +53,7 @@ export function DeleteNodeModal({ node, fetchBlockers, onCancel, onConfirm }: Pr
   const blockerLines: string[] = [];
   if (b.children > 0) blockerLines.push(`${b.children} children — re-parent or delete first`);
   if (b.recipe_ingredients > 0) blockerLines.push(`${b.recipe_ingredients} recipe_ingredients references — remap first`);
-  if (b.taxonomy_proposals > 0) blockerLines.push(`${b.taxonomy_proposals} open taxonomy_proposals references`);
+  if (b.form_proposals > 0) blockerLines.push(`${b.form_proposals} open form-proposal references`);
 
   return (
     <ModalShell onBackdropClick={onCancel}>

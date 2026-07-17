@@ -8,7 +8,7 @@ export type TaxonomyBlockers = {
   aliases: number;
   provenance: number;
   recipe_ingredients: number;
-  taxonomy_proposals: number;
+  form_proposals: number;
 };
 
 export class RpcError extends Error {

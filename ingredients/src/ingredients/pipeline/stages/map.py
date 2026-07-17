@@ -136,6 +136,10 @@ def map_stage_fn(
         #    the per-recipe loop ran them under the autocommit connection.
         _resolve_names(conn, union_names, aliases, providers)
 
+        # Pin: re-stamp any human overrides the auto-resolution just clobbered,
+        # supersede machine proposals now resolved, and point map's live version.
+        base.finalize_run(conn, stage=STAGE, version=MAPPER_VERSION, ids=union_names)
+
         with conn.transaction():
             # 3. One grouped count query -> resolved row count per name.
             name_counts: dict[str, int] = {}

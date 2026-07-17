@@ -6,6 +6,10 @@ import { SplitView, DetailPane } from '../../ui/SplitView';
 import { JsonView } from '../../ui/JsonView';
 import { FilterBar } from '../../ui/FilterBar';
 import { usePagedQuery, type PostgrestFilter } from '../../ui/hooks/usePagedQuery';
+import { Pager } from '../../ui/Pager';
+import { CrossLink, clusterHref, taxonomyHref } from '../../ui/opsLinks';
+
+const PAGE_SIZE = 50;
 
 interface RecipeListRow {
   id: number;
@@ -72,20 +76,21 @@ const COLUMNS: DataTableColumn<RecipeListRow>[] = [
 // to, and the frozen recipe_exports bundle, in one detail pane.
 export function RecipesBrowser() {
   const [filters, setFilters] = useState<PostgrestFilter[]>([]);
+  const [page, setPage] = useState(1);
 
   const { rows, total } = usePagedQuery<RecipeListRow>({
     table: 'recipes_public',
     select: LIST_SELECT,
     filters,
     order: { col: 'id', asc: false },
-    page: 1,
-    pageSize: 50,
+    page,
+    pageSize: PAGE_SIZE,
   });
 
   return (
     <div className="ops-recipes">
-      <FilterBar onChange={(v) => setFilters(v.filters)} />
-      <p style={{ fontSize: 12, opacity: 0.7 }}>{total} recipes</p>
+      <FilterBar onChange={(v) => { setFilters(v.filters); setPage(1); }} />
+      <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="recipes" />
       <SplitView
         list={({ select }) => (
           <DataTable
@@ -190,7 +195,7 @@ function RecipeDetail({ id }: { id: string | null }) {
             <li key={i.id}>
               {i.raw_text} — {i.name ?? 'unparsed'}
               {i.name && (
-                <> ({slug ? slug : 'unresolved'})</>
+                <> ({slug ? <CrossLink to={taxonomyHref(slug)}>{slug}</CrossLink> : 'unresolved'})</>
               )}
             </li>
           );
@@ -200,7 +205,11 @@ function RecipeDetail({ id }: { id: string | null }) {
 
       <h4>Cluster</h4>
       {cluster ? (
-        <p>{cluster.canonical_name} — cluster {cluster.cluster_key} ({cluster.recipe_count} recipes, {cluster.source_count} sources)</p>
+        <p>
+          {cluster.canonical_name} — cluster{' '}
+          <CrossLink to={clusterHref(cluster.cluster_key)}>{cluster.cluster_key}</CrossLink>{' '}
+          ({cluster.recipe_count} recipes, {cluster.source_count} sources)
+        </p>
       ) : (
         <p style={{ fontStyle: 'italic', opacity: 0.7 }}>not yet clustered</p>
       )}

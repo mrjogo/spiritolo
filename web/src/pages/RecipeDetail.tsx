@@ -5,6 +5,7 @@ import { ErrorPage } from '../components/ErrorPage';
 import { normalizeRecipe } from '../normalizeRecipe';
 import { useIsAdmin } from '../auth/useIsAdmin';
 import { StructuredIngredients } from '../components/recipe/StructuredIngredients';
+import { FlagButton } from '../components/reviews/FlagButton';
 import type { InstructionStep, RecipeRow, RecipeIngredientRow } from '../types';
 
 type RecipeState =
@@ -117,6 +118,9 @@ export function RecipeDetail() {
         <img src={normalized.images[0]} alt="" className="recipe-detail__hero" />
       )}
       <h1>{normalized.name}</h1>
+      {/* Admin-only: flag this recipe's extract output for review. Renders null
+          for the public. Per-ingredient/step flags can be added similarly. */}
+      <FlagButton entityKind="recipe" entityId={String(id)} stage="extract" />
       {(normalized.author || host) && (
         <p className="recipe-detail__byline">
           {normalized.author && <>By {normalized.author} · </>}

@@ -43,13 +43,22 @@ def _insert_run(conn, entity_id, stage, outcome, *, cost_cents=None, method="llm
         "values ('recipe', %s, %s, 'v1', %s, %s, %s)",
         (entity_id, stage, outcome, method, cost_cents),
     )
+    # The view counts only the LIVE version (stage_runs is append-versioned), so
+    # point the stage at v1 for these single-version fixtures.
+    conn.execute(
+        "insert into stage_live_version (stage, version) values (%s, 'v1') "
+        "on conflict (stage) do update set version = 'v1'",
+        (stage,),
+    )
 
 
 @pytest.fixture
 def clean_stage_runs(db_conn):
     db_conn.execute("truncate table stage_runs restart identity cascade")
+    db_conn.execute("delete from stage_live_version")
     yield db_conn
     db_conn.execute("truncate table stage_runs restart identity cascade")
+    db_conn.execute("delete from stage_live_version")
 
 
 def test_view_is_security_invoker(db_conn):
@@ -95,17 +104,18 @@ def test_aggregates_count_and_cost_per_stage_outcome(clean_stage_runs):
     assert rows[("fetch", "resolved")] == (1, 5)
 
 
-def test_upsert_keeps_the_view_latest_only(clean_stage_runs):
-    # stage_runs is latest-only per (entity_type, entity_id, stage); a
-    # re-run UPSERT must move the entity's contribution to its new outcome,
-    # not double-count it under both.
+def test_view_counts_live_version_only(clean_stage_runs):
+    # stage_runs is append-versioned; the view counts only the LIVE version, so
+    # a bumped entity contributes its live-version outcome, not both versions.
     conn = clean_stage_runs
-    _insert_run(conn, 1, "map", "pending")
+    _insert_run(conn, 1, "map", "pending")  # v1, live pointer -> v1
     conn.execute(
         "insert into stage_runs (entity_type, entity_id, stage, version, outcome, method) "
-        "values ('recipe', 1, 'map', 'v2', 'resolved', 'llm') "
-        "on conflict (entity_type, entity_id, stage) do update set "
-        "version = excluded.version, outcome = excluded.outcome, method = excluded.method"
+        "values ('recipe', 1, 'map', 'v2', 'resolved', 'llm')"
+    )
+    conn.execute(
+        "insert into stage_live_version (stage, version) values ('map', 'v2') "
+        "on conflict (stage) do update set version = excluded.version"
     )
     rows = dict(
         conn.execute(

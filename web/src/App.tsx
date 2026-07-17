@@ -39,6 +39,9 @@ const OpsClustersBrowser = lazy(() =>
 const OpsExportsBrowser = lazy(() =>
   import('./pages/ops/ExportsBrowser').then((m) => ({ default: m.ExportsBrowser })),
 );
+const OpsReviewsBrowser = lazy(() =>
+  import('./pages/ops/ReviewsBrowser').then((m) => ({ default: m.ReviewsBrowser })),
+);
 
 function OpsChunkFallback() {
   return (
@@ -162,6 +165,14 @@ export default function App() {
                 element={
                   <Suspense fallback={<OpsChunkFallback />}>
                     <OpsExportsBrowser />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="reviews"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsReviewsBrowser />
                   </Suspense>
                 }
               />

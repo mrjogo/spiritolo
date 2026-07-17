@@ -44,8 +44,7 @@ _RECORD_RUN_SQL = """
         %s, %s, %s, %s, %s, %s,
         %s, coalesce(%s, now())
     )
-    on conflict (entity_type, entity_id, stage) do update set
-        version     = excluded.version,
+    on conflict (entity_type, entity_id, stage, version) do update set
         outcome     = excluded.outcome,
         method      = excluded.method,
         confidence  = excluded.confidence,
@@ -85,14 +84,27 @@ def _record_run_params(
 
 
 def record_run(conn, **kwargs) -> None:
-    """UPSERT the latest run for ``(entity_type, entity_id, stage)``.
+    """UPSERT the run for ``(entity_type, entity_id, stage, version)``.
 
-    On conflict the row is overwritten in place (version/outcome/method/… all
-    take the new values), so exactly one row per (entity, stage) ever exists.
-    ``finished_at`` defaults to now() when not supplied — a recorded run is a
-    completed run. See ``_record_run_params`` for the accepted keywords.
+    Append-versioned: re-running at the SAME version overwrites that version's
+    row in place, but a NEW version inserts a new row — so a bump keeps the prior
+    version's decision (in ``payload``) instead of destroying it. ``finished_at``
+    defaults to now() when not supplied. See ``_record_run_params`` for keywords.
     """
     conn.execute(_RECORD_RUN_SQL, _record_run_params(**kwargs))
+
+
+def set_live_version(conn, *, stage: str, version: str) -> None:
+    """Point ``stage`` at ``version`` as the live/materialized version.
+
+    Option-3 default: the latest run wins, so a stage upserts this to its own
+    version on every run. The deferred promote/rollback flips it deliberately.
+    """
+    conn.execute(
+        "insert into stage_live_version (stage, version) values (%s, %s) "
+        "on conflict (stage) do update set version = excluded.version",
+        (stage, version),
+    )
 
 
 def record_runs(conn, rows: Sequence[dict[str, Any]]) -> None:
@@ -125,9 +137,10 @@ def work_queue(
 
     The NOT-EXISTS predicate is the generalization of every ``get_pending_*``
     query: an entity is queued when no stage_runs row exists for it at the
-    current version. Because the unique key guarantees ≤1 row per (entity,
-    stage), an entity whose row is left at an older version is automatically
-    included — no history rows to filter.
+    current version. The ledger is append-versioned (≤1 row per (entity, stage,
+    version), history kept), so an entity whose only rows are at older versions
+    still qualifies — the predicate keys on the current version, so prior-version
+    history rows don't mask it.
 
     The ledger stays content-agnostic: the caller supplies ``content_table`` and
     an optional ``where``/``params`` prefilter over the content row (aliased

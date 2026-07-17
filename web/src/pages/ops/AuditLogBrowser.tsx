@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../supabase';
 import { DataTable, type DataTableColumn } from '../../ui/DataTable';
@@ -6,6 +6,10 @@ import { SplitView, DetailPane } from '../../ui/SplitView';
 import { StatusPill } from '../../ui/StatusPill';
 import { JsonView } from '../../ui/JsonView';
 import { usePagedQuery, type PostgrestFilter } from '../../ui/hooks/usePagedQuery';
+import { Pager } from '../../ui/Pager';
+import { CrossLink, auditRowHref } from '../../ui/opsLinks';
+
+const PAGE_SIZE = 50;
 
 interface AuditLogListRow {
   id: number;
@@ -33,7 +37,14 @@ const OP_LABELS: Record<string, string> = { I: 'insert', U: 'update', D: 'delete
 const COLUMNS: DataTableColumn<AuditLogListRow>[] = [
   { key: 'ts', header: 'when' },
   { key: 'table_name', header: 'table' },
-  { key: 'pk', header: 'pk' },
+  {
+    key: 'pk',
+    header: 'pk',
+    render: (r) => {
+      const href = auditRowHref(r.table_name, r.pk);
+      return href ? <CrossLink to={href}>{r.pk}</CrossLink> : r.pk;
+    },
+  },
   { key: 'op', header: 'op', render: (r) => OP_LABELS[r.op] ?? r.op },
   { key: 'actor_kind', header: 'actor kind' },
   { key: 'actor_id', header: 'actor id', render: (r) => r.actor_id ?? '—' },
@@ -46,6 +57,8 @@ const COLUMNS: DataTableColumn<AuditLogListRow>[] = [
 export function AuditLogBrowser() {
   const [actorKind, setActorKind] = useState('');
   const [tableName, setTableName] = useState('');
+  const [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [actorKind, tableName]);
 
   const filters: PostgrestFilter[] = [];
   if (actorKind) filters.push({ col: 'actor_kind', op: 'eq', value: actorKind });
@@ -56,13 +69,13 @@ export function AuditLogBrowser() {
     select: LIST_SELECT,
     filters,
     order: { col: 'id', asc: false },
-    page: 1,
-    pageSize: 50,
+    page,
+    pageSize: PAGE_SIZE,
   });
 
   return (
     <div className="ops-audit-log">
-      <div role="group" aria-label="audit log filters" style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+      <div className="ops-filters" role="group" aria-label="audit log filters" style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
         <select aria-label="actor kind" value={actorKind} onChange={(e) => setActorKind(e.target.value)}>
           <option value="">All actors</option>
           {ACTOR_KINDS.map((k) => (
@@ -76,7 +89,7 @@ export function AuditLogBrowser() {
           onChange={(e) => setTableName(e.target.value)}
         />
       </div>
-      <p style={{ fontSize: 12, opacity: 0.7 }}>{total} entries</p>
+      <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="entries" />
       <SplitView
         list={({ select }) => (
           <DataTable
@@ -114,7 +127,13 @@ function AuditLogDetail({ id }: { id: string | null }) {
   const row = query.data;
   return (
     <DetailPane>
-      <h3>{row.table_name} #{row.pk}</h3>
+      <h3>
+        {row.table_name} #
+        {(() => {
+          const href = auditRowHref(row.table_name, row.pk);
+          return href ? <CrossLink to={href}>{row.pk}</CrossLink> : row.pk;
+        })()}
+      </h3>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
         <StatusPill kind={row.actor_kind} />
         <span style={{ fontSize: 12, opacity: 0.7 }}>{row.source}</span>

@@ -9,7 +9,7 @@ describe('DeleteNodeModal', () => {
   it('shows loading state, then no-blocker form when fetchBlockers resolves clean', async () => {
     const fetchBlockers = vi.fn().mockResolvedValue({
       children: 0, child_names: [], parents: 2, aliases: 1, provenance: 1,
-      recipe_ingredients: 0, taxonomy_proposals: 0,
+      recipe_ingredients: 0, form_proposals: 0,
     });
     render(
       <DeleteNodeModal node={NODE} fetchBlockers={fetchBlockers} onCancel={vi.fn()} onConfirm={vi.fn()} />,
@@ -27,7 +27,7 @@ describe('DeleteNodeModal', () => {
         { id: 200, display_name: 'other' },
       ],
       parents: 2, aliases: 1, provenance: 1,
-      recipe_ingredients: 12, taxonomy_proposals: 0,
+      recipe_ingredients: 12, form_proposals: 0,
     });
     render(
       <DeleteNodeModal node={NODE} fetchBlockers={fetchBlockers} onCancel={vi.fn()} onConfirm={vi.fn()} />,
@@ -41,7 +41,7 @@ describe('DeleteNodeModal', () => {
   it('enables DELETE only when typed slug matches', async () => {
     const fetchBlockers = vi.fn().mockResolvedValue({
       children: 0, child_names: [], parents: 0, aliases: 0, provenance: 0,
-      recipe_ingredients: 0, taxonomy_proposals: 0,
+      recipe_ingredients: 0, form_proposals: 0,
     });
     const onConfirm = vi.fn().mockResolvedValue(undefined);
     const user = userEvent.setup();

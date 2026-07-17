@@ -30,8 +30,8 @@ from typing import Any
 
 import psycopg
 
-from ingredients.mapping.proposals import enqueue_form_proposal
 from ingredients.mapping.resolutions import write_abstain, write_resolution
+from ingredients.reviews.model import insert_review
 
 # taxonomy_nodes.node_kind has a CHECK constraint allowing only these values
 # (plus NULL). An LLM-proposed brand/expression must validate before INSERT or
@@ -174,14 +174,20 @@ def apply_llm_action(
 
     if action == "propose_form":
         parent_id = _lookup_node_by_slug(conn, answer.get("parent_slug"))
-        enqueue_form_proposal(
+        insert_review(
             conn,
-            raw_string=normalized_name,
-            proposed_slug=answer["slug"],
-            proposed_display_name=answer["display_name"],
-            proposed_parent_id=parent_id,
-            candidates=answer.get("candidates") or [],
-            mapper_version=version,
+            entity_kind="ingredient_name",
+            entity_id=normalized_name,
+            stage="map",
+            origin="machine_proposal",
+            payload={
+                "kind": "form",
+                "proposed_slug": answer["slug"],
+                "proposed_display_name": answer["display_name"],
+                "proposed_parent_id": parent_id,
+                "candidates": answer.get("candidates") or [],
+            },
+            origin_version=version,
         )
         # Parked: no resolution row, so the recipe stays pending for review.
         return "propose_form"

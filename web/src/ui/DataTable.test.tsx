@@ -35,6 +35,24 @@ describe('<DataTable>', () => {
     expect(wrapper.style.overflowX).toBe('auto');
   });
 
+  it('labels every cell with data-label={header} so the mobile card layout can render label→value rows', () => {
+    const { container } = render(
+      <DataTable<Row>
+        columns={[
+          { key: 'name', header: 'Name' },
+          { key: 'state', header: 'State', render: (r) => <StatusPill kind={r.state} /> },
+        ]}
+        rows={rows}
+        rowKey={(r) => r.id}
+        selectable
+      />,
+    );
+    const firstBodyRow = container.querySelector('tbody tr') as HTMLElement;
+    const labels = [...firstBodyRow.querySelectorAll('td')].map((td) => td.getAttribute('data-label'));
+    // select checkbox cell + the two data columns, in order.
+    expect(labels).toEqual(['select', 'Name', 'State']);
+  });
+
   it('selectable table: clicking a row checkbox calls onSelectionChange with the selected ids', async () => {
     const user = userEvent.setup();
     const onSelectionChange = vi.fn();

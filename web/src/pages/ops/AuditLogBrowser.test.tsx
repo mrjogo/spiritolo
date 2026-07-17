@@ -93,7 +93,7 @@ describe('<AuditLogBrowser>', () => {
       },
     );
     renderBrowser(makeClient());
-    const row = await screen.findByRole('button');
+    const row = await within(await screen.findByRole('table')).findByRole('button');
     await userEvent.click(row);
     await waitFor(() => expect(detailEq).toHaveBeenCalledWith('id', 1));
     expect(await screen.findByText('"New"')).toBeInTheDocument();

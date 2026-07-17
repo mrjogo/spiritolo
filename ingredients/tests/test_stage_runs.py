@@ -98,7 +98,8 @@ def test_schema_shape(db_conn):
     for v in ("deterministic", "llm", "manual"):
         assert v in checks, f"method CHECK missing {v}"
 
-    # UNIQUE(entity_type, entity_id, stage) — the latest-only key.
+    # UNIQUE(entity_type, entity_id, stage, version) — the append-versioned key
+    # (was latest-only (…, stage); now one row per version, history kept).
     uniq = {}
     for r in db_conn.execute(
         """
@@ -111,9 +112,10 @@ def test_schema_shape(db_conn):
     ).fetchall():
         uniq.setdefault(r[0], []).append((r[2], r[1]))
     assert any(
-        [c for _, c in sorted(members)] == ["entity_type", "entity_id", "stage"]
+        [c for _, c in sorted(members)]
+        == ["entity_type", "entity_id", "stage", "version"]
         for members in uniq.values()
-    ), f"missing UNIQUE(entity_type, entity_id, stage); have {uniq}"
+    ), f"missing UNIQUE(entity_type, entity_id, stage, version); have {uniq}"
 
 
 def test_entity_type_check_rejects_unknown(db_conn):
@@ -130,7 +132,9 @@ def test_entity_type_check_rejects_unknown(db_conn):
 # Behavior — latest-only UPSERT
 # --------------------------------------------------------------------------
 
-def test_upsert_is_latest_only(db_conn):
+def test_upsert_appends_versions(db_conn):
+    # Append-versioned: one row per (entity, stage, VERSION); a bump keeps the
+    # prior version's decision. A re-run at the SAME version overwrites in place.
     db_conn.execute("truncate table stage_runs restart identity cascade")
 
     ledger.record_run(
@@ -145,16 +149,24 @@ def test_upsert_is_latest_only(db_conn):
     )
 
     rows = db_conn.execute(
-        "select version, outcome, method, confidence, model_id, payload "
-        "from stage_runs where entity_type = 'recipe' and entity_id = 1 "
-        "and stage = 'parse'"
+        "select version, outcome from stage_runs "
+        "where entity_type = 'recipe' and entity_id = 1 and stage = 'parse' "
+        "order by version"
     ).fetchall()
-    assert len(rows) == 1, "UPSERT must keep exactly one row per (entity, stage)"
-    version, outcome, method, confidence, model_id, payload = rows[0]
-    assert (version, outcome, method) == ("v2", "resolved", "llm")
-    assert confidence == pytest.approx(0.9)
-    assert model_id == "gpt-5-mini"
-    assert payload == {"n": 2}
+    assert rows == [("v1", "pending"), ("v2", "resolved")], (
+        "append-versioned: one row per version, history kept"
+    )
+
+    # Same-version re-run overwrites that version's row in place.
+    ledger.record_run(
+        db_conn, entity_type="recipe", entity_id=1, stage="parse",
+        version="v2", outcome="failed", method="llm", payload={"n": 3},
+    )
+    v2 = db_conn.execute(
+        "select outcome, payload from stage_runs "
+        "where entity_id = 1 and stage = 'parse' and version = 'v2'"
+    ).fetchall()
+    assert v2 == [("failed", {"n": 3})]
 
 
 # --------------------------------------------------------------------------
