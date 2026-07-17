@@ -75,7 +75,7 @@ export function AuditLogBrowser() {
 
   return (
     <div className="ops-audit-log">
-      <div role="group" aria-label="audit log filters" style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+      <div className="ops-filters" role="group" aria-label="audit log filters" style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
         <select aria-label="actor kind" value={actorKind} onChange={(e) => setActorKind(e.target.value)}>
           <option value="">All actors</option>
           {ACTOR_KINDS.map((k) => (

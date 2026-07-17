@@ -19,6 +19,10 @@ export interface DataTableProps<T> {
 // optional custom cell renderers (StatusPill/CostBadge cells), optional
 // checkbox selection (feeds scoped triggers), optional row click. Sticky
 // header + an overflow-x:auto wrapper — no ag-grid, no virtualization.
+//
+// Every <td> carries data-label={header} so the mobile stylesheet can hide
+// the <thead> and linearize each row into a labelled card (td::before renders
+// the label) — see the max-width:640px block in pages/ops/ops.css.
 export function DataTable<T>({
   columns, rows, rowKey, selectable, selectedIds, onSelectionChange, onRowClick,
 }: DataTableProps<T>) {
@@ -64,7 +68,7 @@ export function DataTable<T>({
                 }
               >
                 {selectable && (
-                  <td>
+                  <td data-label="select">
                     <input
                       type="checkbox"
                       aria-label={`select row ${id}`}
@@ -75,7 +79,7 @@ export function DataTable<T>({
                   </td>
                 )}
                 {columns.map((c) => (
-                  <td key={c.key}>
+                  <td key={c.key} data-label={c.header}>
                     {c.render ? c.render(row) : String((row as Record<string, unknown>)[c.key] ?? '')}
                   </td>
                 ))}

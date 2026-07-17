@@ -213,6 +213,30 @@ a:focus-visible {
   text-underline-offset: 3px;
 }
 
+/* Phone: keep the shared header a single tidy row. Tighten the brand + nav and
+   drop the redundant "admin" chip so brand + nav + Sign out fit without
+   overflowing a ~360px viewport. (Shared across every authed page, ops or not.) */
+@media (max-width: 640px) {
+  .site-header {
+    padding: 0 12px;
+    gap: 8px;
+  }
+  .site-header__brand {
+    font-size: 0.9rem;
+    letter-spacing: 0.1em;
+  }
+  .site-header__nav {
+    gap: 0.85rem;
+    font-size: 0.9rem;
+  }
+  .site-header__user {
+    gap: 8px;
+  }
+  .site-header__admin-chip {
+    display: none;
+  }
+}
+
 /* Landing — public hero page. Pure-black background extends the dark
    edges of the hero image so it bleeds seamlessly into the rest of the
    viewport on wide screens. */
