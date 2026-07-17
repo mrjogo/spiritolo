@@ -160,3 +160,39 @@
 .ops-xlink:hover {
   text-decoration: underline;
 }
+
+/* --- detail pane (right side of a split view): a framed white panel so it
+       reads as a surface, not floating text --- */
+.ops .detail-pane {
+  background: var(--ops-surface);
+  border: 1px solid var(--ops-border);
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(20, 25, 40, 0.04);
+  padding: 16px 18px;
+  min-height: 140px;
+}
+.ops .detail-pane > :first-child {
+  margin-top: 0;
+}
+.ops .detail-pane h3 {
+  font-size: 15px;
+  margin: 0 0 8px;
+}
+.ops .detail-pane h4 {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ops-muted);
+  margin: 16px 0 6px;
+}
+.ops .detail-pane dl {
+  margin: 0;
+}
+.ops .detail-pane dt {
+  font-size: 11px;
+  color: var(--ops-muted);
+  margin-top: 8px;
+}
+.ops .detail-pane dd {
+  margin: 0 0 2px;
+}
