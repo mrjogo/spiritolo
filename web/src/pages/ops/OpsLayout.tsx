@@ -28,6 +28,9 @@ export function OpsLayout() {
           <li>
             <NavLink to="/ops/exports">Exports</NavLink>
           </li>
+          <li>
+            <NavLink to="/ops/reviews">Reviews</NavLink>
+          </li>
         </ul>
       </nav>
       <Outlet />
