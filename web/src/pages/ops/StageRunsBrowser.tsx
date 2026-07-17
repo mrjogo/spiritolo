@@ -53,6 +53,13 @@ const COLUMNS: DataTableColumn<StageRunListRow>[] = [
 
 // The stage_runs run-ledger: filter by stage/outcome/version, drill from the
 // list into the full row (including payload) on selection.
+//
+// NOTE: stage_runs is now append-versioned — there can be multiple rows per
+// (entity, stage) across version bumps, and only the current-version row is
+// "live" for a stage's queue predicate. This browser intentionally lists all
+// versions (the version <input> narrows to one); TODO: once a per-stage
+// live-version source is wired, default the view to the live version so reads
+// don't surface superseded rows by default.
 export function StageRunsBrowser() {
   const [stage, setStage] = useState('');
   const [outcome, setOutcome] = useState('');
