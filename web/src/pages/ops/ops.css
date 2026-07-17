@@ -161,6 +161,37 @@
   text-decoration: underline;
 }
 
+/* --- split view: master list + detail. Desktop = side by side; the base
+       layout lives here (not inline on the component) so the mobile stylesheet
+       can restack it into a one-pane-at-a-time master→detail flow. --- */
+.ops .split-view {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+.ops .split-view__list {
+  flex: 1 1 60%;
+  min-width: 0;
+}
+.ops .split-view__detail {
+  flex: 1 1 40%;
+  min-width: 0;
+}
+/* The "‹ Back to list" control is a mobile-only affordance (see media query). */
+.ops .split-view__back {
+  display: none;
+}
+
+/* --- review card: the payload editor is a monospace code box. Font-size lives
+       here (not inline) so the mobile block can bump it to 16px and dodge iOS
+       Safari's focus-zoom. --- */
+.ops .review-card textarea {
+  width: 100%;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
 /* --- detail pane (right side of a split view): a framed white panel so it
        reads as a surface, not floating text --- */
 .ops .detail-pane {
@@ -195,4 +226,208 @@
 }
 .ops .detail-pane dd {
   margin: 0 0 2px;
+}
+
+/* ===== Mobile / touch (phones, portrait) ================================== *
+ * Below 640px the /ops workbench goes touch-first: a single swipeable tab
+ * strip, data tables linearized into labelled cards, the split view flipped
+ * into a master→detail flow (one pane at a time), full-width stacked filters,
+ * ~44px tap targets, and 16px inputs so iOS Safari doesn't zoom on focus.
+ * Desktop rendering is untouched. */
+@media (max-width: 640px) {
+  /* --- sub-nav: one swipeable row instead of wrapping to 2–3 rows --- */
+  .ops > nav[aria-label='ops'] ul {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 0;
+    padding: 0 10px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent);
+  }
+  .ops > nav[aria-label='ops'] ul::-webkit-scrollbar {
+    display: none;
+  }
+  .ops > nav[aria-label='ops'] li {
+    flex: 0 0 auto;
+  }
+  .ops > nav[aria-label='ops'] a {
+    padding: 13px 14px;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  .ops-content {
+    padding: 16px 12px 48px;
+  }
+
+  /* --- bigger tap targets + 16px inputs (kills iOS focus-zoom). Checkboxes /
+         radios keep their intrinsic size; the JSON tree's toggle and the
+         mobile Back link opt back out below. --- */
+  .ops button {
+    min-height: 44px;
+    height: auto;
+    padding: 0 16px;
+    font-size: 14px;
+  }
+  .ops select,
+  .ops input:not([type='checkbox']):not([type='radio']) {
+    min-height: 44px;
+    height: auto;
+    font-size: 16px;
+  }
+  .ops textarea {
+    font-size: 16px;
+  }
+
+  /* --- filter surfaces: stack full-width --- */
+  .ops .filter-bar > select,
+  .ops .filter-bar > input[type='search'] {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+  .ops .ops-filters {
+    flex-wrap: wrap;
+  }
+  .ops .ops-filters > select,
+  .ops .ops-filters > input {
+    flex: 1 1 100%;
+    width: 100%;
+  }
+
+  /* --- split view: stacked master→detail, one pane visible at a time. The
+         data-has-selection attribute (set by SplitView from ?sel=) decides
+         which. --- */
+  .ops .split-view {
+    flex-direction: column;
+    gap: 0;
+  }
+  .ops .split-view__list,
+  .ops .split-view__detail {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+  .ops .split-view:not([data-has-selection]) .split-view__detail {
+    display: none;
+  }
+  .ops .split-view[data-has-selection] .split-view__list {
+    display: none;
+  }
+  .ops .split-view__back {
+    display: inline-flex;
+    align-items: center;
+    min-height: 0;
+    height: auto;
+    margin: 0 0 12px;
+    padding: 4px 0;
+    border: 0;
+    background: none;
+    color: var(--ops-accent);
+    font-size: 14px;
+  }
+
+  /* --- data tables → cards: hide the head, make each row a card, and each
+         cell a label→value line where td::before renders the column header
+         (DataTable stamps data-label onto every <td>). --- */
+  .ops .data-table__wrapper {
+    border: 0;
+    background: none;
+    box-shadow: none;
+    border-radius: 0;
+  }
+  .ops table.data-table {
+    display: block;
+  }
+  .ops .data-table thead {
+    display: none;
+  }
+  .ops .data-table tbody {
+    display: block;
+  }
+  .ops .data-table tbody tr {
+    display: block;
+    position: relative;
+    border: 1px solid var(--ops-border);
+    border-radius: 8px;
+    background: var(--ops-surface);
+    box-shadow: 0 1px 2px rgba(20, 25, 40, 0.04);
+    padding: 4px 14px;
+    margin-bottom: 10px;
+  }
+  .ops .data-table tbody tr[role='button'] {
+    padding-right: 30px;
+  }
+  .ops .data-table tbody tr[role='button']::after {
+    content: '›';
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    color: var(--ops-muted);
+    font-size: 20px;
+    line-height: 1;
+  }
+  .ops .data-table tbody td {
+    display: block;
+    position: relative;
+    padding: 8px 0 8px 42%;
+    text-align: right;
+    overflow-wrap: anywhere;
+    white-space: normal;
+    border-bottom: 1px solid var(--ops-border) !important;
+  }
+  .ops .data-table tbody td:last-child {
+    border-bottom: 0 !important;
+  }
+  .ops .data-table tbody td::before {
+    content: attr(data-label);
+    position: absolute;
+    left: 0;
+    top: 8px;
+    width: 38%;
+    text-align: left;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ops-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* --- pager: centered, allowed to wrap --- */
+  .ops-pager {
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  /* --- detail-pane content that can run wide: JSON trees + long URLs --- */
+  .ops .detail-pane {
+    padding: 14px;
+    overflow-wrap: anywhere;
+  }
+  .ops .json-view__leaf,
+  .ops .json-view__value,
+  .ops .json-view__summary {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+  .ops .json-view__toggle {
+    min-height: 0;
+    height: auto;
+  }
+
+  /* --- review card: readable code editor at 16px (no focus-zoom) --- */
+  .ops .review-card textarea {
+    font-size: 16px;
+  }
+
+  /* --- cost-confirm (and any shared .tx-modal rendered inside /ops): never
+         taller than the viewport. Its width already tracks the screen. --- */
+  .ops .tx-modal {
+    max-height: calc(100vh - 32px);
+    overflow-y: auto;
+  }
 }

@@ -94,7 +94,7 @@ export function ReviewCard({
         gap: 8,
       }}
     >
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center', fontSize: 12 }}>
         <span className="review-card__origin" style={{ fontFamily: 'monospace', opacity: 0.8 }}>
           {review.origin}
         </span>
@@ -128,18 +128,15 @@ export function ReviewCard({
 
       <label style={{ fontSize: 11, opacity: 0.7 }}>
         Fix (payload JSON)
+        {/* Sizing (width / monospace / font-size / margin) lives in
+            `.ops .review-card textarea` in ops.css so the mobile stylesheet can
+            bump it to 16px and dodge iOS Safari's focus-zoom. */}
         <textarea
           aria-label="payload JSON"
           value={payloadText}
           onChange={(e) => setPayloadText(e.target.value)}
           spellCheck={false}
           rows={Math.min(8, payloadText.split('\n').length + 1)}
-          style={{
-            width: '100%',
-            fontFamily: 'monospace',
-            fontSize: 12,
-            marginTop: 4,
-          }}
         />
       </label>
 

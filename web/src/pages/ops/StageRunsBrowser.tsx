@@ -107,7 +107,7 @@ export function StageRunsBrowser() {
 
   return (
     <div className="ops-stage-runs">
-      <div role="group" aria-label="stage run filters" style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+      <div className="ops-filters" role="group" aria-label="stage run filters" style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
         <select aria-label="stage" value={stage} onChange={(e) => setFilter('stage', e.target.value)}>
           <option value="">All stages</option>
           {PIPELINE_STAGES.map((s) => (

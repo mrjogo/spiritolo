@@ -46,4 +46,43 @@ describe('<SplitView>', () => {
     );
     expect(screen.getByText('7')).toBeInTheDocument();
   });
+
+  it('reflects the selection on the root as data-has-selection (drives the mobile master→detail CSS)', async () => {
+    const user = userEvent.setup();
+    const { container } = render(
+      <MemoryRouter initialEntries={['/ops/docs']}>
+        <SplitView
+          list={({ select }) => <button onClick={() => select('42')}>Select 42</button>}
+          detail={({ selectedId }) => <DetailPane>{selectedId ?? 'none'}</DetailPane>}
+        />
+      </MemoryRouter>,
+    );
+    const root = container.querySelector('.split-view') as HTMLElement;
+    expect(root.hasAttribute('data-has-selection')).toBe(false);
+
+    await user.click(screen.getByText('Select 42'));
+    expect(root.hasAttribute('data-has-selection')).toBe(true);
+  });
+
+  it('the Back control clears the selection and returns to the empty detail', async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter initialEntries={['/ops/docs?sel=7']}>
+        <SelParamProbe />
+        <SplitView
+          list={() => <div>list</div>}
+          detail={({ selectedId }) => (
+            <DetailPane>{selectedId ? `Detail: ${selectedId}` : 'Nothing selected'}</DetailPane>
+          )}
+        />
+      </MemoryRouter>,
+    );
+    expect(screen.getByText('Detail: 7')).toBeInTheDocument();
+    expect(screen.getByTestId('sel-probe')).toHaveTextContent('7');
+
+    await user.click(screen.getByRole('button', { name: /back to list/i }));
+
+    expect(screen.getByText('Nothing selected')).toBeInTheDocument();
+    expect(screen.getByTestId('sel-probe')).toHaveTextContent('');
+  });
 });
