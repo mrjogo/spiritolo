@@ -106,16 +106,19 @@ def finalize_run(
     """Close out a stage run over ``ids`` (touched entities, at the stage's review
     grain — recipe-id-strings for recipe stages, names for map).
 
-    Three uniform post-run steps: point the stage's live version at ``version``
-    (so needs_review / the dashboard reflect current state), re-apply any resolved
-    human overrides the auto-compute may have clobbered (pin survives rerun), and
-    dismiss machine proposals this run just auto-resolved.
+    Two uniform post-run steps: point the stage's live version at ``version`` (so
+    needs_review / the dashboard reflect current state) and re-apply any resolved
+    human overrides the auto-compute may have clobbered (pin survives rerun).
+    ``reapply`` only touches *resolved* overrides, so freshly-opened machine
+    proposals for the same entities are untouched. Superseding stale proposals is
+    a resolution-aware, per-stage concern (see ``reviews.reapply.supersede_stale``)
+    and is invoked explicitly by a stage over the ids it actually resolved, not
+    blanket-applied here.
     """
-    from ingredients.reviews.reapply import reapply_overrides, supersede_stale
+    from ingredients.reviews.reapply import reapply_overrides
 
     ledger.set_live_version(conn, stage=stage, version=version)
     reapply_overrides(conn, stage=stage, ids=ids)
-    supersede_stale(conn, stage=stage, ids=ids)
 
 
 def record_many(conn: psycopg.Connection, records: Iterable[dict[str, Any]]) -> None:

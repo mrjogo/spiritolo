@@ -52,6 +52,7 @@ def conn(test_db_url: str):
 def _truncate(c: psycopg.Connection) -> None:
     for t in (
         "recipes",
+        "stage_reviews",
         "stage_runs",
         "ingredient_resolutions",
         "taxonomy_proposals",
@@ -168,10 +169,12 @@ def test_propose_form_queues_proposal_and_parks(conn):
     assert counts["pending"] == 1
 
     prop = c.execute(
-        "select raw_string, proposed_slug, proposed_parent_id, status "
-        "from taxonomy_proposals where raw_string = 'lemon zest'"
+        "select entity_id, stage, origin, state, "
+        "payload->>'proposed_slug', (payload->>'proposed_parent_id')::bigint "
+        "from stage_reviews where entity_id = 'lemon zest' and stage = 'map'"
     ).fetchone()
-    assert prop == ("lemon zest", "lemon-zest", ids["lemon"], "pending")
+    assert prop == ("lemon zest", "map", "machine_proposal", "open",
+                    "lemon-zest", ids["lemon"])
 
     # Parked: no taxonomy node yet, no non-null resolution for the name.
     assert (
