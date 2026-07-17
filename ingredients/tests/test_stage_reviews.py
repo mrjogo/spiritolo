@@ -231,6 +231,36 @@ def test_reapply_restamps_override(clean):
     assert slug == "lime-juice"
 
 
+def test_map_stage_reapplies_override_on_run(clean):
+    # End-to-end: running the map stage must re-stamp a human override that a
+    # stale same-version auto-resolution would otherwise win (the pin, wired).
+    from ingredients.pipeline.stages.map import MAPPER_VERSION, map_stage_fn
+
+    r = _recipe(clean)
+    clean.execute(
+        "insert into recipe_ingredients(recipe_id,position,raw_text,name) "
+        "values (%s,0,'x','x')", (r,)
+    )
+    _review(clean, entity_kind="ingredient_name", entity_id="x", stage="map",
+            state="resolved", payload=Json({"slug": "correct"}))
+    clean.execute(
+        "insert into ingredient_resolutions(normalized_name,taxonomy_slug,method,version) "
+        "values ('x','WRONG','lexical',%s)", (MAPPER_VERSION,)
+    )
+
+    map_stage_fn({}, clean, None)
+
+    row = clean.execute(
+        "select taxonomy_slug, method from ingredient_resolutions where normalized_name='x'"
+    ).fetchone()
+    assert row == ("correct", "manual")
+    # and map pointed its live version
+    v = clean.execute(
+        "select version from stage_live_version where stage='map'"
+    ).fetchone()[0]
+    assert v == MAPPER_VERSION
+
+
 def test_supersede_dismisses_machine_not_human(clean):
     from ingredients.reviews.reapply import supersede_stale
     _review(clean, entity_kind="ingredient_name", entity_id="amaro", stage="map",

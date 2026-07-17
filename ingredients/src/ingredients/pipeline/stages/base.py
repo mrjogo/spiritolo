@@ -100,6 +100,24 @@ def record(
     )
 
 
+def finalize_run(
+    conn: psycopg.Connection, *, stage: str, version: str, ids: Sequence[str]
+) -> None:
+    """Close out a stage run over ``ids`` (touched entities, at the stage's review
+    grain — recipe-id-strings for recipe stages, names for map).
+
+    Three uniform post-run steps: point the stage's live version at ``version``
+    (so needs_review / the dashboard reflect current state), re-apply any resolved
+    human overrides the auto-compute may have clobbered (pin survives rerun), and
+    dismiss machine proposals this run just auto-resolved.
+    """
+    from ingredients.reviews.reapply import reapply_overrides, supersede_stale
+
+    ledger.set_live_version(conn, stage=stage, version=version)
+    reapply_overrides(conn, stage=stage, ids=ids)
+    supersede_stale(conn, stage=stage, ids=ids)
+
+
 def record_many(conn: psycopg.Connection, records: Iterable[dict[str, Any]]) -> None:
     """Batch form of ``record`` for a chunk of recipes. Each dict carries
     ``recipe_id`` plus the same keywords ``record`` takes (stage, version,
