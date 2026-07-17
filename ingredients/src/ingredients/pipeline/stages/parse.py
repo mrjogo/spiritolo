@@ -112,4 +112,8 @@ def parse_stage_fn(
                 with conn.cursor() as cur:
                     cur.executemany(_INSERT_ROWS_SQL, insert_tuples)
             base.record_many(conn, records)
+            base.finalize_run(
+                conn, stage=STAGE, version=PARSER_VERSION,
+                ids=[str(r) for r in chunk],
+            )
     return counts

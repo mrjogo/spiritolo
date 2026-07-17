@@ -261,6 +261,26 @@ def test_map_stage_reapplies_override_on_run(clean):
     assert v == MAPPER_VERSION
 
 
+def test_parse_stage_reapplies_override_on_run(clean):
+    # End-to-end: a parse override (keyed recipe_id:position) survives a parse
+    # rerun that re-parses (delete+reinsert) the ingredient rows.
+    from ingredients.pipeline.stages.parse import parse_stage_fn
+
+    r = clean.execute(
+        "insert into recipes (source_url, site, source) values "
+        "('u2','t','{\"recipeIngredient\":[\"1 oz gin\"]}'::jsonb) returning id"
+    ).fetchone()[0]
+    _review(clean, entity_kind="recipe_ingredient", entity_id=f"{r}:0",
+            stage="parse", state="resolved", payload=Json({"unit": "ml"}))
+
+    parse_stage_fn({}, clean, None)
+
+    unit = clean.execute(
+        "select unit from recipe_ingredients where recipe_id=%s and position=0", (r,)
+    ).fetchone()[0]
+    assert unit == "ml"  # override won over the freshly-parsed 'oz'
+
+
 def test_supersede_dismisses_machine_not_human(clean):
     from ingredients.reviews.reapply import supersede_stale
     _review(clean, entity_kind="ingredient_name", entity_id="amaro", stage="map",
