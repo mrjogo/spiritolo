@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../supabase';
 import { DataTable, type DataTableColumn } from '../../ui/DataTable';
@@ -7,6 +7,9 @@ import { StatusPill } from '../../ui/StatusPill';
 import { CostBadge } from '../../ui/CostBadge';
 import { JsonView } from '../../ui/JsonView';
 import { usePagedQuery, type PostgrestFilter } from '../../ui/hooks/usePagedQuery';
+import { Pager } from '../../ui/Pager';
+
+const PAGE_SIZE = 50;
 import { PIPELINE_STAGES } from '../../ui/pipelineStages';
 
 interface StageRunListRow {
@@ -64,6 +67,8 @@ export function StageRunsBrowser() {
   const [stage, setStage] = useState('');
   const [outcome, setOutcome] = useState('');
   const [version, setVersion] = useState('');
+  const [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [stage, outcome, version]);
 
   const filters: PostgrestFilter[] = [];
   if (stage) filters.push({ col: 'stage', op: 'eq', value: stage });
@@ -75,8 +80,8 @@ export function StageRunsBrowser() {
     select: LIST_SELECT,
     filters,
     order: { col: 'id', asc: false },
-    page: 1,
-    pageSize: 50,
+    page,
+    pageSize: PAGE_SIZE,
   });
 
   return (
@@ -101,7 +106,7 @@ export function StageRunsBrowser() {
           onChange={(e) => setVersion(e.target.value)}
         />
       </div>
-      <p style={{ fontSize: 12, opacity: 0.7 }}>{total} runs</p>
+      <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="runs" />
       <SplitView
         list={({ select }) => (
           <DataTable

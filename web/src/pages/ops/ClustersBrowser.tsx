@@ -1,9 +1,13 @@
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../supabase';
 import { DataTable, type DataTableColumn } from '../../ui/DataTable';
 import { SplitView, DetailPane } from '../../ui/SplitView';
 import { JsonView } from '../../ui/JsonView';
 import { usePagedQuery } from '../../ui/hooks/usePagedQuery';
+import { Pager } from '../../ui/Pager';
+
+const PAGE_SIZE = 50;
 
 interface ClusterListRow {
   cluster_key: string;
@@ -37,16 +41,18 @@ const COLUMNS: DataTableColumn<ClusterListRow>[] = [
 // points at. Detail drills into the antichain ingredient_set that hashed to
 // this cluster_key plus every member recipe currently pointing at it.
 export function ClustersBrowser() {
-  const { rows } = usePagedQuery<ClusterListRow>({
+  const [page, setPage] = useState(1);
+  const { rows, total } = usePagedQuery<ClusterListRow>({
     table: 'recipe_clusters',
     select: LIST_SELECT,
     order: { col: 'recipe_count', asc: false },
-    page: 1,
-    pageSize: 50,
+    page,
+    pageSize: PAGE_SIZE,
   });
 
   return (
     <div className="ops-clusters">
+      <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="clusters" />
       <SplitView
         list={({ select }) => (
           <DataTable

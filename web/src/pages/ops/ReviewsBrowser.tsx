@@ -1,8 +1,13 @@
+import { useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { useNeedsReview } from '../../reviews/useNeedsReview';
 import { useOpenReviews, openReviewsQueryKey } from '../../reviews/useOpenReviews';
 import { ReviewCard } from '../../components/reviews/ReviewCard';
 import type { StageReview } from '../../components/reviews/ReviewCard';
+import { Pager } from '../../ui/Pager';
+
+const PAGE_SIZE = 50;
+const STUCK_CAP = 100;
 
 // needs_review reasons that are NOT an actionable stage_reviews row — the
 // pipeline couldn't finish (no human/machine review to resolve yet).
@@ -40,7 +45,8 @@ function groupByStage<T extends { stage: string }>(rows: T[]): Map<string, T[]> 
 // read-only "pipeline stuck" list of needs_review gaps that aren't yet a review.
 export function ReviewsBrowser() {
   const queryClient = useQueryClient();
-  const { rows: reviews, status: reviewsStatus } = useOpenReviews();
+  const [page, setPage] = useState(1);
+  const { rows: reviews, total, status: reviewsStatus } = useOpenReviews(page, PAGE_SIZE);
   const { rows: needs } = useNeedsReview();
 
   const refetch = () => {
@@ -49,17 +55,18 @@ export function ReviewsBrowser() {
   };
 
   const reviewsByStage = groupByStage<StageReview>(reviews);
-  const stuck = needs.filter((r) => STUCK_REASONS.has(r.reason));
+  const allStuck = needs.filter((r) => STUCK_REASONS.has(r.reason));
+  const stuck = allStuck.slice(0, STUCK_CAP);
   const stuckByStage = groupByStage(stuck);
 
   return (
     <div className="ops-reviews">
       <h2 style={{ fontSize: 16, margin: '0 0 8px' }}>Reviews</h2>
-      <p style={{ fontSize: 12, opacity: 0.7 }}>
-        {reviewsStatus === 'loading'
-          ? 'Loading…'
-          : `${reviews.length} open review${reviews.length === 1 ? '' : 's'}`}
-      </p>
+      {reviewsStatus === 'loading' ? (
+        <p style={{ fontSize: 12, opacity: 0.7 }}>Loading…</p>
+      ) : (
+        <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="open reviews" />
+      )}
 
       {reviewsStatus !== 'loading' && reviews.length === 0 && (
         <p style={{ fontStyle: 'italic', opacity: 0.7 }}>No open reviews.</p>
@@ -84,6 +91,7 @@ export function ReviewsBrowser() {
           <h3 style={{ margin: '0 0 4px', fontSize: 14 }}>Pipeline stuck</h3>
           <p style={{ fontSize: 12, opacity: 0.6, margin: '0 0 8px' }}>
             The pipeline couldn&rsquo;t finish these — not yet an actionable review.
+            {allStuck.length > STUCK_CAP && ` (showing first ${STUCK_CAP} of ${allStuck.length})`}
           </p>
           {[...stuckByStage.entries()].map(([stage, stageRows]) => (
             <section key={stage} aria-label={`${stage} stuck`} style={{ marginBottom: 12 }}>

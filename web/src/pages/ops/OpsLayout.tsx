@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import './ops.css';
 
 // The /ops console shell: a left nav plus the routed child. Sits under the
 // existing RequireAuth -> AppLayout -> RequireAdmin nesting (see App.tsx),
@@ -33,7 +34,9 @@ export function OpsLayout() {
           </li>
         </ul>
       </nav>
-      <Outlet />
+      <div className="ops-content">
+        <Outlet />
+      </div>
     </div>
   );
 }

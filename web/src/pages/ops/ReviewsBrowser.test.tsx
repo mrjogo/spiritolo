@@ -46,6 +46,7 @@ describe('<ReviewsBrowser>', () => {
   it('renders open reviews as cards grouped by stage', () => {
     useOpenReviewsMock.mockReturnValue({
       status: 'loaded',
+      total: 2,
       rows: [
         review({ id: 1, entity_id: 'gin', stage: 'map' }),
         review({ id: 2, entity_id: '5:0', stage: 'parse' }),
@@ -58,7 +59,7 @@ describe('<ReviewsBrowser>', () => {
   });
 
   it('lists stuck needs_review rows (abstains) separately, excluding open-review reasons', () => {
-    useOpenReviewsMock.mockReturnValue({ status: 'loaded', rows: [] });
+    useOpenReviewsMock.mockReturnValue({ status: 'loaded', total: 0, rows: [] });
     useNeedsReviewMock.mockReturnValue({
       status: 'loaded',
       rows: [
@@ -74,7 +75,7 @@ describe('<ReviewsBrowser>', () => {
   });
 
   it('shows an empty-state when there are no open reviews', () => {
-    useOpenReviewsMock.mockReturnValue({ status: 'loaded', rows: [] });
+    useOpenReviewsMock.mockReturnValue({ status: 'loaded', total: 0, rows: [] });
     renderBrowser();
     expect(screen.getByText(/no open reviews/i)).toBeInTheDocument();
   });

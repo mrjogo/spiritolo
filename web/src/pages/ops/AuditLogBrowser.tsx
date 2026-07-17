@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../../supabase';
 import { DataTable, type DataTableColumn } from '../../ui/DataTable';
@@ -6,6 +6,9 @@ import { SplitView, DetailPane } from '../../ui/SplitView';
 import { StatusPill } from '../../ui/StatusPill';
 import { JsonView } from '../../ui/JsonView';
 import { usePagedQuery, type PostgrestFilter } from '../../ui/hooks/usePagedQuery';
+import { Pager } from '../../ui/Pager';
+
+const PAGE_SIZE = 50;
 
 interface AuditLogListRow {
   id: number;
@@ -46,6 +49,8 @@ const COLUMNS: DataTableColumn<AuditLogListRow>[] = [
 export function AuditLogBrowser() {
   const [actorKind, setActorKind] = useState('');
   const [tableName, setTableName] = useState('');
+  const [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [actorKind, tableName]);
 
   const filters: PostgrestFilter[] = [];
   if (actorKind) filters.push({ col: 'actor_kind', op: 'eq', value: actorKind });
@@ -56,8 +61,8 @@ export function AuditLogBrowser() {
     select: LIST_SELECT,
     filters,
     order: { col: 'id', asc: false },
-    page: 1,
-    pageSize: 50,
+    page,
+    pageSize: PAGE_SIZE,
   });
 
   return (
@@ -76,7 +81,7 @@ export function AuditLogBrowser() {
           onChange={(e) => setTableName(e.target.value)}
         />
       </div>
-      <p style={{ fontSize: 12, opacity: 0.7 }}>{total} entries</p>
+      <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="entries" />
       <SplitView
         list={({ select }) => (
           <DataTable

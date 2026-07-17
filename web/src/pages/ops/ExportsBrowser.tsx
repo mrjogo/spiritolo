@@ -5,6 +5,7 @@ import { DataTable, type DataTableColumn } from '../../ui/DataTable';
 import { SplitView, DetailPane } from '../../ui/SplitView';
 import { JsonView } from '../../ui/JsonView';
 import { usePagedQuery } from '../../ui/hooks/usePagedQuery';
+import { Pager } from '../../ui/Pager';
 import {
   assembleBundlePreview,
   type BundlePreview,
@@ -38,17 +39,21 @@ const COLUMNS: DataTableColumn<ExportListRow>[] = [
 // bundle), and a preview panel that assembles the pin-2 shape on demand
 // for a recipe that hasn't been frozen yet (bundlePreview.ts — a client-
 // side, unvalidated mirror of the export stage's generate_bundle).
+const PAGE_SIZE = 50;
+
 export function ExportsBrowser() {
-  const { rows } = usePagedQuery<ExportListRow>({
+  const [page, setPage] = useState(1);
+  const { rows, total } = usePagedQuery<ExportListRow>({
     table: 'recipe_exports',
     select: LIST_SELECT,
     order: { col: 'exported_at', asc: false },
-    page: 1,
-    pageSize: 50,
+    page,
+    pageSize: PAGE_SIZE,
   });
 
   return (
     <div className="ops-exports">
+      <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="exports" />
       <SplitView
         list={({ select }) => (
           <DataTable

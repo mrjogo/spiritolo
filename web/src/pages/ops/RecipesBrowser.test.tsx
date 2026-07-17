@@ -131,7 +131,7 @@ describe('<RecipesBrowser>', () => {
       exportRows: [{ recipe_ref: 'com.spiritolo/old-fashioned:v1', converter_version: 'v1', exported_at: '2026-07-01T00:00:00Z' }],
     });
     renderBrowser(makeClient());
-    const row = await screen.findByRole('button');
+    const row = await within(await screen.findByRole('table')).findByRole('button');
     await userEvent.click(row);
 
     // Raw source JSON-LD is shown via JsonView.
@@ -158,7 +158,7 @@ describe('<RecipesBrowser>', () => {
       exportRows: [],
     });
     renderBrowser(makeClient());
-    const row = await screen.findByRole('button');
+    const row = await within(await screen.findByRole('table')).findByRole('button');
     await userEvent.click(row);
     expect(await screen.findByText(/not yet clustered/i)).toBeInTheDocument();
     expect(await screen.findByText(/not yet exported/i)).toBeInTheDocument();

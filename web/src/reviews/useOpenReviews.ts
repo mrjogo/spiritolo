@@ -6,25 +6,38 @@ import type { StageReview } from '../components/reviews/ReviewCard';
 // proposals) an admin can resolve or dismiss. Distinct from `needs_review`,
 // which also surfaces non-actionable pipeline gaps (abstains) that have no
 // stage_reviews row. Admin-only read is enforced by the table's RLS policy.
-export async function fetchOpenReviews(): Promise<StageReview[]> {
-  const { data, error } = await supabase
+export async function fetchOpenReviews(
+  page = 1,
+  pageSize = 50,
+): Promise<{ rows: StageReview[]; total: number }> {
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  const { data, count, error } = await supabase
     .from('stage_reviews')
-    .select('id, entity_kind, entity_id, stage, state, origin, payload, note')
+    .select('id, entity_kind, entity_id, stage, state, origin, payload, note', {
+      count: 'exact',
+    })
     .eq('state', 'open')
-    .order('created_at', { ascending: true });
+    .order('created_at', { ascending: true })
+    .range(from, to);
   if (error) throw error;
-  return (data ?? []) as StageReview[];
+  return { rows: (data ?? []) as StageReview[], total: count ?? 0 };
 }
 
+// Prefix key: invalidating ['openReviews'] refreshes every page.
 export const openReviewsQueryKey = ['openReviews'] as const;
 
-export function useOpenReviews(): { rows: StageReview[]; status: string } {
+export function useOpenReviews(
+  page = 1,
+  pageSize = 50,
+): { rows: StageReview[]; total: number; status: string } {
   const query = useQuery({
-    queryKey: openReviewsQueryKey,
-    queryFn: fetchOpenReviews,
+    queryKey: [...openReviewsQueryKey, page, pageSize],
+    queryFn: () => fetchOpenReviews(page, pageSize),
   });
   return {
-    rows: query.data ?? [],
+    rows: query.data?.rows ?? [],
+    total: query.data?.total ?? 0,
     status: query.isError ? 'error' : query.isPending ? 'loading' : 'loaded',
   };
 }
