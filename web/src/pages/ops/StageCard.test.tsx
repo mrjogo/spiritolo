@@ -69,6 +69,12 @@ beforeEach(() => {
 });
 
 describe('<StageCard>', () => {
+  it('shows a one-line description reminder under the stage name', async () => {
+    mockTables([{ outcome: 'resolved', run_count: 1, cost_cents: 0 }], []);
+    render(<StageCard stage="map" />, { wrapper: wrapperWith(makeClient()) });
+    expect(await screen.findByText('Ingredient names → taxonomy slugs')).toBeInTheDocument();
+  });
+
   it('renders the outcome mix as a StatusPill row with counts, and the accumulated cost', async () => {
     mockTables(
       [
