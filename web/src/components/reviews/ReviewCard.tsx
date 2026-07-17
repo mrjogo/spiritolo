@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { ComponentType } from 'react';
 import { resolveReview, dismissReview } from '../../reviews/flagReview';
 import { MapReviewBody } from './bodies/MapReviewBody';
@@ -16,18 +17,69 @@ export interface StageReview {
   note: string | null;
 }
 
-// Per-stage review bodies, keyed by `stage_reviews.stage`. A stage without a
-// registered body falls back to a raw payload dump.
+// Per-stage read-only summary bodies, keyed by `stage_reviews.stage`. A stage
+// without a registered body just shows the editable payload below.
 const BODIES: Record<string, ComponentType<{ review: StageReview }>> = {
   map: MapReviewBody,
   parse: ParseReviewBody,
 };
 
-// Shared review shell: origin + note + a stage-specific body, with Resolve
-// (attaches the payload as the fix) and Dismiss (no fix) actions wired to the
-// review RPC clients.
-export function ReviewCard({ review }: { review: StageReview }) {
+// What Resolve writes: the payload is applied by the SQL apply_review() per
+// stage (map -> resolution slug, parse -> ingredient fields, etc.). The editor
+// is a raw JSON textarea so a curator can author the fix for ANY stage today;
+// structured per-stage edit forms are a follow-up. Approving a form proposal
+// (which must CREATE a node) is not wired through this editor — dismiss those
+// here and use the curation flow.
+export function ReviewCard({
+  review,
+  onActed,
+}: {
+  review: StageReview;
+  onActed?: () => void;
+}) {
   const Body = BODIES[review.stage];
+  const [payloadText, setPayloadText] = useState(() =>
+    JSON.stringify(review.payload ?? {}, null, 2),
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  function parsePayload(): unknown | undefined {
+    try {
+      return payloadText.trim() === '' ? {} : JSON.parse(payloadText);
+    } catch {
+      setError('Payload is not valid JSON');
+      return undefined;
+    }
+  }
+
+  async function onResolve() {
+    setError(null);
+    const payload = parsePayload();
+    if (payload === undefined) return;
+    setBusy(true);
+    try {
+      await resolveReview({ id: review.id, payload });
+      onActed?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Resolve failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDismiss() {
+    setError(null);
+    setBusy(true);
+    try {
+      await dismissReview(review.id);
+      onActed?.();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Dismiss failed');
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
     <div
@@ -42,14 +94,14 @@ export function ReviewCard({ review }: { review: StageReview }) {
       }}
     >
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
-        <span
-          className="review-card__origin"
-          style={{ fontFamily: 'monospace', opacity: 0.8 }}
-        >
+        <span className="review-card__origin" style={{ fontFamily: 'monospace', opacity: 0.8 }}>
           {review.origin}
         </span>
         <span className="review-card__stage" style={{ opacity: 0.6 }}>
           {review.stage}
+        </span>
+        <span className="review-card__entity" style={{ fontFamily: 'monospace', opacity: 0.6 }}>
+          {review.entity_kind}:{review.entity_id}
         </span>
       </div>
 
@@ -59,27 +111,40 @@ export function ReviewCard({ review }: { review: StageReview }) {
         </p>
       )}
 
-      <div className="review-card__body">
-        {Body ? (
+      {Body && (
+        <div className="review-card__body">
           <Body review={review} />
-        ) : (
-          <pre
-            data-testid="review-payload-fallback"
-            style={{ margin: 0, fontSize: 12, overflowX: 'auto' }}
-          >
-            {JSON.stringify(review.payload, null, 2)}
-          </pre>
-        )}
-      </div>
+        </div>
+      )}
+
+      <label style={{ fontSize: 11, opacity: 0.7 }}>
+        Fix (payload JSON)
+        <textarea
+          aria-label="payload JSON"
+          value={payloadText}
+          onChange={(e) => setPayloadText(e.target.value)}
+          spellCheck={false}
+          rows={Math.min(8, payloadText.split('\n').length + 1)}
+          style={{
+            width: '100%',
+            fontFamily: 'monospace',
+            fontSize: 12,
+            marginTop: 4,
+          }}
+        />
+      </label>
+
+      {error && (
+        <p role="alert" style={{ margin: 0, color: 'var(--danger, #b00020)', fontSize: 12 }}>
+          {error}
+        </p>
+      )}
 
       <div className="review-card__actions" style={{ display: 'flex', gap: 8 }}>
-        <button
-          type="button"
-          onClick={() => void resolveReview({ id: review.id, payload: review.payload })}
-        >
+        <button type="button" disabled={busy} onClick={() => void onResolve()}>
           Resolve
         </button>
-        <button type="button" onClick={() => void dismissReview(review.id)}>
+        <button type="button" disabled={busy} onClick={() => void onDismiss()}>
           Dismiss
         </button>
       </div>

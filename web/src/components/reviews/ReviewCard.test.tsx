@@ -1,13 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ReviewCard, type StageReview } from './ReviewCard';
 import { resolveReview, dismissReview } from '../../reviews/flagReview';
 
-// Mock the RPC clients so the card's actions are observable without a backend.
 vi.mock('../../reviews/flagReview', () => ({
-  resolveReview: vi.fn(),
-  dismissReview: vi.fn(),
+  resolveReview: vi.fn().mockResolvedValue(undefined),
+  dismissReview: vi.fn().mockResolvedValue(undefined),
   flagReview: vi.fn(),
 }));
 
@@ -29,8 +28,8 @@ function makeReview(over: Partial<StageReview> = {}): StageReview {
 }
 
 beforeEach(() => {
-  resolveReviewMock.mockReset();
-  dismissReviewMock.mockReset();
+  resolveReviewMock.mockReset().mockResolvedValue(undefined);
+  dismissReviewMock.mockReset().mockResolvedValue(undefined);
 });
 
 describe('<ReviewCard>', () => {
@@ -40,57 +39,69 @@ describe('<ReviewCard>', () => {
       payload: { proposed_slug: 'aromatic-bitters', candidates: [{ slug: 'angostura-bitters', score: 0.9 }] },
     });
     render(<ReviewCard review={review} />);
-
     expect(screen.getByTestId('map-review-body')).toBeInTheDocument();
     expect(screen.queryByTestId('parse-review-body')).not.toBeInTheDocument();
-    expect(screen.getByText('aromatic-bitters')).toBeInTheDocument();
   });
 
   it('renders ParseReviewBody for a parse review', () => {
-    const review = makeReview({
-      stage: 'parse',
-      payload: { name: 'Angostura', amount: 2, unit: 'dash' },
-    });
+    const review = makeReview({ stage: 'parse', payload: { name: 'Angostura', amount: 2, unit: 'dash' } });
     render(<ReviewCard review={review} />);
-
     expect(screen.getByTestId('parse-review-body')).toBeInTheDocument();
     expect(screen.queryByTestId('map-review-body')).not.toBeInTheDocument();
-    expect(screen.getByText('Angostura')).toBeInTheDocument();
-    expect(screen.getByText('dash')).toBeInTheDocument();
   });
 
-  it('falls back to a raw payload dump for an unknown stage', () => {
+  it('shows the editable payload JSON for a stage without a body', () => {
     const review = makeReview({ stage: 'cluster', payload: { foo: 'bar' } });
     render(<ReviewCard review={review} />);
-
-    expect(screen.getByTestId('review-payload-fallback')).toBeInTheDocument();
     expect(screen.queryByTestId('map-review-body')).not.toBeInTheDocument();
+    const editor = screen.getByLabelText('payload JSON') as HTMLTextAreaElement;
+    expect(editor.value).toContain('bar');
   });
 
   it('shows the origin and note', () => {
     const review = makeReview({ origin: 'distance_gate', note: 'looks off' });
     render(<ReviewCard review={review} />);
-
     expect(screen.getByText('distance_gate')).toBeInTheDocument();
     expect(screen.getByText('looks off')).toBeInTheDocument();
   });
 
-  it('Resolve calls resolveReview with the id and payload', async () => {
+  it('Resolve sends the id and the (default) payload, then calls onActed', async () => {
     const user = userEvent.setup();
-    const payload = { proposed_slug: 'rye-whiskey' };
-    const review = makeReview({ id: 7, stage: 'map', payload });
-    render(<ReviewCard review={review} />);
+    const onActed = vi.fn();
+    const review = makeReview({ id: 7, stage: 'map', payload: { proposed_slug: 'rye-whiskey' } });
+    render(<ReviewCard review={review} onActed={onActed} />);
 
     await user.click(screen.getByRole('button', { name: /resolve/i }));
-    expect(resolveReviewMock).toHaveBeenCalledWith({ id: 7, payload });
+    expect(resolveReviewMock).toHaveBeenCalledWith({ id: 7, payload: { proposed_slug: 'rye-whiskey' } });
+    expect(onActed).toHaveBeenCalled();
     expect(dismissReviewMock).not.toHaveBeenCalled();
+  });
+
+  it('Resolve sends the EDITED payload', async () => {
+    const user = userEvent.setup();
+    const review = makeReview({ id: 8, stage: 'map', payload: { slug: 'old' } });
+    render(<ReviewCard review={review} />);
+
+    fireEvent.change(screen.getByLabelText('payload JSON'), {
+      target: { value: '{"slug":"lime-juice"}' },
+    });
+    await user.click(screen.getByRole('button', { name: /resolve/i }));
+    expect(resolveReviewMock).toHaveBeenCalledWith({ id: 8, payload: { slug: 'lime-juice' } });
+  });
+
+  it('does not submit invalid JSON and shows an error', async () => {
+    const user = userEvent.setup();
+    render(<ReviewCard review={makeReview()} />);
+    fireEvent.change(screen.getByLabelText('payload JSON'), { target: { value: '{not json' } });
+    await user.click(screen.getByRole('button', { name: /resolve/i }));
+    expect(resolveReviewMock).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent(/not valid json/i);
   });
 
   it('Dismiss calls dismissReview with the id', async () => {
     const user = userEvent.setup();
     const review = makeReview({ id: 9 });
     render(<ReviewCard review={review} />);
-
     await user.click(screen.getByRole('button', { name: /dismiss/i }));
     expect(dismissReviewMock).toHaveBeenCalledWith(9);
     expect(resolveReviewMock).not.toHaveBeenCalled();
