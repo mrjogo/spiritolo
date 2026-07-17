@@ -138,7 +138,8 @@ describe('<RecipesBrowser>', () => {
     expect(await screen.findByText('"Recipe"')).toBeInTheDocument();
     // Parsed ingredient row, including its resolved taxonomy slug.
     expect(await screen.findByText(/2 oz bourbon/)).toBeInTheDocument();
-    expect(await screen.findByText(/\(bourbon\)/)).toBeInTheDocument();
+    // the resolved slug is a cross-link to the taxonomy node
+    expect(await screen.findByRole('link', { name: 'bourbon' })).toBeInTheDocument();
     // Cluster identity — scoped to the detail pane, since the list's own
     // "cluster" column cell also renders the same cluster_id text.
     const detailPane = document.querySelector('.detail-pane') as HTMLElement;

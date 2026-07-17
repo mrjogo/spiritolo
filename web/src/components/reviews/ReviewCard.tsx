@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { ComponentType } from 'react';
 import { resolveReview, dismissReview } from '../../reviews/flagReview';
+import { CrossLink, reviewEntityHref } from '../../ui/opsLinks';
 import { MapReviewBody } from './bodies/MapReviewBody';
 import { ParseReviewBody } from './bodies/ParseReviewBody';
 
@@ -101,7 +102,15 @@ export function ReviewCard({
           {review.stage}
         </span>
         <span className="review-card__entity" style={{ fontFamily: 'monospace', opacity: 0.6 }}>
-          {review.entity_kind}:{review.entity_id}
+          {review.entity_kind}:
+          {(() => {
+            const href = reviewEntityHref(review.entity_kind, review.entity_id);
+            return href ? (
+              <CrossLink to={href}>{review.entity_id}</CrossLink>
+            ) : (
+              review.entity_id
+            );
+          })()}
         </span>
       </div>
 

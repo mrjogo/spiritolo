@@ -1,4 +1,6 @@
+import { Link } from 'react-router-dom';
 import { usePagedQuery } from '../../ui/hooks/usePagedQuery';
+import { stageRunsHref } from '../../ui/opsLinks';
 import { useRealtimeJobs } from '../../ui/hooks/useRealtimeJobs';
 import { useStageQueueCounts, queueDepthForStage } from '../../ui/hooks/useStageQueueCounts';
 import { StatusPill } from '../../ui/StatusPill';
@@ -55,7 +57,9 @@ export function StageCard({ stage }: Props) {
     <div className="stage-card" style={{
       border: '1px solid var(--ops-border, #e3e5e9)', borderRadius: 6, padding: 12,
     }}>
-      <h3 style={{ margin: '0 0 2px', fontSize: 14 }}>{stage}</h3>
+      <h3 style={{ margin: '0 0 2px', fontSize: 14 }}>
+        <Link className="ops-xlink" to={stageRunsHref(stage)}>{stage}</Link>
+      </h3>
       {STAGE_DESCRIPTIONS[stage] && (
         <p style={{ margin: '0 0 10px', fontSize: 11.5, lineHeight: 1.3, color: 'var(--ops-muted, #8a8f98)' }}>
           {STAGE_DESCRIPTIONS[stage]}

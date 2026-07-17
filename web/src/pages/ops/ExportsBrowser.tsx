@@ -6,6 +6,7 @@ import { SplitView, DetailPane } from '../../ui/SplitView';
 import { JsonView } from '../../ui/JsonView';
 import { usePagedQuery } from '../../ui/hooks/usePagedQuery';
 import { Pager } from '../../ui/Pager';
+import { CrossLink, recipeHref } from '../../ui/opsLinks';
 import {
   assembleBundlePreview,
   type BundlePreview,
@@ -93,6 +94,9 @@ function ExportDetail({ id }: { id: string | null }) {
   return (
     <DetailPane>
       <h3>{row.recipe_ref} @ {row.converter_version}</h3>
+      <p style={{ fontSize: 12, opacity: 0.7 }}>
+        recipe <CrossLink to={recipeHref(row.recipe_id)}>#{row.recipe_id}</CrossLink>
+      </p>
       <JsonView value={row.bundle} name="bundle" collapseAtDepth={2} />
     </DetailPane>
   );

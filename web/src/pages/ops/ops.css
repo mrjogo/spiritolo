@@ -151,3 +151,12 @@
 .ops-pager__count {
   font-variant-numeric: tabular-nums;
 }
+
+/* --- cross-links between browsers --- */
+.ops-xlink {
+  color: var(--ops-accent);
+  text-decoration: none;
+}
+.ops-xlink:hover {
+  text-decoration: underline;
+}

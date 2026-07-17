@@ -7,6 +7,7 @@ import { StatusPill } from '../../ui/StatusPill';
 import { JsonView } from '../../ui/JsonView';
 import { usePagedQuery, type PostgrestFilter } from '../../ui/hooks/usePagedQuery';
 import { Pager } from '../../ui/Pager';
+import { CrossLink, auditRowHref } from '../../ui/opsLinks';
 
 const PAGE_SIZE = 50;
 
@@ -36,7 +37,14 @@ const OP_LABELS: Record<string, string> = { I: 'insert', U: 'update', D: 'delete
 const COLUMNS: DataTableColumn<AuditLogListRow>[] = [
   { key: 'ts', header: 'when' },
   { key: 'table_name', header: 'table' },
-  { key: 'pk', header: 'pk' },
+  {
+    key: 'pk',
+    header: 'pk',
+    render: (r) => {
+      const href = auditRowHref(r.table_name, r.pk);
+      return href ? <CrossLink to={href}>{r.pk}</CrossLink> : r.pk;
+    },
+  },
   { key: 'op', header: 'op', render: (r) => OP_LABELS[r.op] ?? r.op },
   { key: 'actor_kind', header: 'actor kind' },
   { key: 'actor_id', header: 'actor id', render: (r) => r.actor_id ?? '—' },
@@ -119,7 +127,13 @@ function AuditLogDetail({ id }: { id: string | null }) {
   const row = query.data;
   return (
     <DetailPane>
-      <h3>{row.table_name} #{row.pk}</h3>
+      <h3>
+        {row.table_name} #
+        {(() => {
+          const href = auditRowHref(row.table_name, row.pk);
+          return href ? <CrossLink to={href}>{row.pk}</CrossLink> : row.pk;
+        })()}
+      </h3>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
         <StatusPill kind={row.actor_kind} />
         <span style={{ fontSize: 12, opacity: 0.7 }}>{row.source}</span>

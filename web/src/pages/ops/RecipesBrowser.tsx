@@ -7,6 +7,7 @@ import { JsonView } from '../../ui/JsonView';
 import { FilterBar } from '../../ui/FilterBar';
 import { usePagedQuery, type PostgrestFilter } from '../../ui/hooks/usePagedQuery';
 import { Pager } from '../../ui/Pager';
+import { CrossLink, clusterHref, taxonomyHref } from '../../ui/opsLinks';
 
 const PAGE_SIZE = 50;
 
@@ -194,7 +195,7 @@ function RecipeDetail({ id }: { id: string | null }) {
             <li key={i.id}>
               {i.raw_text} — {i.name ?? 'unparsed'}
               {i.name && (
-                <> ({slug ? slug : 'unresolved'})</>
+                <> ({slug ? <CrossLink to={taxonomyHref(slug)}>{slug}</CrossLink> : 'unresolved'})</>
               )}
             </li>
           );
@@ -204,7 +205,11 @@ function RecipeDetail({ id }: { id: string | null }) {
 
       <h4>Cluster</h4>
       {cluster ? (
-        <p>{cluster.canonical_name} — cluster {cluster.cluster_key} ({cluster.recipe_count} recipes, {cluster.source_count} sources)</p>
+        <p>
+          {cluster.canonical_name} — cluster{' '}
+          <CrossLink to={clusterHref(cluster.cluster_key)}>{cluster.cluster_key}</CrossLink>{' '}
+          ({cluster.recipe_count} recipes, {cluster.source_count} sources)
+        </p>
       ) : (
         <p style={{ fontStyle: 'italic', opacity: 0.7 }}>not yet clustered</p>
       )}

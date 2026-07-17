@@ -6,6 +6,7 @@ import { SplitView, DetailPane } from '../../ui/SplitView';
 import { JsonView } from '../../ui/JsonView';
 import { usePagedQuery } from '../../ui/hooks/usePagedQuery';
 import { Pager } from '../../ui/Pager';
+import { CrossLink, recipeHref } from '../../ui/opsLinks';
 
 const PAGE_SIZE = 50;
 
@@ -118,7 +119,9 @@ function ClusterDetail({ clusterKey }: { clusterKey: string | null }) {
       {membersQuery.data && (
         <ul>
           {membersQuery.data.map((m) => (
-            <li key={m.id}>{m.title ?? `#${m.id}`} — {m.site}</li>
+            <li key={m.id}>
+              <CrossLink to={recipeHref(m.id)}>{m.title ?? `#${m.id}`}</CrossLink> — {m.site}
+            </li>
           ))}
         </ul>
       )}

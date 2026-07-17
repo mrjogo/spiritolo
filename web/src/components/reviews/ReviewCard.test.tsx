@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactNode } from 'react';
+import { MemoryRouter } from 'react-router-dom';
 import { ReviewCard, type StageReview } from './ReviewCard';
 import { resolveReview, dismissReview } from '../../reviews/flagReview';
+
+function RouterWrapper({ children }: { children: ReactNode }) {
+  return <MemoryRouter>{children}</MemoryRouter>;
+}
 
 vi.mock('../../reviews/flagReview', () => ({
   resolveReview: vi.fn().mockResolvedValue(undefined),
@@ -38,21 +44,21 @@ describe('<ReviewCard>', () => {
       stage: 'map',
       payload: { proposed_slug: 'aromatic-bitters', candidates: [{ slug: 'angostura-bitters', score: 0.9 }] },
     });
-    render(<ReviewCard review={review} />);
+    render(<ReviewCard review={review} />, { wrapper: RouterWrapper });
     expect(screen.getByTestId('map-review-body')).toBeInTheDocument();
     expect(screen.queryByTestId('parse-review-body')).not.toBeInTheDocument();
   });
 
   it('renders ParseReviewBody for a parse review', () => {
     const review = makeReview({ stage: 'parse', payload: { name: 'Angostura', amount: 2, unit: 'dash' } });
-    render(<ReviewCard review={review} />);
+    render(<ReviewCard review={review} />, { wrapper: RouterWrapper });
     expect(screen.getByTestId('parse-review-body')).toBeInTheDocument();
     expect(screen.queryByTestId('map-review-body')).not.toBeInTheDocument();
   });
 
   it('shows the editable payload JSON for a stage without a body', () => {
     const review = makeReview({ stage: 'cluster', payload: { foo: 'bar' } });
-    render(<ReviewCard review={review} />);
+    render(<ReviewCard review={review} />, { wrapper: RouterWrapper });
     expect(screen.queryByTestId('map-review-body')).not.toBeInTheDocument();
     const editor = screen.getByLabelText('payload JSON') as HTMLTextAreaElement;
     expect(editor.value).toContain('bar');
@@ -60,7 +66,7 @@ describe('<ReviewCard>', () => {
 
   it('shows the origin and note', () => {
     const review = makeReview({ origin: 'distance_gate', note: 'looks off' });
-    render(<ReviewCard review={review} />);
+    render(<ReviewCard review={review} />, { wrapper: RouterWrapper });
     expect(screen.getByText('distance_gate')).toBeInTheDocument();
     expect(screen.getByText('looks off')).toBeInTheDocument();
   });
@@ -69,7 +75,7 @@ describe('<ReviewCard>', () => {
     const user = userEvent.setup();
     const onActed = vi.fn();
     const review = makeReview({ id: 7, stage: 'map', payload: { proposed_slug: 'rye-whiskey' } });
-    render(<ReviewCard review={review} onActed={onActed} />);
+    render(<ReviewCard review={review} onActed={onActed} />, { wrapper: RouterWrapper });
 
     await user.click(screen.getByRole('button', { name: /resolve/i }));
     expect(resolveReviewMock).toHaveBeenCalledWith({ id: 7, payload: { proposed_slug: 'rye-whiskey' } });
@@ -80,7 +86,7 @@ describe('<ReviewCard>', () => {
   it('Resolve sends the EDITED payload', async () => {
     const user = userEvent.setup();
     const review = makeReview({ id: 8, stage: 'map', payload: { slug: 'old' } });
-    render(<ReviewCard review={review} />);
+    render(<ReviewCard review={review} />, { wrapper: RouterWrapper });
 
     fireEvent.change(screen.getByLabelText('payload JSON'), {
       target: { value: '{"slug":"lime-juice"}' },
@@ -91,7 +97,7 @@ describe('<ReviewCard>', () => {
 
   it('does not submit invalid JSON and shows an error', async () => {
     const user = userEvent.setup();
-    render(<ReviewCard review={makeReview()} />);
+    render(<ReviewCard review={makeReview()} />, { wrapper: RouterWrapper });
     fireEvent.change(screen.getByLabelText('payload JSON'), { target: { value: '{not json' } });
     await user.click(screen.getByRole('button', { name: /resolve/i }));
     expect(resolveReviewMock).not.toHaveBeenCalled();
@@ -101,7 +107,7 @@ describe('<ReviewCard>', () => {
   it('Dismiss calls dismissReview with the id', async () => {
     const user = userEvent.setup();
     const review = makeReview({ id: 9 });
-    render(<ReviewCard review={review} />);
+    render(<ReviewCard review={review} />, { wrapper: RouterWrapper });
     await user.click(screen.getByRole('button', { name: /dismiss/i }));
     expect(dismissReviewMock).toHaveBeenCalledWith(9);
     expect(resolveReviewMock).not.toHaveBeenCalled();
