@@ -19,10 +19,10 @@ import pytest
 from ingredients.mapping.eval_fixture import seed
 from ingredients.mapping.proposals import (
     approve_form_proposal,
-    enqueue_form_proposal,
-    fetch_pending_proposals,
+    fetch_pending_form_proposals,
 )
 from ingredients.pipeline.stages.map import map_stage_fn
+from ingredients.reviews.model import insert_review
 
 
 class _FakeChain:
@@ -55,7 +55,6 @@ def _truncate(c: psycopg.Connection) -> None:
         "stage_reviews",
         "stage_runs",
         "ingredient_resolutions",
-        "taxonomy_proposals",
         "taxonomy_provenance",
         "taxonomy_aliases",
         "taxonomy_edges",
@@ -194,17 +193,23 @@ def test_propose_form_queues_proposal_and_parks(conn):
 
 def test_review_proposals_path_resolves(conn):
     c, ids = conn
-    pid = enqueue_form_proposal(
+    insert_review(
         c,
-        raw_string="lemon zest",
-        proposed_slug="lemon-zest",
-        proposed_display_name="Lemon Zest",
-        proposed_parent_id=ids["lemon"],
-        candidates=[],
-        mapper_version="v1",
+        entity_kind="ingredient_name",
+        entity_id="lemon zest",
+        stage="map",
+        origin="machine_proposal",
+        payload={
+            "kind": "form",
+            "proposed_slug": "lemon-zest",
+            "proposed_display_name": "Lemon Zest",
+            "proposed_parent_id": ids["lemon"],
+            "candidates": [],
+        },
+        origin_version="v1",
     )
-    [proposal] = fetch_pending_proposals(c)
-    assert proposal["id"] == pid
+    [proposal] = fetch_pending_form_proposals(c)
+    assert proposal["raw_string"] == "lemon zest"
 
     new_id = approve_form_proposal(c, proposal=proposal, decided_by="alice", version="v1")
 
@@ -228,7 +233,7 @@ def test_review_proposals_path_resolves(conn):
     ).fetchone()
     assert res == ("lemon-zest",)
 
-    status = c.execute(
-        "select status from taxonomy_proposals where id = %s", (pid,)
+    state = c.execute(
+        "select state from stage_reviews where id = %s", (proposal["id"],)
     ).fetchone()[0]
-    assert status == "approved"
+    assert state == "resolved"
