@@ -26,9 +26,30 @@ export RECIPEGF_TOKEN=      # read-only PAT for mrjogo/RecipeGF (skip if public)
 
 **Required vs optional:** only `DB_URL` is required (the worker exits without
 it). `SCRAPERAPI_KEY` matters only if you re-scrape (the `fetch` stage). The
-hosted-LLM keys are optional — a missing one fails only that provider's jobs
-(not the worker), and none are read if the provider chain uses only local
-`barbot`.
+hosted-LLM keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`) are
+optional — the worker registers a hosted provider only when its key is set, and
+none are read if the provider chain uses only local `barbot` (Ollama, always
+registered). Adding a key is all that's needed to make that provider usable:
+the client wiring is automatic. A chain that names a provider whose key is
+absent fails those jobs loudly (the provider id isn't registered), not silently.
+
+**Choosing which provider a stage uses — `PROVIDER_CHAIN_CONFIG`.** This env
+var is a path to a JSON file mapping each smart stage to an *ordered* list of
+provider ids (`ollama` / `openai` / `claude` / `deepseek`) plus a `pack_size`.
+The chain tries them left-to-right and short-circuits when everything resolves,
+so order = priority + fallback. It's config-not-code: reordering the file
+reorders the chain with no code change. Example — DeepSeek for `map`, local
+Ollama first with an OpenAI fallback for `parse`:
+
+```json
+{
+  "map":   { "providers": ["deepseek"],           "pack_size": 20 },
+  "parse": { "providers": ["ollama", "openai"],   "pack_size": 20 }
+}
+```
+
+With `PROVIDER_CHAIN_CONFIG` unset (or a stage omitted), that stage runs its
+deterministic tier only and parks anything an LLM would resolve.
 
 ---
 
@@ -95,7 +116,7 @@ railway bucket create spiritolo-corpus   # pick a US-East region at the prompt (
      --set RECIPEGF_TOKEN="$RECIPEGF_TOKEN"
    ```
 
-   Add the hosted-LLM / scraper keys you actually use, e.g. `--set OPENAI_API_KEY="$OPENAI_API_KEY" --set SCRAPERAPI_KEY="$SCRAPERAPI_KEY"`. Only `SUPABASE_DB_URL` is strictly required (see **Required vs optional** above).
+   Add the hosted-LLM / scraper keys you actually use, e.g. `--set OPENAI_API_KEY="$OPENAI_API_KEY" --set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" --set DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" --set SCRAPERAPI_KEY="$SCRAPERAPI_KEY"`, plus `--set PROVIDER_CHAIN_CONFIG="/path/to/chains.json"` to pick which provider each stage uses (see **Choosing which provider a stage uses** above). Only `SUPABASE_DB_URL` is strictly required (see **Required vs optional** above).
 4. **Builds fail until you promote (§9)** — `railway.json` + `worker.Dockerfile` are on `main`, not yet on `staging`, so Railway falls back to Railpack auto-detect and errors with "no start command." That's expected. Once `main → staging` lands, Railway builds `worker.Dockerfile` (its `ENTRYPOINT` is the start command) and `railway logs` shows: tailscaled up, tailnet joined, poll loop started. (To smoke-test the image before promoting, point the deploy branch at `main`, build, then switch back to `staging`.)
 
 ## 6. Vercel — web SPA

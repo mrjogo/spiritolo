@@ -18,15 +18,27 @@ class ClaudeProvider:
     max_tokens: int = DEFAULT_MAX_TOKENS
 
     @classmethod
-    def from_env(cls, *, model_id: str = DEFAULT_MODEL) -> "ClaudeProvider":
+    def from_env(
+        cls,
+        *,
+        model_id: str = DEFAULT_MODEL,
+        http_client: object | None = None,
+        api_key: str | None = None,
+    ) -> "ClaudeProvider":
+        """Build a provider over the Anthropic SDK. ``http_client`` injects a
+        pre-built transport (the worker's direct-route client); ``api_key``
+        overrides the ``ANTHROPIC_API_KEY`` env read."""
         import anthropic
-        api_key = os.environ.get("ANTHROPIC_API_KEY")
-        if not api_key:
+        key = api_key or os.environ.get("ANTHROPIC_API_KEY")
+        if not key:
             raise RuntimeError(
                 "ANTHROPIC_API_KEY not set. Add it to .env or export before "
-                "running --provider claude."
+                "using this provider."
             )
-        return cls(client=anthropic.Anthropic(api_key=api_key), model_id=model_id)
+        client_kwargs: dict[str, object] = {"api_key": key}
+        if http_client is not None:
+            client_kwargs["http_client"] = http_client
+        return cls(client=anthropic.Anthropic(**client_kwargs), model_id=model_id)
 
     def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
         msg = self.client.messages.create(
