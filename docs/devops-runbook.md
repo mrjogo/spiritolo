@@ -35,8 +35,7 @@ absent fails those jobs loudly (the provider id isn't registered), not silently.
 
 **Choosing which provider a stage uses — `PROVIDER_CHAIN_CONFIG`.** This env
 var is a path to a JSON file mapping each smart stage to an *ordered* list of
-provider ids (`ollama` — or its aliases `local` / `barbot` — / `openai` /
-`claude` / `deepseek`) plus a `pack_size`.
+provider ids (`ollama` / `openai` / `claude` / `deepseek`) plus a `pack_size`.
 The chain tries them left-to-right and short-circuits when everything resolves,
 so order = priority + fallback. It's config-not-code: reordering the file
 reorders the chain with no code change. Example — DeepSeek for `map`, local

@@ -92,19 +92,19 @@ def build_provider_impls(
 ) -> dict[str, Any]:
     """The worker's ``{provider_id -> impl}`` registry, built from the env.
 
-    The local Ollama tier (free) is always registered under every zero-cost
-    local id the cost table names — ``ollama`` / ``local`` / ``barbot`` — all
-    pointing at the same client, so a chain config may reference any of them.
-    Each hosted provider — ``openai`` / ``claude`` / ``deepseek`` — is registered
-    only when its API key is present in ``env``; an absent key means an absent
-    id, so a ``PROVIDER_CHAIN_CONFIG`` that names an unconfigured provider fails
-    loudly (``KeyError`` in the chain) rather than silently skipping the tier.
-    Hosted clients take the direct route; only the local Ollama client tunnels
-    the tailnet proxy (see module docstring).
+    The local Ollama tier (free) is always registered under ``ollama`` — the one
+    id for the local LLM, no ``local`` / ``barbot`` synonyms. Each hosted
+    provider — ``openai`` / ``claude`` / ``deepseek`` — is registered only when
+    its API key is present in ``env``; an absent key means an absent id, so a
+    ``PROVIDER_CHAIN_CONFIG`` that names an unconfigured provider fails loudly
+    (``KeyError`` in the chain) rather than silently skipping the tier. Hosted
+    clients take the direct route; only the local Ollama client tunnels the
+    tailnet proxy (see module docstring).
     """
     e = _env(env)
-    ollama = build_local_ollama_provider(client_factory=client_factory, env=env)
-    impls: dict[str, Any] = {"ollama": ollama, "local": ollama, "barbot": ollama}
+    impls: dict[str, Any] = {
+        "ollama": build_local_ollama_provider(client_factory=client_factory, env=env),
+    }
     if e.get("OPENAI_API_KEY"):
         impls["openai"] = OpenAIProvider.from_env(
             api_key=e["OPENAI_API_KEY"],
