@@ -23,7 +23,10 @@ from typing import Any
 
 import httpx
 
+from common.llm.claude import ClaudeProvider
+from common.llm.deepseek import build_deepseek_provider
 from common.llm.ollama import DEFAULT_BASE_URL, DEFAULT_TIMEOUT, OllamaProvider
+from common.llm.openai import OpenAIProvider
 
 Env = Mapping[str, str]
 ClientFactory = Callable[..., Any]
@@ -82,3 +85,39 @@ def build_scraperapi_http_client(
     """Direct-route httpx client for ScraperAPI fetch calls."""
     factory = httpx.Client if client_factory is None else client_factory
     return factory(**hosted_client_kwargs(env))
+
+
+def build_provider_impls(
+    *, env: Env | None = None, client_factory: ClientFactory | None = None
+) -> dict[str, Any]:
+    """The worker's ``{provider_id -> impl}`` registry, built from the env.
+
+    ``ollama`` (local, free) is always registered so the local tier is available
+    without any key. Each hosted provider — ``openai`` / ``claude`` /
+    ``deepseek`` — is registered only when its API key is present in ``env``; an
+    absent key means an absent id, so a ``PROVIDER_CHAIN_CONFIG`` that names an
+    unconfigured provider fails loudly (``KeyError`` in the chain) rather than
+    silently skipping the tier. Hosted clients take the direct route; only the
+    local Ollama client tunnels the tailnet proxy (see module docstring).
+    """
+    e = _env(env)
+    impls: dict[str, Any] = {
+        "ollama": build_local_ollama_provider(client_factory=client_factory, env=env),
+    }
+    if e.get("OPENAI_API_KEY"):
+        impls["openai"] = OpenAIProvider.from_env(
+            api_key=e["OPENAI_API_KEY"],
+            http_client=build_openai_http_client(client_factory=client_factory, env=env),
+        )
+    if e.get("ANTHROPIC_API_KEY"):
+        impls["claude"] = ClaudeProvider.from_env(
+            api_key=e["ANTHROPIC_API_KEY"],
+            http_client=build_claude_http_client(client_factory=client_factory, env=env),
+        )
+    if e.get("DEEPSEEK_API_KEY"):
+        # DeepSeek is OpenAI-compatible, so it takes the same direct-route client.
+        impls["deepseek"] = build_deepseek_provider(
+            api_key=e["DEEPSEEK_API_KEY"],
+            http_client=build_openai_http_client(client_factory=client_factory, env=env),
+        )
+    return impls

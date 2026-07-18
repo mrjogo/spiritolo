@@ -49,3 +49,48 @@ def test_resolve_omits_reasoning_effort_for_non_gpt5_models():
 def test_model_id_property_matches_constructor():
     p = OpenAIProvider(client=MagicMock(), model_id="gpt-4o-mini")
     assert p.model_id == "gpt-4o-mini"
+
+
+def test_from_env_reads_api_key_and_constructs_client(monkeypatch):
+    import openai
+
+    captured = {}
+    monkeypatch.setattr(openai, "OpenAI", lambda **kw: captured.update(kw) or object())
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-env")
+
+    p = OpenAIProvider.from_env()
+
+    assert captured == {"api_key": "sk-env"}
+    assert p.model_id == "gpt-5-mini"
+
+
+def test_from_env_missing_key_raises(monkeypatch):
+    import pytest
+
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY"):
+        OpenAIProvider.from_env()
+
+
+def test_from_env_accepts_base_url_http_client_and_explicit_key(monkeypatch):
+    """DeepSeek reuses this path: an OpenAI-compatible base_url, an explicit key
+    (no env read), and a pre-built direct-route http client."""
+    import openai
+
+    captured = {}
+    monkeypatch.setattr(openai, "OpenAI", lambda **kw: captured.update(kw) or object())
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    http = object()
+
+    p = OpenAIProvider.from_env(
+        model_id="deepseek-chat",
+        base_url="https://api.deepseek.com",
+        http_client=http,
+        api_key="sk-explicit",
+        api_key_env="DEEPSEEK_API_KEY",
+    )
+
+    assert captured["api_key"] == "sk-explicit"
+    assert captured["base_url"] == "https://api.deepseek.com"
+    assert captured["http_client"] is http
+    assert p.model_id == "deepseek-chat"
