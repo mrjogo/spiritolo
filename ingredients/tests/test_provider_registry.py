@@ -12,17 +12,22 @@ from common.llm.openai import OpenAIProvider
 from ingredients.worker.providers_local import build_provider_impls
 
 
-def test_ollama_always_registered_even_with_no_keys():
+def test_ollama_always_registered_under_all_local_ids():
+    """The cost table names three zero-cost local ids — ollama / local / barbot —
+    for the one local Ollama tier, so every one resolves to the same client and
+    a chain config may reference any of them."""
     impls = build_provider_impls(env={})
-    assert set(impls) == {"ollama"}
+    assert set(impls) == {"ollama", "local", "barbot"}
     assert impls["ollama"].model_id == "qwen3:14b"
+    assert impls["local"] is impls["ollama"]
+    assert impls["barbot"] is impls["ollama"]
 
 
 def test_registers_only_hosted_providers_with_credentials():
     env = {"OPENAI_API_KEY": "sk-o", "DEEPSEEK_API_KEY": "sk-d"}  # no ANTHROPIC key
     impls = build_provider_impls(env=env)
 
-    assert set(impls) == {"ollama", "openai", "deepseek"}
+    assert set(impls) == {"ollama", "local", "barbot", "openai", "deepseek"}
     assert isinstance(impls["deepseek"], OpenAIProvider)
     assert impls["deepseek"].model_id == "deepseek-chat"
     assert impls["openai"].model_id == "gpt-5-mini"
@@ -36,5 +41,5 @@ def test_all_providers_registered_when_all_keys_present():
     }
     impls = build_provider_impls(env=env)
 
-    assert set(impls) == {"ollama", "openai", "claude", "deepseek"}
+    assert set(impls) == {"ollama", "local", "barbot", "openai", "claude", "deepseek"}
     assert impls["claude"].model_id == "claude-haiku-4-5"
