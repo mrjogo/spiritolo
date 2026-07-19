@@ -277,6 +277,6 @@ def test_estimate_cents_token_based(conn):
 
     assert est("ollama", 1000) == 0
     assert est("deepseek", 1000) == 22    # 1000 * (1200*0.14 + 200*0.28)/1e4
-    assert est("openai", 1000) == 70      # 1000 * (1200*0.25 + 200*2.00)/1e4
+    assert est("openai", 1000) == 180     # 1000 * (1200*0.75 + 200*4.50)/1e4
     assert est("anthropic", 1000) == 220  # 1000 * (1200*1.00 + 200*5.00)/1e4
     assert est(None, 1000) == 0           # unknown / no provider -> free

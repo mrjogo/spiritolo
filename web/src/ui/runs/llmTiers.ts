@@ -27,24 +27,24 @@ export const LLM_TIERS: LlmTier[] = [
     outputPerMTok: 0,
   },
   {
-    // deepseek-chat = v4-flash non-thinking; $0.14/$0.28 per 1M (api-docs.deepseek.com).
+    // deepseek-v4-flash (succeeds deepseek-chat); $0.14/$0.28 per 1M (api-docs.deepseek.com).
     provider: 'deepseek',
-    model: 'deepseek-chat',
-    label: 'DeepSeek · deepseek-chat — metered',
-    shortLabel: 'DeepSeek · deepseek-chat',
+    model: 'deepseek-v4-flash',
+    label: 'DeepSeek · deepseek-v4-flash — metered',
+    shortLabel: 'DeepSeek · deepseek-v4-flash',
     metered: true,
     inputPerMTok: 0.14,
     outputPerMTok: 0.28,
   },
   {
-    // gpt-5-mini last-known list price $0.25/$2.00 per 1M.
+    // gpt-5.4-mini (succeeds gpt-5-mini); $0.75/$4.50 per 1M (developers.openai.com).
     provider: 'openai',
-    model: 'gpt-5-mini',
-    label: 'OpenAI · gpt-5-mini — metered',
-    shortLabel: 'OpenAI · gpt-5-mini',
+    model: 'gpt-5.4-mini',
+    label: 'OpenAI · gpt-5.4-mini — metered',
+    shortLabel: 'OpenAI · gpt-5.4-mini',
     metered: true,
-    inputPerMTok: 0.25,
-    outputPerMTok: 2.0,
+    inputPerMTok: 0.75,
+    outputPerMTok: 4.5,
   },
   {
     // claude-haiku-4-5 $1.00/$5.00 per 1M.

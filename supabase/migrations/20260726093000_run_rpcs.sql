@@ -69,9 +69,9 @@ $$;
 
 -- _estimate_cents: token-based cost estimate for `p_items` items on a hosted LLM
 -- tier. Models ~1200 input + ~200 output tokens per item, priced at each
--- provider's published $/1M rates (2026-07): deepseek-chat (=v4-flash non-thinking)
--- $0.14/$0.28, gpt-5-mini $0.25/$2.00, claude-haiku-4-5 $1.00/$5.00. Local ollama
--- is free (0). Deliberately assumes every pending item reaches the LLM tier (the
+-- provider's published $/1M rates (2026-07): deepseek-v4-flash $0.14/$0.28,
+-- gpt-5.4-mini $0.75/$4.50, claude-haiku-4-5 $1.00/$5.00. Local ollama is free
+-- (0). Deliberately assumes every pending item reaches the LLM tier (the
 -- deterministic tier resolves most first), so it OVER-estimates. A confirm-modal
 -- hint bounded by the run's hard cost cap — not a billing figure. Keep the token
 -- counts + rates in sync with web/src/ui/runs/llmTiers.ts (estimateRunCents).
@@ -84,7 +84,7 @@ as $$
   -- per-item cents = (in_tokens * in_$perM + out_tokens * out_$perM) / 1e4
   select round(coalesce(p_items, 0) * case p_provider
     when 'deepseek'  then (1200 * 0.14 + 200 * 0.28) / 10000.0
-    when 'openai'    then (1200 * 0.25 + 200 * 2.00) / 10000.0
+    when 'openai'    then (1200 * 0.75 + 200 * 4.50) / 10000.0
     when 'anthropic' then (1200 * 1.00 + 200 * 5.00) / 10000.0
     else 0.0
   end)::int;

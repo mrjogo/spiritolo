@@ -1,4 +1,4 @@
-"""OpenAI sync provider. Defaults to gpt-5-mini.
+"""OpenAI sync provider. Defaults to gpt-5.4-mini.
 
 For batch (50% off, ~24h SLA), see openai_batch.py.
 
@@ -7,7 +7,7 @@ so the budget must cover both the (invisible) reasoning trace and the
 (visible) output. We default to 2048 to leave headroom; for our pure
 structured-retrieval prompts we also pin `reasoning_effort='minimal'`
 so the model doesn't burn the budget thinking about a question that
-doesn't need thinking. Without these two together, gpt-5-mini routinely
+doesn't need thinking. Without these two together, gpt-5.4-mini routinely
 returns empty content with finish_reason='length'.
 """
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from .provider import ProviderResult
 
-DEFAULT_MODEL = "gpt-5-mini"
+DEFAULT_MODEL = "gpt-5.4-mini"
 DEFAULT_MAX_TOKENS = 2048
 
 

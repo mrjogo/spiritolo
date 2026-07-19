@@ -19,7 +19,7 @@ from dataclasses import dataclass
 
 from .batch_provider import BatchRequest, BatchResult, BatchStatus, BatchSubmission
 
-DEFAULT_MODEL = "gpt-5-mini"
+DEFAULT_MODEL = "gpt-5.4-mini"
 # gpt-5-family charges reasoning tokens against max_completion_tokens; see
 # common.llm.openai.OpenAIProvider for the full rationale. 2048 leaves
 # headroom; reasoning_effort='minimal' (set below for gpt-5*) keeps the
