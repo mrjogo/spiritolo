@@ -40,6 +40,14 @@ def test_claim_run_finish(test_db_url, db_conn):
     db_conn.execute("truncate table job_items restart identity cascade")
     payload = {"entity_ids": [101], "entity_type": "recipe", "version": "vtest"}
     jid = _seed_job(db_conn, stage="demo", payload=payload)
+    # The run's member row pre-exists (add_run_items created it); the stage_fn
+    # UPDATEs it in place with the outcome + job attribution.
+    db_conn.execute(
+        "insert into job_items (entity_type, entity_id, stage, code_version, "
+        "outcome, method, state, job_id) "
+        "values ('recipe', 101, 'demo', '', 'pending', 'deterministic', 'pending', %s)",
+        (jid,),
+    )
 
     def demo_fn(job, conn, providers):
         p = job["payload"]

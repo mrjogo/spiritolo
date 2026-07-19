@@ -75,9 +75,13 @@ def parse_stage_fn(
     inserts the fresh rows, and UPSERTs the chunk's `job_items` in one executemany.
     """
     site, limit = base.scope(job)
-    recipe_ids = base.recipe_queue(
-        conn, stage=STAGE, version=PARSER_VERSION, site=site, limit=limit
-    )
+    apply_mode = job.get("apply_mode") or "auto"
+    if job.get("id"):
+        recipe_ids = base.run_item_ids(conn, job_id=job["id"], stage=STAGE)
+    else:
+        recipe_ids = base.recipe_queue(
+            conn, stage=STAGE, version=PARSER_VERSION, site=site, limit=limit
+        )
     counts = {"parsed": 0, "empty": 0}
     for chunk in base.chunked(recipe_ids, chunk_size):
         with conn.transaction():
@@ -111,7 +115,7 @@ def parse_stage_fn(
             if insert_tuples:
                 with conn.cursor() as cur:
                     cur.executemany(_INSERT_ROWS_SQL, insert_tuples)
-            base.record_many(conn, records)
+            base.record_many(conn, records, apply_mode=apply_mode)
             base.finalize_run(
                 conn, stage=STAGE, version=PARSER_VERSION,
                 ids=[str(r) for r in chunk],

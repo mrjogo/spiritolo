@@ -137,9 +137,14 @@ def cluster_stage_fn(
     the loop and shared across chunks; recipes are processed in queue order.
     """
     site, limit = base.scope(job)
-    recipe_ids = base.recipe_queue(
-        conn, stage=STAGE, version=DEDUP_VERSION, site=site, limit=limit
-    )
+    apply_mode = job.get("apply_mode") or "auto"
+    job_id = job.get("id")
+    if job_id:
+        recipe_ids = base.run_item_ids(conn, job_id=job_id, stage=STAGE)
+    else:
+        recipe_ids = base.recipe_queue(
+            conn, stage=STAGE, version=DEDUP_VERSION, site=site, limit=limit
+        )
     if not recipe_ids:
         return {"clustered": 0}
 
@@ -147,7 +152,6 @@ def cluster_stage_fn(
     node_meta = _node_meta(conn)
     rollup_cache: dict[int, int] = {}
     counts = {"clustered": 0, "skipped": 0}
-    job_id = job.get("id")
 
     for chunk in base.chunked(recipe_ids, chunk_size):
         # Bulk fetch headers, skipping absent ids.
@@ -207,7 +211,7 @@ def cluster_stage_fn(
                     cur.executemany(_UPSERT_CLUSTER_SQL, cluster_upserts)
                 if recipe_updates:
                     cur.executemany(_UPDATE_CLUSTER_SQL, recipe_updates)
-            base.record_many(conn, records)
+            base.record_many(conn, records, apply_mode=apply_mode)
             base.finalize_run(
                 conn, stage=STAGE, version=DEDUP_VERSION,
                 ids=[str(r) for r in chunk],

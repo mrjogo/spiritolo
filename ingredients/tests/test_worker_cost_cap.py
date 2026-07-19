@@ -67,6 +67,16 @@ def test_aborts_past_max_cost(test_db_url, db_conn):
         "('metered', %s, 'queued', 5) returning id",
         (Json(payload),),
     ).fetchone()[0]
+    # The four members pre-exist (as add_run_items would create them); the
+    # metered stage UPDATEs each as it pays for it, and the abort leaves the
+    # unreached members pending.
+    for eid in (401, 402, 403, 404):
+        db_conn.execute(
+            "insert into job_items (entity_type, entity_id, stage, code_version, "
+            "outcome, method, state, job_id) "
+            "values ('recipe', %s, 'metered', '', 'pending', 'deterministic', 'pending', %s)",
+            (eid, jid),
+        )
 
     def metered_fn(job, conn, providers):
         for eid in job["payload"]["entity_ids"]:
@@ -90,12 +100,14 @@ def test_aborts_past_max_cost(test_db_url, db_conn):
         conn.close()
 
     assert ran is True
-    rows = db_conn.execute(
-        "select entity_id, cost_cents from job_items where stage='metered' "
-        "order by entity_id"
+    # Only the paid-for members were UPDATEd to a terminal state; the abort left
+    # 403/404 as pending members (they never reached record_run).
+    processed = db_conn.execute(
+        "select entity_id, cost_cents from job_items "
+        "where stage='metered' and state <> 'pending' order by entity_id"
     ).fetchall()
-    assert [r[0] for r in rows] == [401, 402], "items 3 and 4 left unprocessed"
-    assert sum(int(r[1]) for r in rows) == 4
+    assert [r[0] for r in processed] == [401, 402], "items 3 and 4 left unprocessed"
+    assert sum(int(r[1]) for r in processed) == 4
 
     state, error_code, cost_actual = db_conn.execute(
         "select state, error_code, cost_actual_cents from jobs where id=%s", (jid,)
@@ -105,5 +117,5 @@ def test_aborts_past_max_cost(test_db_url, db_conn):
     assert cost_actual == 4, "no double count on the aborted item"
 
     assert db_conn.execute(
-        "select count(*) from job_items where entity_id=403"
-    ).fetchone()[0] == 0, "the aborted item never got a stage_run"
+        "select state from job_items where entity_id=403"
+    ).fetchone()[0] == "pending", "the aborted item was never processed"

@@ -91,6 +91,14 @@ def test_idempotent_rerun(test_db_url, db_conn):
         "('demo', %s, 'queued') returning id",
         (Json(payload),),
     ).fetchone()[0]
+    # The run's member row pre-exists (as add_run_items would have created it);
+    # the stage_fn UPDATEs it in place, so a re-run cannot duplicate it.
+    db_conn.execute(
+        "insert into job_items (entity_type, entity_id, stage, code_version, "
+        "outcome, method, state, job_id) "
+        "values ('recipe', 301, 'demo', '', 'pending', 'deterministic', 'pending', %s)",
+        (jid,),
+    )
 
     def fn(job, conn, providers):
         for eid in job["payload"]["entity_ids"]:
@@ -118,7 +126,7 @@ def test_idempotent_rerun(test_db_url, db_conn):
         "select count(*) from job_items where entity_type='recipe' "
         "and entity_id=301 and stage='demo'"
     ).fetchone()[0]
-    assert n_rows == 1, "UPSERT keeps exactly one row per (entity, stage)"
+    assert n_rows == 1, "the member row is UPDATEd in place, not duplicated"
 
     cost_actual = db_conn.execute(
         "select cost_actual_cents from jobs where id=%s", (jid,)

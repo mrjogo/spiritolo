@@ -34,6 +34,39 @@ def scope(job: dict[str, Any]) -> tuple[str | None, int | None]:
     return payload.get("site"), payload.get("limit")
 
 
+def run_item_ids(conn: psycopg.Connection, *, job_id: int, stage: str) -> list[int]:
+    """The entity ids of a run's *pending* members for ``stage``.
+
+    This is the explicit-run queue: when a stage_fn is dispatched for a real job
+    it processes exactly the entities the operator loaded into that run (added by
+    the add_run_items RPC as 'pending' job_items), instead of re-deriving a
+    version NOT-EXISTS predicate over the whole content table. Ordered by
+    entity_id for stable chunking."""
+    rows = conn.execute(
+        "select entity_id from job_items "
+        "where job_id = %s and stage = %s and state = 'pending' "
+        "order by entity_id",
+        (job_id, stage),
+    ).fetchall()
+    return [r[0] for r in rows]
+
+
+def item_state(outcome: str, apply_mode: str = "auto") -> str:
+    """The terminal job_item ``state`` for a stage outcome under a run's
+    apply_mode.
+
+    - ``resolved`` -> ``applied`` for an auto run, ``pending_apply`` for a hold
+      run (the result is computed but held for a human to bulk-apply).
+    - ``failed``   -> ``failed``.
+    - anything parked (``pending`` / ``abstain`` / ``proposes_new``) -> ``flagged``
+      (no content written; needs an LLM or human pass)."""
+    if outcome == "resolved":
+        return "applied" if apply_mode == "auto" else "pending_apply"
+    if outcome == "failed":
+        return "failed"
+    return "flagged"
+
+
 def recipe_queue(
     conn: psycopg.Connection,
     *,
@@ -77,13 +110,18 @@ def record(
     version: str,
     outcome: str,
     method: str,
+    apply_mode: str = "auto",
     job_id: int | None = None,
     cost_cents: float | None = None,
     model_id: str | None = None,
     error_code: str | None = None,
     payload: Any | None = None,
 ) -> None:
-    """UPSERT the recipe's `job_items` row for this stage/version."""
+    """Record the recipe's `job_items` outcome for this stage/version.
+
+    For a run member (``job_id`` set) the pending member row is UPDATEd to its
+    terminal ``state`` (per ``apply_mode``); for the cold-build (``job_id`` None)
+    the append-versioned ledger row is UPSERTed."""
     ledger.record_run(
         conn,
         entity_type=ENTITY_RECIPE,
@@ -92,6 +130,7 @@ def record(
         version=version,
         outcome=outcome,
         method=method,
+        state=item_state(outcome, apply_mode),
         job_id=job_id,
         cost_cents=cost_cents,
         model_id=model_id,
@@ -119,17 +158,25 @@ def finalize_run(
     reapply_overrides(conn, stage=stage, ids=ids)
 
 
-def record_many(conn: psycopg.Connection, records: Iterable[dict[str, Any]]) -> None:
+def record_many(
+    conn: psycopg.Connection,
+    records: Iterable[dict[str, Any]],
+    *,
+    apply_mode: str = "auto",
+) -> None:
     """Batch form of ``record`` for a chunk of recipes. Each dict carries
     ``recipe_id`` plus the same keywords ``record`` takes (stage, version,
-    outcome, method, and optional job_id/payload/error_code/…); they UPSERT in
-    one ``executemany``. Wrap the chunk in ``conn.transaction()`` to commit once."""
+    outcome, method, and optional job_id/payload/error_code/…). Member rows
+    (``job_id`` set) UPDATE their pending row to the terminal ``state`` derived
+    from the outcome + ``apply_mode``; cold-build rows UPSERT the ledger. Wrap the
+    chunk in ``conn.transaction()`` to commit once."""
     ledger.record_runs(
         conn,
         [
             {
                 "entity_type": ENTITY_RECIPE,
                 "entity_id": r["recipe_id"],
+                "state": item_state(r["outcome"], apply_mode),
                 **{k: v for k, v in r.items() if k != "recipe_id"},
             }
             for r in records

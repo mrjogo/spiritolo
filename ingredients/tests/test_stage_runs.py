@@ -99,24 +99,20 @@ def test_schema_shape(db_conn):
     for v in ("deterministic", "llm", "manual"):
         assert v in checks, f"method CHECK missing {v}"
 
-    # UNIQUE(entity_type, entity_id, stage, version) — the append-versioned key
-    # (was latest-only (…, stage); now one row per version, history kept).
-    uniq = {}
-    for r in db_conn.execute(
-        """
-        select tc.constraint_name, kcu.column_name, kcu.ordinal_position
-        from information_schema.table_constraints tc
-        join information_schema.key_column_usage kcu
-          on tc.constraint_name = kcu.constraint_name
-        where tc.table_name = 'job_items' and tc.constraint_type = 'UNIQUE'
-        """
-    ).fetchall():
-        uniq.setdefault(r[0], []).append((r[2], r[1]))
-    assert any(
-        [c for _, c in sorted(members)]
-        == ["entity_type", "entity_id", "stage", "code_version"]
-        for members in uniq.values()
-    ), f"missing UNIQUE(entity_type, entity_id, stage, code_version); have {uniq}"
+    # Append-versioned uniqueness is now a PARTIAL unique index scoped to the
+    # cold-build ledger rows (job_id IS NULL). Run-member rows (job_id NOT NULL)
+    # are deliberately unconstrained — the same entity can be a member of many
+    # runs over time, and the add_run_items RPC dedups membership instead.
+    idxdef = db_conn.execute(
+        "select indexdef from pg_indexes "
+        "where tablename = 'job_items' and indexname = 'job_items_ledger_key'"
+    ).fetchone()
+    assert idxdef is not None, "missing job_items_ledger_key partial unique index"
+    definition = idxdef[0].lower()
+    assert "unique" in definition
+    for col in ("entity_type", "entity_id", "stage", "code_version"):
+        assert col in definition, f"ledger key missing {col}: {definition}"
+    assert "job_id is null" in definition, definition
 
 
 def test_entity_type_check_rejects_unknown(db_conn):

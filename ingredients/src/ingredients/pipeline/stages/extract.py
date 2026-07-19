@@ -106,6 +106,20 @@ def _upsert_recipe(conn: psycopg.Connection, page: dict[str, Any], recipe: dict[
     )
 
 
+def _pages_by_ids(conn: psycopg.Connection, page_ids: list[int]) -> list[dict[str, Any]]:
+    """Load the explicit page members of a run (same row shape as _page_queue)."""
+    if not page_ids:
+        return []
+    rows = conn.execute(
+        "select p.id, p.url, p.site, p.corpus_key from pages p "
+        "where p.id = any(%s) order by p.id",
+        (page_ids,),
+    ).fetchall()
+    return [
+        {"id": r[0], "url": r[1], "site": r[2], "corpus_key": r[3]} for r in rows
+    ]
+
+
 def _record(conn, page_id, *, outcome, method, job, error_code=None):
     ledger.record_run(
         conn,
@@ -115,6 +129,7 @@ def _record(conn, page_id, *, outcome, method, job, error_code=None):
         version=EXTRACTOR_VERSION,
         outcome=outcome,
         method=method,
+        state=base.item_state(outcome, job.get("apply_mode") or "auto"),
         job_id=job.get("id"),
         error_code=error_code,
     )
@@ -152,7 +167,10 @@ def extract_stage_fn(
     tier, and every DB write run on the calling thread in queue order.
     """
     site, limit = base.scope(job)
-    pages = _page_queue(conn, site, limit)
+    if job.get("id"):
+        pages = _pages_by_ids(conn, base.run_item_ids(conn, job_id=job["id"], stage=STAGE))
+    else:
+        pages = _page_queue(conn, site, limit)
     counts = {"extracted": 0, "no_recipe": 0, "html_missing": 0}
     if not pages:
         return counts
