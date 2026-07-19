@@ -15,6 +15,7 @@ import psycopg
 from ingredients.pipeline import ledger
 
 ENTITY_RECIPE = "recipe"
+ENTITY_TAXONOMY_NODE = "taxonomy_node"
 
 # Recipes per transaction/batch. A stage collects a chunk's writes, flushes them
 # with bulk statements + one ledger executemany, and commits once — turning ~N
@@ -99,6 +100,37 @@ def recipe_queue(
         version=version,
         where=where,
         params=tuple(params),
+        limit=limit,
+    )
+
+
+def node_queue(
+    conn: psycopg.Connection,
+    *,
+    stage: str,
+    version: str,
+    broad: bool = False,
+    limit: int | None = None,
+) -> list[int]:
+    """taxonomy_node ids with no `job_items` row for (stage, version).
+
+    The node analogue of ``recipe_queue``: the work queue for the harmonization
+    stages (``combine-nodes`` / ``connect-nodes``) over the ``taxonomy_nodes``
+    table. By default it targets the provisional residue (``status =
+    'provisional'``) — the nodes ``map-ingredient`` freshly minted that still
+    need merging + placing. ``broad=True`` drops the status filter so a run can
+    harmonize the pre-existing live taxonomy too (see the design's
+    "combine/connect can run broadly"). Same NOT-EXISTS-a-run-at-this-version
+    predicate as every other queue, so an already-processed node reappears only
+    after a version bump."""
+    where = None if broad else "c.status = 'provisional'"
+    return ledger.work_queue(
+        conn,
+        content_table="taxonomy_nodes",
+        entity_type=ENTITY_TAXONOMY_NODE,
+        stage=stage,
+        version=version,
+        where=where,
         limit=limit,
     )
 
