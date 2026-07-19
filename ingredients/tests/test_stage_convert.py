@@ -105,6 +105,39 @@ def test_convert_batches_across_chunk_boundary(conn):
         ).fetchone()[0] == "resolved"
 
 
+def test_convert_skips_recipe_with_provisional_ingredient(conn):
+    # bourbon resolves (a valid slug), but its node is provisional -> the gate
+    # parks the recipe as pending with NO steps, even though the converter itself
+    # would treat the resolved slug as fine.
+    rid = _old_fashioned(conn)
+    conn.execute("update taxonomy_nodes set status='provisional' where slug='bourbon'")
+
+    counts = convert_stage_fn(_job(), conn, None)
+    assert counts["pending"] == 1
+    assert counts["converted"] == 0
+    assert conn.execute(
+        "select count(*) from recipe_steps where recipe_id=%s", (rid,)
+    ).fetchone()[0] == 0
+    outcome = conn.execute(
+        "select outcome from job_items where entity_id=%s and stage='convert-steps'", (rid,)
+    ).fetchone()[0]
+    assert outcome == "pending"
+
+    # Promote + requeue -> converts normally.
+    conn.execute("update taxonomy_nodes set status='live' where slug='bourbon'")
+    conn.execute("delete from job_items where entity_id=%s and stage='convert-steps'", (rid,))
+    counts2 = convert_stage_fn(_job(), conn, None)
+    assert counts2["converted"] == 1
+    verbs = conn.execute(
+        "select verb from recipe_steps where recipe_id=%s order by step_index", (rid,)
+    ).fetchall()
+    assert [v[0] for v in verbs] == ["add", "stir", "strain"]
+    outcome2 = conn.execute(
+        "select outcome from job_items where entity_id=%s and stage='convert-steps'", (rid,)
+    ).fetchone()[0]
+    assert outcome2 == "resolved"
+
+
 def test_convert_pending_when_ingredient_unresolved(conn):
     rid = _old_fashioned(conn, resolve_all=False)
     counts = convert_stage_fn(_job(), conn, None)

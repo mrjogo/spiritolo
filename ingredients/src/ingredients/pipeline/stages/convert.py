@@ -133,6 +133,9 @@ def convert_stage_fn(
             }
             present_ids = [rid for rid in chunk if rid in headers]
             ingredients_by_recipe = _fetch_ingredients(conn, present_ids)
+            # Recipes with any provisional-node ingredient aren't eligible yet —
+            # gate before running the converter so no steps are written.
+            blocked = base.recipes_with_provisional_ingredients(conn, present_ids)
 
             canonical_updates: list[tuple] = []
             ok_ids: list[int] = []
@@ -143,6 +146,18 @@ def convert_stage_fn(
             for recipe_id in chunk:
                 header = headers.get(recipe_id)
                 if header is None:
+                    continue
+                if recipe_id in blocked:
+                    counts["pending"] += 1
+                    records.append({
+                        "recipe_id": recipe_id,
+                        "stage": STAGE,
+                        "version": CONVERTER_VERSION,
+                        "outcome": "pending",
+                        "method": "deterministic",
+                        "job_id": job.get("id"),
+                        "payload": None,
+                    })
                     continue
                 _id, title, canonical_name, source_url, source = header
                 if canonical_name is None:

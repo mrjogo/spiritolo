@@ -103,6 +103,33 @@ def recipe_queue(
     )
 
 
+def recipes_with_provisional_ingredients(
+    conn: psycopg.Connection, recipe_ids: list[int]
+) -> set[int]:
+    """The subset of ``recipe_ids`` that have at least one ingredient whose
+    resolution points at a ``status='provisional'`` taxonomy node.
+
+    A provisional node's taxonomy identity isn't final yet (it hasn't been
+    harmonized + promoted by connect-nodes), so a recipe using one is not
+    eligible for the downstream stages (cluster/convert/export) — clustering or
+    exporting it now would freeze a wrong identity. The downstream stages call
+    this to gate each recipe in BOTH run paths (explicit run and cold-build
+    queue); the recipe comes back once its nodes are promoted to ``live``.
+    Returns ``set()`` for empty input."""
+    if not recipe_ids:
+        return set()
+    rows = conn.execute(
+        "select distinct ri.recipe_id "
+        "from recipe_ingredients ri "
+        "join ingredient_resolutions ir "
+        "  on lower(btrim(ri.name)) = ir.normalized_name "
+        "join taxonomy_nodes n on n.slug = ir.taxonomy_slug "
+        "where ri.recipe_id = any(%s) and n.status = 'provisional'",
+        (recipe_ids,),
+    ).fetchall()
+    return {r[0] for r in rows}
+
+
 def record(
     conn: psycopg.Connection,
     *,

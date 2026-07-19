@@ -71,10 +71,27 @@ def export_stage_fn(
         export_rows: list[tuple[Any, ...]] = []
         slug_updates: list[tuple[Any, ...]] = []
         records: list[dict[str, Any]] = []
+        # Recipes with any provisional-node ingredient aren't eligible yet — gate
+        # before freezing any bundle so no export row is written for them.
+        blocked = base.recipes_with_provisional_ingredients(conn, chunk)
         with conn.transaction():
             for recipe_id, result in generate_bundles(conn, chunk, imported_at=imported_at):
                 if result is None:
                     continue  # recipe vanished between queue and process
+                if recipe_id in blocked:
+                    counts["pending"] += 1
+                    records.append(
+                        {
+                            "recipe_id": recipe_id,
+                            "stage": STAGE,
+                            "version": CONVERTER_VERSION,
+                            "outcome": "pending",
+                            "method": "deterministic",
+                            "job_id": job.get("id"),
+                            "error_code": None,
+                        }
+                    )
+                    continue
                 error_code: str | None = None
                 if isinstance(result, UnresolvedIngredient):
                     outcome = "pending"
