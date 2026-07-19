@@ -1,6 +1,6 @@
 import type { StageReview } from '../ReviewCard';
 
-// Read-only body for a `parse`-stage review: shows the ingredient fields the
+// Read-only body for a `parse-ingredients`-stage review: shows the ingredient fields the
 // parser produced (name + amount + unit). Payload is untyped jsonb off the
 // human_reviews row, so each field is narrowed defensively.
 interface ParsePayload {

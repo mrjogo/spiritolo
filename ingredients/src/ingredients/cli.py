@@ -1,8 +1,10 @@
 """Pipeline CLI: run one stage, or the whole cold build, over the queue.
 
-Each subcommand is one stage (`extract`, `parse`, `map`, `convert`, `cluster`,
-`export`) run deterministically over its whole `job_items` work queue; `cold-build`
-runs them all in order (extract -> parse -> map -> convert -> cluster -> export).
+Each subcommand is one stage (`extract-recipe`, `parse-ingredients`,
+`map-ingredient`, `convert-steps`, `cluster-recipes`, `export-recipegf`) run
+deterministically over its whole `job_items` work queue; `cold-build` runs them
+all in order (extract-recipe -> parse-ingredients -> map-ingredient ->
+convert-steps -> cluster-recipes -> export-recipegf).
 Every stage is idempotent, so a re-run only processes what a prior run left
 undone. Writes go to whatever `SUPABASE_DB_URL` points at.
 """

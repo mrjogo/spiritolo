@@ -18,9 +18,8 @@ import { AddTasks } from './AddTasks';
 
 const RUN = {
   id: 142,
-  stage: 'map',
+  stage: 'map-ingredient',
   state: 'draft',
-  apply_mode: 'hold',
   llm_provider: 'deepseek',
   llm_model: 'deepseek-chat',
   task_count: 1102,

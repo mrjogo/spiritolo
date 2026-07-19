@@ -2,7 +2,7 @@
 
 These are the SECURITY DEFINER functions the queue-selection UI calls: the run
 lifecycle (create_run / add_run_items[_by_filter] / remove_run_items /
-set_run_llm / start_run / apply_run_items), the browsing surfaces
+set_run_llm / start_run), the browsing surfaces
 (eligible_pool[_facets] / run_items[_facets]), and the `runs` read view.
 
 Every function guards on ``public.is_admin()`` (reads profiles.is_admin filtered
@@ -58,7 +58,7 @@ def _recipe(conn, *, site="diffordsguide", title="A Drink") -> int:
     ).fetchone()[0]
 
 
-def _terminal_item(conn, *, recipe_id, stage="map", state="flagged", code_version="v1"):
+def _terminal_item(conn, *, recipe_id, stage="map-ingredient", state="flagged", code_version="v1"):
     """A completed job_item that gives an entity a stage status in the pool."""
     conn.execute(
         "insert into job_items (entity_type, entity_id, stage, code_version, "
@@ -72,12 +72,9 @@ def _terminal_item(conn, *, recipe_id, stage="map", state="flagged", code_versio
 # ---------------------------------------------------------------------------
 def test_run_lifecycle(conn):
     r1, r2 = _recipe(conn), _recipe(conn)
-    jid = conn.execute("select create_run('map','hold')").fetchone()[0]
+    jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]
     assert isinstance(jid, int)
-    assert conn.execute("select state, apply_mode from jobs where id=%s", (jid,)).fetchone() == (
-        "draft",
-        "hold",
-    )
+    assert conn.execute("select state from jobs where id=%s", (jid,)).fetchone() == ("draft",)
 
     n = conn.execute("select add_run_items(%s,'recipe', array[%s,%s])", (jid, r1, r2)).fetchone()[0]
     assert n == 2
@@ -110,7 +107,7 @@ def test_run_lifecycle(conn):
 def test_named_args_match_web_hooks(conn):
     """The web hooks call these RPCs with named args; pin the exact names."""
     r1 = _recipe(conn)
-    jid = conn.execute("select create_run(stage => 'map', apply_mode => 'auto')").fetchone()[0]
+    jid = conn.execute("select create_run(stage => 'map-ingredient')").fetchone()[0]
     conn.execute(
         "select add_run_items(job_id => %s, entity_type => 'recipe', entity_ids => array[%s])",
         (jid, r1),
@@ -122,7 +119,7 @@ def test_named_args_match_web_hooks(conn):
 
 def test_remove_run_items_draft_only(conn):
     r1, r2 = _recipe(conn), _recipe(conn)
-    jid = conn.execute("select create_run('map','auto')").fetchone()[0]
+    jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]
     conn.execute("select add_run_items(%s,'recipe', array[%s,%s])", (jid, r1, r2))
     ids = [
         r[0]
@@ -133,19 +130,6 @@ def test_remove_run_items_draft_only(conn):
     assert conn.execute("select count(*) from job_items where job_id=%s", (jid,)).fetchone()[0] == 1
 
 
-def test_apply_run_items_flips_pending_apply(conn):
-    r1 = _recipe(conn)
-    jid = conn.execute("select create_run('map','hold')").fetchone()[0]
-    conn.execute("select add_run_items(%s,'recipe', array[%s])", (jid, r1))
-    # Simulate a hold-run worker outcome: the member is held for apply.
-    conn.execute("update job_items set state='pending_apply' where job_id=%s", (jid,))
-    n = conn.execute("select apply_run_items(%s, null)", (jid,)).fetchone()[0]
-    assert n == 1
-    assert conn.execute(
-        "select state from job_items where job_id=%s", (jid,)
-    ).fetchone()[0] == "applied"
-
-
 # ---------------------------------------------------------------------------
 # runs read view
 # ---------------------------------------------------------------------------
@@ -154,23 +138,22 @@ def test_runs_view_shape_and_rollups(conn):
     # r1 flagged, r2 failed at the stage; r3 never run.
     _terminal_item(conn, recipe_id=r1, state="flagged")
     _terminal_item(conn, recipe_id=r2, state="failed")
-    jid = conn.execute("select create_run('map','auto')").fetchone()[0]
+    jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]
     conn.execute("select add_run_items(%s,'recipe', array[%s,%s,%s])", (jid, r1, r2, r3))
 
     row = conn.execute(
-        "select id, stage, state, apply_mode, llm_provider, llm_model, task_count, "
+        "select id, stage, state, llm_provider, llm_model, task_count, "
         "flagged_count, never_run_count, failed_count, cost_estimate_cents, "
         "max_cost_cents, created_at, created_by from runs where id=%s",
         (jid,),
     ).fetchone()
     assert row[0] == jid
-    assert row[1] == "map"
+    assert row[1] == "map-ingredient"
     assert row[2] == "draft"
-    assert row[3] == "auto"
-    assert row[6] == 3  # task_count
-    assert row[7] == 1  # flagged_count
-    assert row[8] == 1  # never_run_count
-    assert row[9] == 1  # failed_count
+    assert row[5] == 3  # task_count
+    assert row[6] == 1  # flagged_count
+    assert row[7] == 1  # never_run_count
+    assert row[8] == 1  # failed_count
 
 
 # ---------------------------------------------------------------------------
@@ -187,7 +170,7 @@ def test_eligible_pool_filter_and_facets(conn):
 
     # AND across keys, OR within a key: (flagged OR failed) AND source=diffordsguide.
     rows = conn.execute(
-        "select * from eligible_pool('map', %s, 'last_run_desc', 50, 0)",
+        "select * from eligible_pool('map-ingredient', %s, 'last_run_desc', 50, 0)",
         ('{"status":["flagged","failed"],"source":["diffordsguide"]}',),
     ).fetchall()
     ids = {r[0] for r in rows}
@@ -195,7 +178,7 @@ def test_eligible_pool_filter_and_facets(conn):
     # total_count window column is stamped on every row.
     assert all(r[-1] == 2 for r in rows)
 
-    facets = conn.execute("select eligible_pool_facets('map','{}')").fetchone()[0]
+    facets = conn.execute("select eligible_pool_facets('map-ingredient','{}')").fetchone()[0]
     assert facets["status"]["flagged"] == 2
     assert facets["status"]["failed"] == 1
     assert facets["status"]["never_run"] == 1
@@ -207,7 +190,7 @@ def test_add_run_items_by_filter(conn):
     r2 = _recipe(conn, site="punch")
     _terminal_item(conn, recipe_id=r1, state="flagged")
     _terminal_item(conn, recipe_id=r2, state="flagged")
-    jid = conn.execute("select create_run('map','auto')").fetchone()[0]
+    jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]
     n = conn.execute(
         "select add_run_items_by_filter(%s, %s)",
         (jid, '{"status":["flagged"],"source":["diffordsguide"]}'),
@@ -228,7 +211,7 @@ def test_add_run_items_by_filter(conn):
 def test_run_items_and_facets(conn):
     r1, r2 = _recipe(conn, title="Negroni"), _recipe(conn, title="Martini")
     _terminal_item(conn, recipe_id=r1, state="flagged")  # why_added flagged
-    jid = conn.execute("select create_run('map','auto')").fetchone()[0]
+    jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]
     conn.execute("select add_run_items(%s,'recipe', array[%s,%s])", (jid, r1, r2))
 
     rows = conn.execute(
@@ -261,7 +244,7 @@ def test_create_run_admin_only(conn):
     conn.execute("set role authenticated")
     try:
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            conn.execute("select create_run('map','auto')")
+            conn.execute("select create_run('map-ingredient')")
     finally:
         conn.execute("reset role")
 

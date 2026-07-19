@@ -1,7 +1,7 @@
 """Human review of map *form* proposals.
 
 The map LLM tier can't auto-create a new substance *form* node (e.g. "lemon
-zest"), so it writes an open `human_reviews` row (stage='map',
+zest"), so it writes an open `human_reviews` row (stage='map-ingredient',
 origin='machine_proposal', payload.kind='form') and parks the name. A curator
 approves it here: create the node + edge + alias + shared resolution, then mark
 the review resolved. (Enqueuing is now `reviews.model.insert_review`, done by the
@@ -23,7 +23,7 @@ def fetch_pending_form_proposals(conn: psycopg.Connection) -> list[dict[str, Any
         """
         select id, entity_id, payload
         from human_reviews
-        where stage = 'map' and origin = 'machine_proposal' and state = 'open'
+        where stage = 'map-ingredient' and origin = 'machine_proposal' and state = 'open'
           and payload->>'kind' = 'form'
         order by created_at, id
         """

@@ -7,17 +7,12 @@ import { findTier, DEFAULT_LLM_TIER, type LlmTier } from './llmTiers';
 // selection UI's point of view.
 export type RunState = 'draft' | 'queued' | 'claimed' | 'running' | 'done' | 'failed';
 
-// How a run applies its results: 'auto' writes them straight through; 'hold'
-// parks them as pending_apply for a human to bulk-apply from the task list.
-export type ApplyMode = 'auto' | 'hold';
-
 // One row from the `runs` read view (a projection over `jobs` + item roll-ups).
 // The write path is the RPC set below; this is the read side only.
 export interface RunHeader {
   id: number;
   stage: string;
   state: RunState;
-  apply_mode: ApplyMode;
   llm_provider: string | null;
   llm_model: string | null;
   task_count: number;
@@ -32,7 +27,7 @@ export interface RunHeader {
 }
 
 const RUN_SELECT =
-  'id, stage, state, apply_mode, llm_provider, llm_model, task_count, ' +
+  'id, stage, state, llm_provider, llm_model, task_count, ' +
   'flagged_count, never_run_count, failed_count, cost_estimate_cents, ' +
   'max_cost_cents, created_at, created_by';
 
@@ -72,11 +67,11 @@ export function useRun(jobId: number | null): UseRunResult {
 
 // --- Run-level mutations (the RPC write path) -----------------------------
 
-type CreateRunArgs = { stage: string; apply_mode: ApplyMode };
+type CreateRunArgs = { stage: string };
 type SetRunLlmArgs = { job_id: number; provider: string; model: string };
 type StartRunArgs = { job_id: number; max_cost_cents: number };
 
-/** create_run(stage, apply_mode) -> bigint job id. */
+/** create_run(stage) -> bigint job id. */
 export function useCreateRun() {
   return useRpc<CreateRunArgs, number>('create_run', { invalidate: [['runs']] });
 }

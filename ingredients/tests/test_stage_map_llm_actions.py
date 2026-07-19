@@ -170,9 +170,9 @@ def test_propose_form_queues_proposal_and_parks(conn):
     prop = c.execute(
         "select entity_id, stage, origin, state, "
         "payload->>'proposed_slug', (payload->>'proposed_parent_id')::bigint "
-        "from human_reviews where entity_id = 'lemon zest' and stage = 'map'"
+        "from human_reviews where entity_id = 'lemon zest' and stage = 'map-ingredient'"
     ).fetchone()
-    assert prop == ("lemon zest", "map", "machine_proposal", "open",
+    assert prop == ("lemon zest", "map-ingredient", "machine_proposal", "open",
                     "lemon-zest", ids["lemon"])
 
     # Parked: no taxonomy node yet, no non-null resolution for the name.
@@ -186,7 +186,7 @@ def test_propose_form_queues_proposal_and_parks(conn):
     assert slug is None or slug[0] is None
 
     outcome = c.execute(
-        "select outcome from job_items where entity_id = %s and stage = 'map'", (rid,)
+        "select outcome from job_items where entity_id = %s and stage = 'map-ingredient'", (rid,)
     ).fetchone()[0]
     assert outcome == "pending"
 
@@ -197,7 +197,7 @@ def test_review_proposals_path_resolves(conn):
         c,
         entity_kind="ingredient_name",
         entity_id="lemon zest",
-        stage="map",
+        stage="map-ingredient",
         origin="machine_proposal",
         payload={
             "kind": "form",

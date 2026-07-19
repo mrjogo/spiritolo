@@ -2,7 +2,7 @@
 
 # spiritolo
 
-Cocktail recipe scraper + verification UI, in two zones. **Zone 1 (`scraper/`)** crawls: discover → classify_url → fetch (runs HTML validation + drink scoring inline), caching page HTML. **Zone 2 (`ingredients/`)** builds the relational recipe from those pages: extract → parse → map → convert → cluster → export. An operator assembles explicit **runs** in `/ops` (a `jobs` row that owns per-entity `job_items`); the worker processes a run's `pending` `job_items`. Vite/React SPA reads `recipes_public`.
+Cocktail recipe scraper + verification UI, in two zones. **Zone 1 (`scraper/`)** crawls: discover → classify_url → fetch (runs HTML validation + drink scoring inline), caching page HTML. **Zone 2 (`ingredients/`)** builds the relational recipe from those pages: extract-recipe → parse-ingredients → map-ingredient → convert-steps → cluster-recipes → export-recipegf. An operator assembles explicit **runs** in `/ops` (a `jobs` row that owns per-entity `job_items`); the worker processes a run's `pending` `job_items`. Vite/React SPA reads `recipes_public`.
 
 - `scraper/` — Python 3.11+ (uv), pytest. Zone-1 stage CLIs in `scraper/src/scraper/{discover,classify,fetch,validate}.py`. Work queue: `data/scraper.db` (SQLite).
 - `ingredients/` — Zone-2 content pipeline + the always-on worker. Stages in `ingredients/src/ingredients/pipeline/stages/`; depends on `common/`, not on `scraper/`.
@@ -56,7 +56,7 @@ URL classifier needs ollama: `ollama pull qwen3:14b`.
 
 **Zone 2 — Supabase (relational content model).** The recipe is stored across `recipes` (header + raw Schema.org `source` JSON-LD), `recipe_ingredients` (RecipeGF ingredient rows), and `recipe_steps` (verb-frame steps). Ingredient → taxonomy resolution is **shared and name-keyed** in `ingredient_resolutions` — fix a name once and every recipe that uses it follows, so a taxonomy correction never rewrites a recipe. Drink identity is derived into `recipe_clusters` (+ `recipes.cluster_id`/`variant_key`). Taxonomy is `taxonomy_nodes` / `taxonomy_edges` / `taxonomy_aliases` (multi-parent DAG, see Spirits Taxonomy below). The RecipeGF bundle a consumer imports is generated on demand from these rows; only a published export is frozen (`recipe_exports`). The website reads `recipes_public`.
 
-**Runs, not derived queues.** A **run** is a `jobs` row (`draft → queued → claimed → running → done`/`failed`) that carries a per-run LLM tier (`llm_provider`/`llm_model`) and an `apply_mode` (`auto`|`hold`). Its membership is the set of `job_items` it owns — one per `(job, entity)`, in state `pending → running → {applied | pending_apply | flagged | failed}`. **`job_items` replaced `stage_runs`**: it's both the run's membership (when `pending`) and the per-entity outcome (when terminal), append-only across runs so an entity can be re-run. "Current status of entity X at stage Y" = its most recent terminal `job_item`; that derived status index powers the `/ops` add-tasks filter facets. The operator assembles a run in `/ops` (create → filter/select entities → load `pending` items → **Start**); the single cost gate is the Start-confirm modal (metered = the run's LLM tier is a hosted API; local `ollama` is free — no separate approval step). The worker claims a `queued` job and processes exactly its `pending` `job_items`.
+**Runs, not derived queues.** A **run** is a `jobs` row (`draft → queued → claimed → running → done`/`failed`) that carries a per-run LLM tier (`llm_provider`/`llm_model`). Its membership is the set of `job_items` it owns — one per `(job, entity)`, in state `pending → running → {applied | flagged | failed}`. Application is always immediate — a stage writes its content rows as it processes, so a terminal `applied` item is already live; there is no hold mode or deferred apply step. **`job_items` replaced `stage_runs`**: it's both the run's membership (when `pending`) and the per-entity outcome (when terminal), append-only across runs so an entity can be re-run. "Current status of entity X at stage Y" = its most recent terminal `job_item`; that derived status index powers the `/ops` add-tasks filter facets. The operator assembles a run in `/ops` (create → filter/select entities → load `pending` items → **Start**); the single cost gate is the Start-confirm modal (metered = the run's LLM tier is a hosted API; local `ollama` is free — no separate approval step). The worker claims a `queued` job and processes exactly its `pending` `job_items`. (The append-only audit log captures each row's before+after tagged with the job id — the intended substrate for a future run rollback, which is not yet built.)
 
 ## Pipeline conventions
 
@@ -108,7 +108,7 @@ Zone 2 (`ingredients/`):
   Sidecar at `data/batches/<batch_id>.json` (gitignored). Lose it and you must re-derive from the OpenAI dashboard or re-submit.
 - **`validate.py`** — fetch runs validation + drink scoring inline, so this CLI exists only to re-evaluate cached HTML after a version bump.
 
-Schema.org Recipe JSON-LD extraction is no longer a scraper CLI — the Zone-2 `extract` stage owns page → `recipes` now (see below).
+Schema.org Recipe JSON-LD extraction is no longer a scraper CLI — the Zone-2 `extract-recipe` stage owns page → `recipes` now (see below).
 
 ## Spirits Taxonomy
 
@@ -124,19 +124,19 @@ Taxonomy nodes are managed on staging via the curation UI; they are not maintain
 
 ## Content pipeline (Zone 2)
 
-`ingredients/` turns crawled pages into the relational recipe. Each stage is a `stage_fn(job, conn, providers)` registered into `worker.dispatch.STAGE_FNS`; the run order is **extract → parse → map → convert → cluster → export**. A stage resolves its work queue from `stage_runs` ("content qualifies AND no run at the current version"), does its work over a provider chain (deterministic tier first, an LLM tier for the residue), writes its content rows, and UPSERTs one `stage_runs` row per entity — so a re-run only touches what a prior run left undone.
+`ingredients/` turns crawled pages into the relational recipe. Each stage is a `stage_fn(job, conn, providers)` registered into `worker.dispatch.STAGE_FNS`; the run order is **extract-recipe → parse-ingredients → map-ingredient → convert-steps → cluster-recipes → export-recipegf**. A stage resolves its work queue from `stage_runs` ("content qualifies AND no run at the current version"), does its work over a provider chain (deterministic tier first, an LLM tier for the residue), writes its content rows, and UPSERTs one `stage_runs` row per entity — so a re-run only touches what a prior run left undone.
 
 **Two run surfaces:**
 
 - **CLI — one stage, or the whole cold build, deterministically.** It passes no providers, so LLM tiers are skipped and anything only an LLM could resolve parks as `pending`. Good for a local cold build off a staging restore.
 
   ```bash
-  cd ingredients && uv run python -m ingredients.cli <stage>            # extract|parse|map|convert|cluster|export
-  cd ingredients && uv run python -m ingredients.cli map --site punch --limit 200
+  cd ingredients && uv run python -m ingredients.cli <stage>            # extract-recipe|parse-ingredients|map-ingredient|convert-steps|cluster-recipes|export-recipegf
+  cd ingredients && uv run python -m ingredients.cli map-ingredient --site punch --limit 200
   cd ingredients && uv run python -m ingredients.cli cold-build         # every stage in order
   ```
 
-  Every subcommand takes `--site` / `--limit`. To re-run a stage, delete its `stage_runs` rows or bump the version constant. (Verified against [cli.py](ingredients/src/ingredients/cli.py) + [coldbuild.py](ingredients/src/ingredients/pipeline/coldbuild.py): the subcommands are exactly `extract`, `parse`, `map`, `convert`, `cluster`, `export`, `cold-build` — no `--review` / `--reset` / `--dry-run` / provider flags.)
+  Every subcommand takes `--site` / `--limit`. To re-run a stage, delete its `stage_runs` rows or bump the version constant. (Verified against [cli.py](ingredients/src/ingredients/cli.py) + [coldbuild.py](ingredients/src/ingredients/pipeline/coldbuild.py): the subcommands are exactly `extract-recipe`, `parse-ingredients`, `map-ingredient`, `convert-steps`, `cluster-recipes`, `export-recipegf`, `cold-build` — no `--review` / `--reset` / `--dry-run` / provider flags.)
 
 - **Worker — the always-on daemon over the `jobs` queue.** Claims a job (`FOR UPDATE SKIP LOCKED`), dispatches it to its stage_fn with a config-not-code `ProviderChain` (LLM tiers + a per-job cost cap), heartbeats while it runs, then finalizes. Provider chains are wired from `PROVIDER_CHAIN_CONFIG` (a JSON file); the schema is never rewired for a provider change.
 
@@ -144,16 +144,16 @@ Taxonomy nodes are managed on staging via the curation UI; they are not maintain
   cd ingredients && uv run python -m ingredients.worker
   ```
 
-  Runs are assembled in the `/ops` console: `create_run` (draft) → `add_run_items`/`add_run_items_by_filter` (load `pending` members) → `start_run` (draft → `queued`). The worker then claims the `queued` job and processes its `pending` `job_items`. `apply_run_items` flips `pending_apply → applied` for `hold`-mode runs. (The legacy `enqueue_job`/`approve_job`/`awaiting_approval` path is gone.)
+  Runs are assembled in the `/ops` console: `create_run` (draft) → `add_run_items`/`add_run_items_by_filter` (load `pending` members) → `start_run` (draft → `queued`). The worker then claims the `queued` job and processes its `pending` `job_items`, writing content immediately as it goes (no separate apply step). (The legacy `enqueue_job`/`approve_job`/`awaiting_approval` path is gone.)
 
 **The stages:**
 
-- **extract** — reads a classified page's cached HTML from the object store, finds the Schema.org Recipe JSON-LD, and UPSERTs a `recipes` row (raw `source` verbatim + derived title/author/image). No Recipe JSON-LD → the LLM tier synthesizes a recipe source from the page, else it abstains.
-- **parse** — parses each `recipes.source` `recipeIngredient` string with strict abstain discipline into `recipe_ingredients` (RecipeGF shape: name + amount/amount_max/unit + `string[]` modifiers). `PARSER_VERSION` in [parser.py](ingredients/src/ingredients/parser.py); bump on any rule or unit-table change.
-- **map** — resolves each `recipe_ingredients.name` to a taxonomy slug in the **shared** `ingredient_resolutions` (name-keyed — resolved once for every recipe that uses it): alias → lexical → LLM tier → abstain. An LLM `propose_brand`/expression whose parent slug already exists auto-creates the node + edge + `taxonomy_provenance` (`is_cluster_node=false`) and writes the resolution; a `propose_form` queues a `human_reviews` machine-proposal row for human review (the curation UI) and parks the name.
-- **convert** — deterministic technique keyword scan → RecipeGF verb-frame `recipe_steps`. Anything uncertain (no technique, muddle, untranslatable unit, unresolved ingredient) records a `pending` / `proposes_new` outcome in `stage_runs` and writes no steps.
-- **cluster** — normalizes the cocktail name (`NORMALIZER_VERSION`), role-tags ingredients and rolls them up to the curated antichain, then writes `recipe_clusters` (+ `recipes.cluster_id`/`variant_key`). Cluster identity is `hash(canonical_name, role-tagged rolled-up ingredient set)`; two recipes share a variant iff they also share amounts and brand call-outs, so identical recipes from multiple sources collapse to one variant with `source_count > 1`.
-- **export** — freezes the on-demand bundle into `recipe_exports`, keyed by recipe + `CONVERTER_VERSION`.
+- **extract-recipe** — reads a classified page's cached HTML from the object store, finds the Schema.org Recipe JSON-LD, and UPSERTs a `recipes` row (raw `source` verbatim + derived title/author/image). No Recipe JSON-LD → the LLM tier synthesizes a recipe source from the page, else it abstains.
+- **parse-ingredients** — parses each `recipes.source` `recipeIngredient` string with strict abstain discipline into `recipe_ingredients` (RecipeGF shape: name + amount/amount_max/unit + `string[]` modifiers). `PARSER_VERSION` in [parser.py](ingredients/src/ingredients/parser.py); bump on any rule or unit-table change.
+- **map-ingredient** — resolves each `recipe_ingredients.name` to a taxonomy slug in the **shared** `ingredient_resolutions` (name-keyed — resolved once for every recipe that uses it): alias → lexical → LLM tier → abstain. An LLM `propose_brand`/expression whose parent slug already exists auto-creates the node + edge + `taxonomy_provenance` (`is_cluster_node=false`) and writes the resolution; a `propose_form` queues a `human_reviews` machine-proposal row for human review (the curation UI) and parks the name.
+- **convert-steps** — deterministic technique keyword scan → RecipeGF verb-frame `recipe_steps`. Anything uncertain (no technique, muddle, untranslatable unit, unresolved ingredient) records a `pending` / `proposes_new` outcome in `stage_runs` and writes no steps.
+- **cluster-recipes** — normalizes the cocktail name (`NORMALIZER_VERSION`), role-tags ingredients and rolls them up to the curated antichain, then writes `recipe_clusters` (+ `recipes.cluster_id`/`variant_key`). Cluster identity is `hash(canonical_name, role-tagged rolled-up ingredient set)`; two recipes share a variant iff they also share amounts and brand call-outs, so identical recipes from multiple sources collapse to one variant with `source_count > 1`.
+- **export-recipegf** — freezes the on-demand bundle into `recipe_exports`, keyed by recipe + `CONVERTER_VERSION`.
 
 **Generate-on-demand bundles.** Spiritolo emits validated **RecipeGF pin-2 bundles** — one per recipe — so a consumer (Barbot) imports self-contained docs with no runtime dependency on Spiritolo. The bundle is `{recipe, verbs:[<spiritolo/ defs used>], meta:{slug, source, imported_at}}`, generated from `recipes` + `recipe_ingredients` + `recipe_steps` by [recipegf/generate.py](ingredients/src/ingredients/recipegf/generate.py) (`generate_bundle`) — not a stored blob. Depends on the pinned `recipegf` v0.4.0 library; **read [docs/recipegf-export.md](docs/recipegf-export.md)**. Non-obvious invariants:
 
@@ -162,7 +162,7 @@ Taxonomy nodes are managed on staging via the curation UI; they are not maintain
 
 **Eval sets** run through pytest (`cd ingredients && uv run --extra dev pytest`), not a CLI flag: [eval_set.py](ingredients/src/ingredients/eval_set.py) (parser), [mapping/eval_set.py](ingredients/src/ingredients/mapping/eval_set.py) + [mapping/eval_fixture.py](ingredients/src/ingredients/mapping/eval_fixture.py), [dedup/eval_set.py](ingredients/src/ingredients/dedup/eval_set.py) + [dedup/eval_fixture.py](ingredients/src/ingredients/dedup/eval_fixture.py), and [recipegf/eval_set.py](ingredients/src/ingredients/recipegf/eval_set.py). Fixtures are frozen so eval results don't drift with seed changes.
 
-**Providers + writes.** The worker's LLM tiers need credentials per chosen provider: `ANTHROPIC_API_KEY` (claude), `OLLAMA_BASE_URL` (defaults `http://localhost:11434`, ollama), `OPENAI_API_KEY` (openai). Writes go to whatever `SUPABASE_DB_URL` points at — including the taxonomy nodes the map stage's LLM tier auto-creates. The worker runs against the hosted DB directly; there is no separate upload step.
+**Providers + writes.** The worker's LLM tiers need credentials per chosen provider: `ANTHROPIC_API_KEY` (claude), `OLLAMA_BASE_URL` (defaults `http://localhost:11434`, ollama), `OPENAI_API_KEY` (openai). Writes go to whatever `SUPABASE_DB_URL` points at — including the taxonomy nodes the map-ingredient stage's LLM tier auto-creates. The worker runs against the hosted DB directly; there is no separate upload step.
 
 ## Data flow
 

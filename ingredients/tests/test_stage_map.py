@@ -73,7 +73,7 @@ def test_resolution_is_shared_across_recipes(conn):
 
     for rid in (a, b):
         outcome = conn.execute(
-            "select outcome from job_items where entity_id=%s and stage='map'", (rid,)
+            "select outcome from job_items where entity_id=%s and stage='map-ingredient'", (rid,)
         ).fetchone()[0]
         assert outcome == "resolved"
 
@@ -87,7 +87,7 @@ def test_unresolved_name_records_pending(conn):
     ).fetchone()
     assert row == (None, "abstain")
     outcome = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='map'", (rid,)
+        "select outcome from job_items where entity_id=%s and stage='map-ingredient'", (rid,)
     ).fetchone()[0]
     assert outcome == "pending"
 
@@ -128,7 +128,7 @@ def test_chunk_boundary_matches_single_chunk(conn):
 
     outcomes = {
         rid: conn.execute(
-            "select outcome from job_items where entity_id=%s and stage='map'", (rid,)
+            "select outcome from job_items where entity_id=%s and stage='map-ingredient'", (rid,)
         ).fetchone()[0]
         for rid in rids
     }

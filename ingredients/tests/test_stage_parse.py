@@ -51,10 +51,10 @@ def test_parse_writes_recipe_ingredients(conn):
 
     run = conn.execute(
         "select stage, code_version, outcome, method from job_items "
-        "where entity_type='recipe' and entity_id=%s and stage='parse'",
+        "where entity_type='recipe' and entity_id=%s and stage='parse-ingredients'",
         (rid,),
     ).fetchone()
-    assert run == ("parse", PARSER_VERSION, "resolved", "deterministic")
+    assert run == ("parse-ingredients", PARSER_VERSION, "resolved", "deterministic")
 
 
 def test_parse_is_idempotent_via_ledger(conn):
@@ -76,7 +76,7 @@ def test_parse_stores_unparseable_row_but_abstains(conn):
     ).fetchone()
     assert row[0] is None and row[1] == "???"
     outcome = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='parse'", (rid,)
+        "select outcome from job_items where entity_id=%s and stage='parse-ingredients'", (rid,)
     ).fetchone()[0]
     assert outcome == "abstain"
 
@@ -104,7 +104,7 @@ def test_parse_batches_across_chunk_boundary(conn):
         ).fetchone()[0]
         assert n_rows == len(ings)
     total_runs = conn.execute(
-        "select count(*) from job_items where stage='parse'"
+        "select count(*) from job_items where stage='parse-ingredients'"
     ).fetchone()[0]
     assert total_runs == len(rids)
 
@@ -116,7 +116,7 @@ def test_parse_batches_across_chunk_boundary(conn):
     ).fetchall()
     assert row[0] == ("vodka", 1.5, "oz")
     abstain = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='parse'",
+        "select outcome from job_items where entity_id=%s and stage='parse-ingredients'",
         (rids[2],),
     ).fetchone()[0]
     assert abstain == "abstain"
@@ -129,6 +129,6 @@ def test_parse_scopes_by_site(conn):
     parse_stage_fn(_job(site="punch"), conn, None)
     # Only the punch recipe was parsed.
     n = conn.execute(
-        "select count(*) from job_items where stage='parse'"
+        "select count(*) from job_items where stage='parse-ingredients'"
     ).fetchone()[0]
     assert n == 1

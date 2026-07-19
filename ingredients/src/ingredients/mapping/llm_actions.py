@@ -178,7 +178,7 @@ def apply_llm_action(
             conn,
             entity_kind="ingredient_name",
             entity_id=normalized_name,
-            stage="map",
+            stage="map-ingredient",
             origin="machine_proposal",
             payload={
                 "kind": "form",

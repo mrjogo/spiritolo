@@ -27,7 +27,7 @@ from ingredients.dedup.rollup import roll_up_to_antichain
 from ingredients.dedup.version import DEDUP_VERSION
 from ingredients.pipeline.stages import base, naming
 
-STAGE = "cluster"
+STAGE = "cluster-recipes"
 
 
 def _node_meta(conn: psycopg.Connection) -> dict[int, str]:
@@ -137,7 +137,6 @@ def cluster_stage_fn(
     the loop and shared across chunks; recipes are processed in queue order.
     """
     site, limit = base.scope(job)
-    apply_mode = job.get("apply_mode") or "auto"
     job_id = job.get("id")
     if job_id:
         recipe_ids = base.run_item_ids(conn, job_id=job_id, stage=STAGE)
@@ -211,7 +210,7 @@ def cluster_stage_fn(
                     cur.executemany(_UPSERT_CLUSTER_SQL, cluster_upserts)
                 if recipe_updates:
                     cur.executemany(_UPDATE_CLUSTER_SQL, recipe_updates)
-            base.record_many(conn, records, apply_mode=apply_mode)
+            base.record_many(conn, records)
             base.finalize_run(
                 conn, stage=STAGE, version=DEDUP_VERSION,
                 ids=[str(r) for r in chunk],

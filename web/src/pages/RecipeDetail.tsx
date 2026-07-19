@@ -120,7 +120,7 @@ export function RecipeDetail() {
       <h1>{normalized.name}</h1>
       {/* Admin-only: flag this recipe's extract output for review. Renders null
           for the public. Per-ingredient/step flags can be added similarly. */}
-      <FlagButton entityKind="recipe" entityId={String(id)} stage="extract" />
+      <FlagButton entityKind="recipe" entityId={String(id)} stage="extract-recipe" />
       {(normalized.author || host) && (
         <p className="recipe-detail__byline">
           {normalized.author && <>By {normalized.author} · </>}

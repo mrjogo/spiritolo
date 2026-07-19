@@ -25,7 +25,7 @@ from ingredients.recipegf.version import CONVERTER_VERSION
 
 from . import base
 
-STAGE = "export"
+STAGE = "export-recipegf"
 
 # _freeze's two statements, hoisted so a chunk can flush them with executemany.
 _FREEZE_EXPORT_SQL = """
@@ -58,7 +58,6 @@ def export_stage_fn(
     UPDATEs, and ledger rows flush together in one transaction.
     """
     site, limit = base.scope(job)
-    apply_mode = job.get("apply_mode") or "auto"
     if job.get("id"):
         recipe_ids = base.run_item_ids(conn, job_id=job["id"], stage=STAGE)
     else:
@@ -109,5 +108,5 @@ def export_stage_fn(
                 with conn.cursor() as cur:
                     cur.executemany(_FREEZE_EXPORT_SQL, export_rows)
                     cur.executemany(_FREEZE_SLUG_SQL, slug_updates)
-            base.record_many(conn, records, apply_mode=apply_mode)
+            base.record_many(conn, records)
     return counts

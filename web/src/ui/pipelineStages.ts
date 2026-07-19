@@ -4,7 +4,8 @@
 // needs the stage order — like the runs stage-picker — doesn't need a Supabase
 // client configured.
 export const PIPELINE_STAGES = [
-  'discover', 'classify', 'fetch', 'extract', 'parse', 'map', 'convert', 'cluster', 'export',
+  'discover', 'classify', 'fetch', 'extract-recipe', 'parse-ingredients', 'map-ingredient',
+  'convert-steps', 'cluster-recipes', 'export-recipegf',
 ] as const;
 
 export type PipelineStage = (typeof PIPELINE_STAGES)[number];

@@ -1,6 +1,6 @@
 import type { StageReview } from '../ReviewCard';
 
-// Read-only body for a `map`-stage review: shows the slug the mapper proposed
+// Read-only body for a `map-ingredient`-stage review: shows the slug the mapper proposed
 // and the ranked candidates it considered. Payload is untyped jsonb off the
 // human_reviews row, so every field is narrowed defensively.
 interface MapPayload {

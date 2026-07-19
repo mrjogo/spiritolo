@@ -7,7 +7,6 @@ const WHY_LABEL: Record<WhyAdded, string> = {
   never_run: 'never run',
   retry_failed: 'retry failed',
   applied: 'applied',
-  pending_apply: 'pending apply',
 };
 
 const WHY_VARIANT: Record<WhyAdded, string> = {
@@ -15,7 +14,6 @@ const WHY_VARIANT: Record<WhyAdded, string> = {
   never_run: 'never',
   retry_failed: 'failed',
   applied: 'applied',
-  pending_apply: 'pending',
 };
 
 export function WhyAddedBadge({ why, detail }: { why: WhyAdded; detail?: string }) {
@@ -31,7 +29,6 @@ const STATUS_VARIANT: Record<string, string> = {
   failed: 'failed',
   never_run: 'never',
   applied: 'applied',
-  pending_apply: 'pending',
   pending: 'pending',
   running: 'pending',
 };
@@ -48,7 +45,6 @@ const TASK_STATE_LABEL: Record<TaskStatus, string> = {
   pending: 'queued',
   running: 'running',
   applied: 'applied',
-  pending_apply: 'pending apply',
   flagged: 'flagged',
   failed: 'failed',
 };

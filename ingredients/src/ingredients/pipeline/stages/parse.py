@@ -22,7 +22,7 @@ from ingredients.parser import PARSER_VERSION, parse
 
 from . import base
 
-STAGE = "parse"
+STAGE = "parse-ingredients"
 
 
 def _recipe_ingredient_strings(source: dict[str, Any] | None) -> list[str]:
@@ -75,7 +75,6 @@ def parse_stage_fn(
     inserts the fresh rows, and UPSERTs the chunk's `job_items` in one executemany.
     """
     site, limit = base.scope(job)
-    apply_mode = job.get("apply_mode") or "auto"
     if job.get("id"):
         recipe_ids = base.run_item_ids(conn, job_id=job["id"], stage=STAGE)
     else:
@@ -115,7 +114,7 @@ def parse_stage_fn(
             if insert_tuples:
                 with conn.cursor() as cur:
                     cur.executemany(_INSERT_ROWS_SQL, insert_tuples)
-            base.record_many(conn, records, apply_mode=apply_mode)
+            base.record_many(conn, records)
             base.finalize_run(
                 conn, stage=STAGE, version=PARSER_VERSION,
                 ids=[str(r) for r in chunk],

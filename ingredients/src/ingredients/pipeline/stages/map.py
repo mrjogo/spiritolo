@@ -24,7 +24,7 @@ from ingredients.mapping.resolutions import write_resolution
 from ingredients.mapping.types import Resolved
 from ingredients.pipeline.stages import base
 
-STAGE = "map"
+STAGE = "map-ingredient"
 MAPPER_VERSION = "v1"
 
 
@@ -111,7 +111,6 @@ def map_stage_fn(
     a single transaction. Per-recipe outcome/count semantics are unchanged.
     """
     site, limit = base.scope(job)
-    apply_mode = job.get("apply_mode") or "auto"
     if job.get("id"):
         recipe_ids = base.run_item_ids(conn, job_id=job["id"], stage=STAGE)
     else:
@@ -176,5 +175,5 @@ def map_stage_fn(
                 )
 
             # 5. One ledger executemany for the chunk.
-            base.record_many(conn, records, apply_mode=apply_mode)
+            base.record_many(conn, records)
     return counts

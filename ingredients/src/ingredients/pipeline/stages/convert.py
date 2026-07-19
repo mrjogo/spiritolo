@@ -30,7 +30,7 @@ from ingredients.recipegf.converter import (
 )
 from ingredients.recipegf.version import CONVERTER_VERSION
 
-STAGE = "convert"
+STAGE = "convert-steps"
 
 # Converter reasons that mean "an upstream stage isn't done" -> retry (pending);
 # everything else is a genuine review item -> proposes_new.
@@ -112,7 +112,6 @@ def convert_stage_fn(
     transaction.
     """
     site, limit = base.scope(job)
-    apply_mode = job.get("apply_mode") or "auto"
     if job.get("id"):
         recipe_ids = base.run_item_ids(conn, job_id=job["id"], stage=STAGE)
     else:
@@ -202,7 +201,7 @@ def convert_stage_fn(
                         "update recipes set equipment = %s, recipe_slug = %s where id = %s",
                         equipment_updates,
                     )
-            base.record_many(conn, records, apply_mode=apply_mode)
+            base.record_many(conn, records)
             base.finalize_run(
                 conn, stage=STAGE, version=CONVERTER_VERSION,
                 ids=[str(r) for r in chunk],

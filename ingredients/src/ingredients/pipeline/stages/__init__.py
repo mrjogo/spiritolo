@@ -19,15 +19,23 @@ from . import extract as _extract
 from . import map as _map
 from . import parse as _parse
 
-dispatch.register("extract", _extract.extract_stage_fn)
-dispatch.register("parse", _parse.parse_stage_fn)
-dispatch.register("map", _map.map_stage_fn)
-dispatch.register("convert", _convert.convert_stage_fn)
-dispatch.register("cluster", _cluster.cluster_stage_fn)
-dispatch.register("export", _export.export_stage_fn)
+dispatch.register(_extract.STAGE, _extract.extract_stage_fn)
+dispatch.register(_parse.STAGE, _parse.parse_stage_fn)
+dispatch.register(_map.STAGE, _map.map_stage_fn)
+dispatch.register(_convert.STAGE, _convert.convert_stage_fn)
+dispatch.register(_cluster.STAGE, _cluster.cluster_stage_fn)
+dispatch.register(_export.STAGE, _export.export_stage_fn)
 
 # The order the cold build drives the stages in: page -> recipe rows ->
-# resolution -> verb-frame steps -> cluster identity -> frozen bundle.
-STAGE_ORDER = ["extract", "parse", "map", "convert", "cluster", "export"]
+# resolution -> verb-frame steps -> cluster identity -> frozen bundle. Keyed by
+# each stage module's canonical STAGE name so the registry and order can't drift.
+STAGE_ORDER = [
+    _extract.STAGE,
+    _parse.STAGE,
+    _map.STAGE,
+    _convert.STAGE,
+    _cluster.STAGE,
+    _export.STAGE,
+]
 
 __all__ = ["STAGE_ORDER"]

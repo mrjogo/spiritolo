@@ -28,7 +28,7 @@ from ingredients.pipeline.stages import base
 
 from . import jsonld
 
-STAGE = "extract"
+STAGE = "extract-recipe"
 EXTRACTOR_VERSION = "v1"
 
 # Page classification labels the extract queue accepts — the Zone-1 classifier's
@@ -68,10 +68,10 @@ def _page_queue(
         """not exists (
             select 1 from job_items r
             where r.entity_type = 'page' and r.entity_id = p.id
-              and r.stage = 'extract' and r.code_version = %s
+              and r.stage = %s and r.code_version = %s
         )""",
     ]
-    params: list[Any] = [list(RECIPE_CONTENT_TYPES), EXTRACTOR_VERSION]
+    params: list[Any] = [list(RECIPE_CONTENT_TYPES), STAGE, EXTRACTOR_VERSION]
     if site is not None:
         clauses.append("p.site = %s")
         params.append(site)
@@ -129,7 +129,7 @@ def _record(conn, page_id, *, outcome, method, job, error_code=None):
         version=EXTRACTOR_VERSION,
         outcome=outcome,
         method=method,
-        state=base.item_state(outcome, job.get("apply_mode") or "auto"),
+        state=base.item_state(outcome),
         job_id=job.get("id"),
         error_code=error_code,
     )

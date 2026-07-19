@@ -1,8 +1,9 @@
 """Cold-build orchestration: drive every stage in order from {pages, corpus}.
 
 Runs the stages left-to-right over the whole queue, so a fresh corpus builds all
-the way to frozen bundles in one call: extract (pages -> recipes) -> parse ->
-map -> convert -> cluster -> export. Each stage is idempotent over its
+the way to frozen bundles in one call: extract-recipe (pages -> recipes) ->
+parse-ingredients -> map-ingredient -> convert-steps -> cluster-recipes ->
+export-recipegf. Each stage is idempotent over its
 `job_items` queue, so a re-run only touches what a prior run left undone.
 """
 

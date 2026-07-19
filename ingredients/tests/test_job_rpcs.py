@@ -63,7 +63,7 @@ def test_enqueue_job_admin_only(rpc_db):
     conn.execute("set role authenticated")
     try:
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            conn.execute(_ENQUEUE, ("parse", "run", "{}", None, False, None, None))
+            conn.execute(_ENQUEUE, ("parse-ingredients", "run", "{}", None, False, None, None))
     finally:
         conn.execute("reset role")
 
@@ -72,7 +72,7 @@ def test_enqueue_job_admin_only(rpc_db):
     conn.execute("set role authenticated")
     try:
         new_id = conn.execute(
-            _ENQUEUE, ("parse", "run", "{}", None, False, None, None)
+            _ENQUEUE, ("parse-ingredients", "run", "{}", None, False, None, None)
         ).fetchone()[0]
     finally:
         conn.execute("reset role")
@@ -81,7 +81,7 @@ def test_enqueue_job_admin_only(rpc_db):
     row = conn.execute(
         "select stage, state, created_by from jobs where id = %s", (new_id,)
     ).fetchone()
-    assert row[0] == "parse"
+    assert row[0] == "parse-ingredients"
     assert row[1] == "queued"
     assert str(row[2]) == str(admin_uid)
 
@@ -91,10 +91,10 @@ def test_enqueue_free_vs_metered_state(rpc_db):
     _become(conn, admin=True)
 
     free_id = conn.execute(
-        _ENQUEUE, ("map", "run", "{}", None, False, None, None)
+        _ENQUEUE, ("map-ingredient", "run", "{}", None, False, None, None)
     ).fetchone()[0]
     metered_id = conn.execute(
-        _ENQUEUE, ("map", "run", "{}", None, True, 750, 2000)
+        _ENQUEUE, ("map-ingredient", "run", "{}", None, True, 750, 2000)
     ).fetchone()[0]
 
     free = conn.execute(
@@ -138,7 +138,7 @@ def test_approve_job_gates_metered(rpc_db):
 
     _become(conn, admin=True)
     jid = conn.execute(
-        _ENQUEUE, ("map", "run", "{}", None, True, 500, 5000)
+        _ENQUEUE, ("map-ingredient", "run", "{}", None, True, 500, 5000)
     ).fetchone()[0]
 
     # awaiting_approval -> not claimable.

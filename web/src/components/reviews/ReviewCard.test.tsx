@@ -24,7 +24,7 @@ function makeReview(over: Partial<StageReview> = {}): StageReview {
     id: 1,
     entity_kind: 'recipe_ingredient',
     entity_id: '42',
-    stage: 'map',
+    stage: 'map-ingredient',
     state: 'open',
     origin: 'human_flag',
     payload: null,
@@ -41,7 +41,7 @@ beforeEach(() => {
 describe('<ReviewCard>', () => {
   it('renders MapReviewBody for a map review', () => {
     const review = makeReview({
-      stage: 'map',
+      stage: 'map-ingredient',
       payload: { proposed_slug: 'aromatic-bitters', candidates: [{ slug: 'angostura-bitters', score: 0.9 }] },
     });
     render(<ReviewCard review={review} />, { wrapper: RouterWrapper });
@@ -50,14 +50,14 @@ describe('<ReviewCard>', () => {
   });
 
   it('renders ParseReviewBody for a parse review', () => {
-    const review = makeReview({ stage: 'parse', payload: { name: 'Angostura', amount: 2, unit: 'dash' } });
+    const review = makeReview({ stage: 'parse-ingredients', payload: { name: 'Angostura', amount: 2, unit: 'dash' } });
     render(<ReviewCard review={review} />, { wrapper: RouterWrapper });
     expect(screen.getByTestId('parse-review-body')).toBeInTheDocument();
     expect(screen.queryByTestId('map-review-body')).not.toBeInTheDocument();
   });
 
   it('shows the editable payload JSON for a stage without a body', () => {
-    const review = makeReview({ stage: 'cluster', payload: { foo: 'bar' } });
+    const review = makeReview({ stage: 'cluster-recipes', payload: { foo: 'bar' } });
     render(<ReviewCard review={review} />, { wrapper: RouterWrapper });
     expect(screen.queryByTestId('map-review-body')).not.toBeInTheDocument();
     const editor = screen.getByLabelText('payload JSON') as HTMLTextAreaElement;
@@ -74,7 +74,7 @@ describe('<ReviewCard>', () => {
   it('Resolve sends the id and the (default) payload, then calls onActed', async () => {
     const user = userEvent.setup();
     const onActed = vi.fn();
-    const review = makeReview({ id: 7, stage: 'map', payload: { proposed_slug: 'rye-whiskey' } });
+    const review = makeReview({ id: 7, stage: 'map-ingredient', payload: { proposed_slug: 'rye-whiskey' } });
     render(<ReviewCard review={review} onActed={onActed} />, { wrapper: RouterWrapper });
 
     await user.click(screen.getByRole('button', { name: /resolve/i }));
@@ -85,7 +85,7 @@ describe('<ReviewCard>', () => {
 
   it('Resolve sends the EDITED payload', async () => {
     const user = userEvent.setup();
-    const review = makeReview({ id: 8, stage: 'map', payload: { slug: 'old' } });
+    const review = makeReview({ id: 8, stage: 'map-ingredient', payload: { slug: 'old' } });
     render(<ReviewCard review={review} />, { wrapper: RouterWrapper });
 
     fireEvent.change(screen.getByLabelText('payload JSON'), {

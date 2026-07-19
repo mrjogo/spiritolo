@@ -21,7 +21,7 @@ describe('<FlagButton>', () => {
   it('renders null for a non-admin', () => {
     useIsAdminMock.mockReturnValue({ isAdmin: false, isLoading: false });
     const { container } = render(
-      <FlagButton entityKind="recipe" entityId="r-1" stage="map" />,
+      <FlagButton entityKind="recipe" entityId="r-1" stage="map-ingredient" />,
     );
     expect(container).toBeEmptyDOMElement();
     expect(screen.queryByRole('button')).toBeNull();
@@ -30,7 +30,7 @@ describe('<FlagButton>', () => {
 
   it('renders a Flag button for an admin', () => {
     useIsAdminMock.mockReturnValue({ isAdmin: true, isLoading: false });
-    render(<FlagButton entityKind="recipe" entityId="r-1" stage="map" />);
+    render(<FlagButton entityKind="recipe" entityId="r-1" stage="map-ingredient" />);
     expect(screen.getByRole('button', { name: /flag/i })).toBeInTheDocument();
     expect(flagReviewMock).not.toHaveBeenCalled();
   });
@@ -38,7 +38,7 @@ describe('<FlagButton>', () => {
   it('clicking calls flagReview with the right args and shows the flagged state', async () => {
     const user = userEvent.setup();
     useIsAdminMock.mockReturnValue({ isAdmin: true, isLoading: false });
-    render(<FlagButton entityKind="ingredient" entityId="gin" stage="cluster" />);
+    render(<FlagButton entityKind="ingredient" entityId="gin" stage="cluster-recipes" />);
 
     await user.click(screen.getByRole('button', { name: /flag/i }));
 
@@ -46,7 +46,7 @@ describe('<FlagButton>', () => {
     expect(flagReviewMock).toHaveBeenCalledWith({
       entityKind: 'ingredient',
       entityId: 'gin',
-      stage: 'cluster',
+      stage: 'cluster-recipes',
     });
 
     // After success it collapses into the subtle "flagged" marker and the
