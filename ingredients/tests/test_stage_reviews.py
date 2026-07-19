@@ -14,7 +14,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 _TABLES = (
-    "stage_reviews", "stage_runs", "recipe_ingredients", "recipe_steps",
+    "human_reviews", "job_items", "recipe_ingredients", "recipe_steps",
     "ingredient_resolutions", "recipes",
 )
 
@@ -23,7 +23,6 @@ _TABLES = (
 def clean(db_conn):
     for t in _TABLES:
         db_conn.execute(f"truncate table {t} restart identity cascade")
-    db_conn.execute("delete from stage_live_version")
     return db_conn
 
 
@@ -38,7 +37,7 @@ def _review(conn, **kw):
     cols = ", ".join(kw)
     vals = ", ".join(["%s"] * len(kw))
     return conn.execute(
-        f"insert into stage_reviews ({cols}) values ({vals}) returning id",
+        f"insert into human_reviews ({cols}) values ({vals}) returning id",
         tuple(kw.values()),
     ).fetchone()[0]
 
@@ -68,7 +67,7 @@ def test_ledger_appends_versions(clean):
     ledger.record_run(clean, entity_type="recipe", entity_id=rid, stage="map",
                       version="v2", outcome="resolved", method="deterministic")
     n = clean.execute(
-        "select count(*) from stage_runs where entity_id=%s and stage='map'", (rid,)
+        "select count(*) from job_items where entity_id=%s and stage='map'", (rid,)
     ).fetchone()[0]
     assert n == 2
 
@@ -81,19 +80,9 @@ def test_same_version_rerun_overwrites(clean):
     ledger.record_run(clean, entity_type="recipe", entity_id=rid, stage="map",
                       version="v1", outcome="resolved", method="deterministic")
     rows = clean.execute(
-        "select outcome from stage_runs where entity_id=%s and stage='map'", (rid,)
+        "select outcome from job_items where entity_id=%s and stage='map'", (rid,)
     ).fetchall()
     assert rows == [("resolved",)]
-
-
-def test_set_live_version(clean):
-    from ingredients.pipeline import ledger
-    ledger.set_live_version(clean, stage="map", version="v2")
-    ledger.set_live_version(clean, stage="map", version="v3")
-    v = clean.execute(
-        "select version from stage_live_version where stage='map'"
-    ).fetchone()[0]
-    assert v == "v3"
 
 
 # --- apply_review() per stage ----------------------------------------------
@@ -167,29 +156,21 @@ def test_apply_review_ignores_unresolved(clean):
 
 # --- needs_review view ------------------------------------------------------
 
-def test_needs_review_surfaces_open_and_abstain(clean):
-    from ingredients.pipeline import ledger
-    r = _recipe(clean)
+def test_needs_review_surfaces_open_reviews_only(clean):
+    # In the explicit-runs model needs_review is simply the open human_reviews
+    # queue (a flagged item raises a review row; machine residue surfacing moved
+    # to the add-page status facets). An open review shows with reason=origin; a
+    # resolved one does not.
     _review(clean, entity_kind="ingredient_name", entity_id="amaro", stage="map",
             origin="distance_gate")
-    ledger.record_run(clean, entity_type="recipe", entity_id=r, stage="map",
-                      version="v1", outcome="abstain", method="deterministic")
-    ledger.set_live_version(clean, stage="map", version="v1")
-    reasons = {x[0] for x in clean.execute("select reason from needs_review").fetchall()}
-    assert "distance_gate" in reasons and "abstain" in reasons
-
-
-def test_needs_review_ignores_nonlive_version(clean):
-    from ingredients.pipeline import ledger
-    r = _recipe(clean)
-    ledger.record_run(clean, entity_type="recipe", entity_id=r, stage="map",
-                      version="v1", outcome="abstain", method="deterministic")
-    ledger.record_run(clean, entity_type="recipe", entity_id=r, stage="map",
-                      version="v2", outcome="resolved", method="deterministic")
-    ledger.set_live_version(clean, stage="map", version="v2")
-    reasons = [x[0] for x in clean.execute(
-        "select reason from needs_review where stage='map'").fetchall()]
-    assert "abstain" not in reasons
+    _review(clean, entity_kind="ingredient_name", entity_id="gin", stage="map",
+            origin="human_flag", state="resolved")
+    rows = {
+        (x[0], x[1])
+        for x in clean.execute("select entity_id, reason from needs_review").fetchall()
+    }
+    assert ("amaro", "distance_gate") in rows
+    assert not any(entity_id == "gin" for entity_id, _ in rows)
 
 
 # --- review model -----------------------------------------------------------
@@ -201,7 +182,7 @@ def test_insert_review_idempotent_open(clean):
     b = model.insert_review(clean, entity_kind="ingredient_name", entity_id="gin",
                             stage="map", origin="machine_proposal")
     assert a == b
-    n = clean.execute("select count(*) from stage_reviews where entity_id='gin'").fetchone()[0]
+    n = clean.execute("select count(*) from human_reviews where entity_id='gin'").fetchone()[0]
     assert n == 1
 
 
@@ -254,11 +235,6 @@ def test_map_stage_reapplies_override_on_run(clean):
         "select taxonomy_slug, method from ingredient_resolutions where normalized_name='x'"
     ).fetchone()
     assert row == ("correct", "manual")
-    # and map pointed its live version
-    v = clean.execute(
-        "select version from stage_live_version where stage='map'"
-    ).fetchone()[0]
-    assert v == MAPPER_VERSION
 
 
 def test_parse_stage_reapplies_override_on_run(clean):
@@ -289,6 +265,6 @@ def test_supersede_dismisses_machine_not_human(clean):
             origin="human_flag")
     n = supersede_stale(clean, stage="map", ids=["amaro", "suze"])
     assert n == 1
-    m = clean.execute("select state from stage_reviews where entity_id='amaro'").fetchone()[0]
-    h = clean.execute("select state from stage_reviews where entity_id='suze'").fetchone()[0]
+    m = clean.execute("select state from human_reviews where entity_id='amaro'").fetchone()[0]
+    h = clean.execute("select state from human_reviews where entity_id='suze'").fetchone()[0]
     assert m == "dismissed" and h == "open"

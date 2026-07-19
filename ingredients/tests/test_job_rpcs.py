@@ -30,7 +30,6 @@ def rpc_db(db_conn):
     """
     db_conn.execute("reset role")
     db_conn.execute("truncate table jobs restart identity cascade")
-    db_conn.execute("truncate table job_batches restart identity cascade")
     db_conn.execute("delete from profiles")
     db_conn.execute("delete from auth.users")
     yield db_conn

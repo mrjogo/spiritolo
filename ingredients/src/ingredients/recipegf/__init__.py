@@ -19,7 +19,7 @@ persists/exports bundles; it is a thin shell over the pure core above.
 Versioning: ``CONVERTER_VERSION`` in ``version.py`` — bump when conversion
 rules (templates, technique keywords, slug rules, ingredient handling) change,
 then re-run the export stage (``ingredients.cli export``): delete the export
-stage's ``stage_runs`` rows, or rely on the version bump itself, to re-queue
+stage's ``job_items`` rows, or rely on the version bump itself, to re-queue
 affected recipes.
 """
 

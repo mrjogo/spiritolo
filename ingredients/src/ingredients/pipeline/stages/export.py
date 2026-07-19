@@ -5,7 +5,7 @@ resolution + verb-defs (`generate_bundle`), then FREEZES that snapshot into
 `recipe_exports` (keyed by recipe + converter version) — the live representation
 stays generated-on-demand and current with the taxonomy; only the published
 snapshot is frozen. The minted slug is written back to `recipes.recipe_slug` so
-the drink's identity is stable across regenerations. One `stage_runs` row records
+the drink's identity is stable across regenerations. One `job_items` row records
 the outcome at `CONVERTER_VERSION`: `resolved` (frozen), `pending` (an
 ingredient isn't resolved yet — comes back after the map stage), or `failed`
 (a seam violation, e.g. an unbuildable recipe).

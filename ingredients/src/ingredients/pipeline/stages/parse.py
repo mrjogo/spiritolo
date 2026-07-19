@@ -3,7 +3,7 @@
 For each queued recipe it parses every `source.recipeIngredient` string with the
 deterministic parser (the stage's deterministic tier) into a RecipeGF ingredient
 row: name + (amount, amount_max, unit) + string[] modifiers + raw_text. The rows
-replace any prior parse for that recipe, and one `stage_runs` row records the
+replace any prior parse for that recipe, and one `job_items` row records the
 outcome at `PARSER_VERSION`. A row the parser can't structure is still stored
 (name/amount null, raw_text preserved) so nothing is silently dropped and the
 map/export stages can see it.
@@ -72,7 +72,7 @@ def parse_stage_fn(
 
     DB writes are batched per chunk: each chunk bulk-fetches its recipes, parses
     them in-memory, then in ONE transaction deletes the chunk's prior rows, bulk-
-    inserts the fresh rows, and UPSERTs the chunk's `stage_runs` in one executemany.
+    inserts the fresh rows, and UPSERTs the chunk's `job_items` in one executemany.
     """
     site, limit = base.scope(job)
     recipe_ids = base.recipe_queue(

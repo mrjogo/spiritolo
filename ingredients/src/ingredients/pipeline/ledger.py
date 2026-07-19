@@ -1,4 +1,4 @@
-"""stage_runs run-ledger access.
+"""job_items run-ledger access.
 
 One polymorphic latest-only ledger for every pipeline stage. Three operations,
 mirroring the per-stage ``record_*`` / ``get_pending_*`` / ``clear_*`` helpers
@@ -34,24 +34,23 @@ from psycopg.types.json import Json
 
 
 _RECORD_RUN_SQL = """
-    insert into stage_runs (
-        entity_type, entity_id, stage, version, outcome, method,
-        confidence, model_id, cost_cents, error_code, batch_id, job_id,
+    insert into job_items (
+        entity_type, entity_id, stage, code_version, outcome, method,
+        confidence, model_id, cost_cents, error_code, job_id,
         payload, finished_at
     )
     values (
         %s, %s, %s, %s, %s, %s,
-        %s, %s, %s, %s, %s, %s,
+        %s, %s, %s, %s, %s,
         %s, coalesce(%s, now())
     )
-    on conflict (entity_type, entity_id, stage, version) do update set
+    on conflict (entity_type, entity_id, stage, code_version) do update set
         outcome     = excluded.outcome,
         method      = excluded.method,
         confidence  = excluded.confidence,
         model_id    = excluded.model_id,
         cost_cents  = excluded.cost_cents,
         error_code  = excluded.error_code,
-        batch_id    = excluded.batch_id,
         job_id      = excluded.job_id,
         payload     = excluded.payload,
         started_at  = now(),
@@ -71,14 +70,13 @@ def _record_run_params(
     model_id: str | None = None,
     cost_cents: float | None = None,
     error_code: str | None = None,
-    batch_id: int | None = None,
     job_id: int | None = None,
     payload: Any | None = None,
     finished_at: Any | None = None,
 ) -> tuple:
     return (
         entity_type, entity_id, stage, version, outcome, method,
-        confidence, model_id, cost_cents, error_code, batch_id, job_id,
+        confidence, model_id, cost_cents, error_code, job_id,
         Json(payload) if payload is not None else None, finished_at,
     )
 
@@ -94,21 +92,8 @@ def record_run(conn, **kwargs) -> None:
     conn.execute(_RECORD_RUN_SQL, _record_run_params(**kwargs))
 
 
-def set_live_version(conn, *, stage: str, version: str) -> None:
-    """Point ``stage`` at ``version`` as the live/materialized version.
-
-    Option-3 default: the latest run wins, so a stage upserts this to its own
-    version on every run. The deferred promote/rollback flips it deliberately.
-    """
-    conn.execute(
-        "insert into stage_live_version (stage, version) values (%s, %s) "
-        "on conflict (stage) do update set version = excluded.version",
-        (stage, version),
-    )
-
-
 def record_runs(conn, rows: Sequence[dict[str, Any]]) -> None:
-    """Batch form of ``record_run``: UPSERT one stage_runs row per dict in
+    """Batch form of ``record_run``: UPSERT one job_items row per dict in
     ``rows`` (each dict is the keyword set ``record_run`` takes) in a single
     ``executemany``. psycopg pipelines the batch, so a chunk of N recipes is one
     round-trip's worth of latency instead of N — the whole point of chunking a
@@ -136,7 +121,7 @@ def work_queue(
     ``version``.
 
     The NOT-EXISTS predicate is the generalization of every ``get_pending_*``
-    query: an entity is queued when no stage_runs row exists for it at the
+    query: an entity is queued when no job_items row exists for it at the
     current version. The ledger is append-versioned (≤1 row per (entity, stage,
     version), history kept), so an entity whose only rows are at older versions
     still qualifies — the predicate keys on the current version, so prior-version
@@ -151,11 +136,11 @@ def work_queue(
         select c.id
         from {content_table} c
         where not exists (
-            select 1 from stage_runs r
+            select 1 from job_items r
             where r.entity_type = %s
               and r.entity_id   = c.id
               and r.stage       = %s
-              and r.version     = %s
+              and r.code_version = %s
         )
     """
     qparams: list[Any] = [entity_type, stage, version]
@@ -194,7 +179,7 @@ def reset(
         clauses = ["stage = %s"]
         params: list[Any] = [stage]
         if except_version is not None:
-            clauses.append("version <> %s")
+            clauses.append("code_version <> %s")
             params.append(except_version)
         if entity_type is not None:
             clauses.append("entity_type = %s")
@@ -211,7 +196,7 @@ def reset(
             params.append(site)
 
         cur = conn.execute(
-            f"delete from stage_runs where {' and '.join(clauses)}", params
+            f"delete from job_items where {' and '.join(clauses)}", params
         )
         deleted = cur.rowcount
 

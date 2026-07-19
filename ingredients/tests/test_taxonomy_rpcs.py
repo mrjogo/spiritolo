@@ -27,7 +27,7 @@ def db():
         conn.execute("delete from taxonomy_aliases")
         conn.execute("delete from taxonomy_edges")
         conn.execute("delete from taxonomy_provenance")
-        conn.execute("delete from stage_reviews")
+        conn.execute("delete from human_reviews")
         conn.execute("delete from recipe_ingredients")
         conn.execute("delete from taxonomy_nodes")
         conn.execute("delete from profiles")
@@ -350,7 +350,7 @@ def test_blockers_report_all_dimensions(db):
 
     # An open map form proposal naming this node as parent is a blocker.
     db.execute(
-        "insert into stage_reviews (entity_kind, entity_id, stage, origin, payload) "
+        "insert into human_reviews (entity_kind, entity_id, stage, origin, payload) "
         "values ('ingredient_name', 'zest of a', 'map', 'machine_proposal', "
         "jsonb_build_object('kind','form','proposed_parent_id', 1))"
     )

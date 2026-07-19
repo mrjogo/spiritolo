@@ -1,4 +1,4 @@
-"""Row access over `stage_reviews`.
+"""Row access over `human_reviews`.
 
 Keyed by `(entity_kind, entity_id, stage)` with at most one *open* row (a partial
 unique index); resolved/dismissed rows accumulate as history. `entity_id` is
@@ -33,7 +33,7 @@ def insert_review(
     """
     row = conn.execute(
         """
-        insert into stage_reviews
+        insert into human_reviews
             (entity_kind, entity_id, stage, origin, payload, note,
              origin_version, state, created_by)
         values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
@@ -50,7 +50,7 @@ def insert_review(
     if row is not None:
         return row[0]
     existing = conn.execute(
-        "select id from stage_reviews "
+        "select id from human_reviews "
         "where entity_kind = %s and entity_id = %s and stage = %s and state = 'open'",
         (entity_kind, entity_id, stage),
     ).fetchone()
@@ -62,7 +62,7 @@ def set_state(
 ) -> None:
     """Move a review to `state` (resolved/dismissed/open), stamping the reviewer."""
     conn.execute(
-        "update stage_reviews set state = %s, reviewed_by = %s, reviewed_at = now() "
+        "update human_reviews set state = %s, reviewed_by = %s, reviewed_at = now() "
         "where id = %s",
         (state, reviewed_by, review_id),
     )
@@ -74,7 +74,7 @@ def open_reviews_for(
     """Open reviews for `stage` whose entity_id is in `entity_ids`."""
     rows = conn.execute(
         "select id, entity_kind, entity_id, origin, payload, note "
-        "from stage_reviews "
+        "from human_reviews "
         "where stage = %s and state = 'open' and entity_id = any(%s)",
         (stage, list(entity_ids)),
     ).fetchall()
@@ -100,7 +100,7 @@ def resolved_override_ids(
     if not id_list:
         return []
     rows = conn.execute(
-        "select id from stage_reviews "
+        "select id from human_reviews "
         "where stage = %s and state = 'resolved' "
         "and (entity_id = any(%s) or split_part(entity_id, ':', 1) = any(%s))",
         (stage, id_list, id_list),

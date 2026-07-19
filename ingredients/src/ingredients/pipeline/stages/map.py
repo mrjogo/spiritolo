@@ -5,7 +5,7 @@ Resolution is name-keyed, not per recipe row: a name resolves once into
 that uses that name follows, so a taxonomy correction is a single-row edit. The
 deterministic tier is the alias + lexical layers (which return a taxonomy node
 id — joined to its slug here); misses route to the LLM tier (provider chain),
-which returns a slug or abstains. A per-recipe `stage_runs` row records whether
+which returns a slug or abstains. A per-recipe `job_items` row records whether
 that recipe's names are all resolved at `MAPPER_VERSION` while the resolutions
 themselves stay shared.
 """

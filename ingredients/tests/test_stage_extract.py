@@ -33,11 +33,11 @@ class _FakeCorpus:
 @pytest.fixture()
 def conn(test_db_url: str):
     with psycopg.connect(test_db_url, autocommit=True) as c:
-        for t in ("recipes", "pages", "stage_runs"):
+        for t in ("recipes", "pages", "job_items"):
             c.execute(f"truncate {t} restart identity cascade")
         yield c
         extract.set_corpus_reader(None)
-        for t in ("recipes", "pages", "stage_runs"):
+        for t in ("recipes", "pages", "job_items"):
             c.execute(f"truncate {t} restart identity cascade")
 
 
@@ -70,7 +70,7 @@ def test_extract_writes_recipe_from_jsonld(conn):
     assert row[4]["recipeIngredient"] == ["2 oz rum", "1 oz lime juice"]
 
     run = conn.execute(
-        "select outcome, version from stage_runs where entity_type='page' and stage='extract'"
+        "select outcome, code_version from job_items where entity_type='page' and stage='extract'"
     ).fetchone()
     assert run == ("resolved", EXTRACTOR_VERSION)
 
@@ -90,7 +90,7 @@ def test_extract_records_html_missing(conn):
     counts = extract_stage_fn(_job(), conn, None)
     assert counts["html_missing"] == 1
     outcome = conn.execute(
-        "select outcome, error_code from stage_runs where stage='extract'"
+        "select outcome, error_code from job_items where stage='extract'"
     ).fetchone()
     assert outcome == ("failed", "html_missing")
 
@@ -113,6 +113,6 @@ def test_extract_threads_reads_across_window(conn):
     assert counts["extracted"] == 5
     assert conn.execute("select count(*) from recipes").fetchone()[0] == 5
     resolved = conn.execute(
-        "select count(*) from stage_runs where stage='extract' and outcome='resolved'"
+        "select count(*) from job_items where stage='extract' and outcome='resolved'"
     ).fetchone()[0]
     assert resolved == 5

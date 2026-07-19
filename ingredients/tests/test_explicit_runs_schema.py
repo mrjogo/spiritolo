@@ -137,16 +137,3 @@ def test_backfill_maps_outcome_to_state(conn):
         "select state from job_items where entity_id = 9001"
     ).fetchone()
     assert row[0] == "applied"
-
-
-def test_backfill_synthetic_job_owns_migrated_items(conn):
-    # Every migrated cold-build item (job_id was null pre-migration) is attached
-    # to a synthetic 'done' backfill job with a null created_by. This can only be
-    # asserted structurally on an empty test DB: no job_item may be left orphaned
-    # with a null job_id AND a null-created_by synthetic job absent.
-    orphans = conn.execute(
-        "select count(*) from job_items where job_id is null"
-    ).fetchone()[0]
-    # On a fresh test DB there are no pre-existing rows, so this is vacuously 0;
-    # the assertion documents the invariant the backfill establishes.
-    assert orphans == 0

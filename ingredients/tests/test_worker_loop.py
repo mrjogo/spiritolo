@@ -2,7 +2,7 @@
 
 One loop ``tick`` claims the oldest runnable job (reusing the queue claim),
 dispatches it to its ``stage_fn`` while a background thread heartbeats, then sets
-the terminal state + progress and rolls cost up from ``stage_runs``. ``boot``
+the terminal state + progress and rolls cost up from ``job_items``. ``boot``
 runs the reaper once (Railway-restart safety) and leaves a seam where the B24
 batch reconciler will hook in.
 
@@ -37,7 +37,7 @@ def _seed_job(db_conn, *, stage, payload=None, **cols):
 
 def test_claim_run_finish(test_db_url, db_conn):
     db_conn.execute("truncate table jobs restart identity cascade")
-    db_conn.execute("truncate table stage_runs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
     payload = {"entity_ids": [101], "entity_type": "recipe", "version": "vtest"}
     jid = _seed_job(db_conn, stage="demo", payload=payload)
 
@@ -67,7 +67,7 @@ def test_claim_run_finish(test_db_url, db_conn):
     assert progress == {"processed": 1}
 
     sr = db_conn.execute(
-        "select outcome, job_id from stage_runs where entity_type='recipe' "
+        "select outcome, job_id from job_items where entity_type='recipe' "
         "and entity_id=101 and stage='demo'"
     ).fetchone()
     assert sr == ("resolved", jid)
@@ -75,7 +75,7 @@ def test_claim_run_finish(test_db_url, db_conn):
 
 def test_heartbeat_updates_during_run(test_db_url, db_conn):
     db_conn.execute("truncate table jobs restart identity cascade")
-    db_conn.execute("truncate table stage_runs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
     jid = _seed_job(
         db_conn, stage="hb",
         payload={"entity_ids": [201], "entity_type": "recipe", "version": "vt"},
@@ -124,7 +124,7 @@ def test_heartbeat_updates_during_run(test_db_url, db_conn):
 
 def test_empty_queue_no_op(test_db_url, db_conn):
     db_conn.execute("truncate table jobs restart identity cascade")
-    db_conn.execute("truncate table stage_runs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
 
     conn = psycopg.connect(test_db_url)
     try:
@@ -133,7 +133,7 @@ def test_empty_queue_no_op(test_db_url, db_conn):
         conn.close()
 
     assert ran is False, "no claimable job -> tick is a no-op"
-    assert db_conn.execute("select count(*) from stage_runs").fetchone()[0] == 0
+    assert db_conn.execute("select count(*) from job_items").fetchone()[0] == 0
 
 
 def test_reaper_on_boot(test_db_url, db_conn):

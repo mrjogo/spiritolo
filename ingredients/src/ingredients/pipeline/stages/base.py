@@ -1,7 +1,7 @@
 """Shared plumbing for the pipeline stages.
 
 A stage_fn resolves its work queue from the ledger, processes each entity, and
-records exactly one `stage_runs` row per entity (latest-only UPSERT). `scope`
+records exactly one `job_items` row per entity (latest-only UPSERT). `scope`
 pulls the `{site, limit}` filter a job carries in its payload; `queue` is the
 NOT-EXISTS-a-run-at-this-version predicate over a content table.
 """
@@ -44,7 +44,7 @@ def recipe_queue(
     extra_where: str | None = None,
     extra_params: tuple[Any, ...] = (),
 ) -> list[int]:
-    """Recipe ids with no `stage_runs` row for (stage, version), optionally
+    """Recipe ids with no `job_items` row for (stage, version), optionally
     scoped by site and an extra content predicate over the `c` alias."""
     where = None
     params: list[Any] = []
@@ -83,7 +83,7 @@ def record(
     error_code: str | None = None,
     payload: Any | None = None,
 ) -> None:
-    """UPSERT the recipe's `stage_runs` row for this stage/version."""
+    """UPSERT the recipe's `job_items` row for this stage/version."""
     ledger.record_run(
         conn,
         entity_type=ENTITY_RECIPE,
@@ -106,18 +106,16 @@ def finalize_run(
     """Close out a stage run over ``ids`` (touched entities, at the stage's review
     grain — recipe-id-strings for recipe stages, names for map).
 
-    Two uniform post-run steps: point the stage's live version at ``version`` (so
-    needs_review / the dashboard reflect current state) and re-apply any resolved
-    human overrides the auto-compute may have clobbered (pin survives rerun).
-    ``reapply`` only touches *resolved* overrides, so freshly-opened machine
-    proposals for the same entities are untouched. Superseding stale proposals is
-    a resolution-aware, per-stage concern (see ``reviews.reapply.supersede_stale``)
-    and is invoked explicitly by a stage over the ids it actually resolved, not
-    blanket-applied here.
+    The one uniform post-run step: re-apply any resolved human overrides the
+    auto-compute may have clobbered (pin survives rerun). ``reapply`` only touches
+    *resolved* overrides, so freshly-opened machine proposals for the same
+    entities are untouched. Superseding stale proposals is a resolution-aware,
+    per-stage concern (see ``reviews.reapply.supersede_stale``) and is invoked
+    explicitly by a stage over the ids it actually resolved, not blanket-applied
+    here.
     """
     from ingredients.reviews.reapply import reapply_overrides
 
-    ledger.set_live_version(conn, stage=stage, version=version)
     reapply_overrides(conn, stage=stage, ids=ids)
 
 

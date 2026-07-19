@@ -4,7 +4,7 @@ A metered stage accumulates per-item spend against ``jobs.max_cost_cents``. Once
 the next item would breach the cap the worker hard-aborts (``CostCapExceeded``):
 the breaching item is left unprocessed (no ``stage_run``, no double count), the
 job is marked ``failed`` with a ``cost_cap_exceeded`` error_code, and
-``cost_actual_cents`` equals the sum of the ``stage_runs.cost_cents`` actually
+``cost_actual_cents`` equals the sum of the ``job_items.cost_cents`` actually
 written. A free / deterministic chain never consults the cap at all.
 
 Fake providers only; the abort test drives one loop tick against TEST_DB_URL.
@@ -46,7 +46,7 @@ def test_free_stage_no_cap_check():
 
 def test_aborts_past_max_cost(test_db_url, db_conn):
     db_conn.execute("truncate table jobs restart identity cascade")
-    db_conn.execute("truncate table stage_runs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
 
     # Metered fake: 2c per call, pack_size 1 -> 2c per item. Budget is 5c, so
     # item #3 (which would reach 6c) must abort.
@@ -91,7 +91,7 @@ def test_aborts_past_max_cost(test_db_url, db_conn):
 
     assert ran is True
     rows = db_conn.execute(
-        "select entity_id, cost_cents from stage_runs where stage='metered' "
+        "select entity_id, cost_cents from job_items where stage='metered' "
         "order by entity_id"
     ).fetchall()
     assert [r[0] for r in rows] == [401, 402], "items 3 and 4 left unprocessed"
@@ -105,5 +105,5 @@ def test_aborts_past_max_cost(test_db_url, db_conn):
     assert cost_actual == 4, "no double count on the aborted item"
 
     assert db_conn.execute(
-        "select count(*) from stage_runs where entity_id=403"
+        "select count(*) from job_items where entity_id=403"
     ).fetchone()[0] == 0, "the aborted item never got a stage_run"

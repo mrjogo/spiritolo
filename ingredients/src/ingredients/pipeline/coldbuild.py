@@ -3,7 +3,7 @@
 Runs the stages left-to-right over the whole queue, so a fresh corpus builds all
 the way to frozen bundles in one call: extract (pages -> recipes) -> parse ->
 map -> convert -> cluster -> export. Each stage is idempotent over its
-`stage_runs` queue, so a re-run only touches what a prior run left undone.
+`job_items` queue, so a re-run only touches what a prior run left undone.
 """
 
 from __future__ import annotations

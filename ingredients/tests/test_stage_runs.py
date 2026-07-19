@@ -1,13 +1,13 @@
-"""Schema + behavior + boundary tests for the stage_runs run-ledger.
+"""Schema + behavior + boundary tests for the job_items run-ledger.
 
-stage_runs is ONE polymorphic latest-only ledger generalizing every per-stage
+job_items is ONE polymorphic latest-only ledger generalizing every per-stage
 *_runs table: (entity_type, entity_id, stage) is unique, a re-run UPSERTs, the
 work queue is "content qualifies AND NOT EXISTS a run at the current version",
 and its `reset()` operation deletes runs (optionally below a version / scoped)
 to re-queue the entity. ledger.py wraps the UPSERT / queue / reset SQL.
 
 Runs against TEST_DB_URL with all migrations applied (the ingredients conftest
-auto-applies 20260712_020000_stage_runs.sql). The ledger is content-agnostic and
+auto-applies 20260712_020000_job_items.sql). The ledger is content-agnostic and
 carries NO per-entity FK, so these tests drive it against a small throwaway
 stand-in content table (`_ledger_content`) rather than any real content table —
 the ledger is decoupled from the `recipes` schema and already speaks the
@@ -29,7 +29,7 @@ def content_table(db_conn):
     """A throwaway stand-in for a content table: (id, state, site). Stands in for
     the real `recipes`/`pages` content the ledger's work_queue joins against,
     keeping the ledger tests independent of any particular content schema."""
-    db_conn.execute("truncate table stage_runs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
     db_conn.execute(f"drop table if exists {_CONTENT}")
     db_conn.execute(
         f"create table {_CONTENT} (id bigint primary key, state text, site text)"
@@ -57,22 +57,23 @@ def test_schema_shape(db_conn):
             """
             select column_name, data_type, is_nullable
             from information_schema.columns
-            where table_name = 'stage_runs'
+            where table_name = 'job_items'
             """
         ).fetchall()
     }
     assert cols["entity_type"] == ("text", "NO")
     assert cols["entity_id"] == ("bigint", "NO")
     assert cols["stage"] == ("text", "NO")
-    assert cols["version"] == ("text", "NO")
+    assert cols["code_version"] == ("text", "NO")
     assert cols["outcome"] == ("text", "NO")
     assert cols["method"] == ("text", "NO")
     assert cols["confidence"][0] == "real"
     assert cols["model_id"][0] == "text"
     assert cols["cost_cents"][0] == "numeric"
     assert cols["error_code"][0] == "text"
-    assert cols["batch_id"][0] == "bigint"
     assert cols["job_id"][0] == "bigint"
+    assert cols["state"][0] == "text"
+    assert cols["outcome_payload"][0] == "jsonb"
     assert cols["payload"][0] == "jsonb"
     assert cols["started_at"][0] == "timestamp with time zone"
     assert cols["finished_at"][0] == "timestamp with time zone"
@@ -86,7 +87,7 @@ def test_schema_shape(db_conn):
             from information_schema.check_constraints cc
             join information_schema.constraint_column_usage ccu
               on cc.constraint_name = ccu.constraint_name
-            where ccu.table_name = 'stage_runs'
+            where ccu.table_name = 'job_items'
             """
         ).fetchall()
     )
@@ -107,22 +108,22 @@ def test_schema_shape(db_conn):
         from information_schema.table_constraints tc
         join information_schema.key_column_usage kcu
           on tc.constraint_name = kcu.constraint_name
-        where tc.table_name = 'stage_runs' and tc.constraint_type = 'UNIQUE'
+        where tc.table_name = 'job_items' and tc.constraint_type = 'UNIQUE'
         """
     ).fetchall():
         uniq.setdefault(r[0], []).append((r[2], r[1]))
     assert any(
         [c for _, c in sorted(members)]
-        == ["entity_type", "entity_id", "stage", "version"]
+        == ["entity_type", "entity_id", "stage", "code_version"]
         for members in uniq.values()
-    ), f"missing UNIQUE(entity_type, entity_id, stage, version); have {uniq}"
+    ), f"missing UNIQUE(entity_type, entity_id, stage, code_version); have {uniq}"
 
 
 def test_entity_type_check_rejects_unknown(db_conn):
-    db_conn.execute("truncate table stage_runs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
     with pytest.raises(psycopg.errors.CheckViolation):
         db_conn.execute(
-            "insert into stage_runs (entity_type, entity_id, stage, version, "
+            "insert into job_items (entity_type, entity_id, stage, code_version, "
             "outcome, method) values ('widget', 1, 'parse', 'v1', 'resolved', "
             "'deterministic')"
         )
@@ -135,7 +136,7 @@ def test_entity_type_check_rejects_unknown(db_conn):
 def test_upsert_appends_versions(db_conn):
     # Append-versioned: one row per (entity, stage, VERSION); a bump keeps the
     # prior version's decision. A re-run at the SAME version overwrites in place.
-    db_conn.execute("truncate table stage_runs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
 
     ledger.record_run(
         db_conn, entity_type="recipe", entity_id=1, stage="parse",
@@ -149,9 +150,9 @@ def test_upsert_appends_versions(db_conn):
     )
 
     rows = db_conn.execute(
-        "select version, outcome from stage_runs "
+        "select code_version, outcome from job_items "
         "where entity_type = 'recipe' and entity_id = 1 and stage = 'parse' "
-        "order by version"
+        "order by code_version"
     ).fetchall()
     assert rows == [("v1", "pending"), ("v2", "resolved")], (
         "append-versioned: one row per version, history kept"
@@ -163,8 +164,8 @@ def test_upsert_appends_versions(db_conn):
         version="v2", outcome="failed", method="llm", payload={"n": 3},
     )
     v2 = db_conn.execute(
-        "select outcome, payload from stage_runs "
-        "where entity_id = 1 and stage = 'parse' and version = 'v2'"
+        "select outcome, payload from job_items "
+        "where entity_id = 1 and stage = 'parse' and code_version = 'v2'"
     ).fetchall()
     assert v2 == [("failed", {"n": 3})]
 
@@ -203,8 +204,8 @@ def test_work_queue_not_exists_predicate(db_conn, content_table):
     assert set(q2) == {b, c}, "parse@v0 entity must re-appear in the v1 queue"
 
 
-def test_truncate_stage_runs_requeues_everything(db_conn, content_table):
-    # stage_runs is prunable derived state: TRUNCATE + re-run reproduces it.
+def test_truncate_job_items_requeues_everything(db_conn, content_table):
+    # job_items is prunable derived state: TRUNCATE + re-run reproduces it.
     a = _seed_content(db_conn, content_table, 1)
     ledger.record_run(
         db_conn, entity_type="recipe", entity_id=a, stage="parse",
@@ -215,7 +216,7 @@ def test_truncate_stage_runs_requeues_everything(db_conn, content_table):
         stage="parse", version="v1",
     ) == []
 
-    db_conn.execute("truncate table stage_runs")
+    db_conn.execute("truncate table job_items")
     assert ledger.work_queue(
         db_conn, content_table=content_table, entity_type="recipe",
         stage="parse", version="v1",
@@ -244,7 +245,7 @@ def test_reset_requeues_below_version(db_conn, content_table):
     assert deleted == 1
 
     surviving = db_conn.execute(
-        "select entity_id, version from stage_runs where stage = 'parse'"
+        "select entity_id, code_version from job_items where stage = 'parse'"
     ).fetchall()
     assert surviving == [(b, "v2")], "only the v2 row survives"
 
@@ -261,7 +262,7 @@ def test_reset_nulls_gating_cursor_atomically(db_conn):
     # NULL), so its reset must delete the run row AND null the cursor in ONE
     # transaction. The ledger takes the gating (table, column) explicitly and
     # carries no FK, so we exercise it against a throwaway stand-in for `pages`.
-    db_conn.execute("truncate table stage_runs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
     db_conn.execute("drop table if exists _ledger_gating_pages")
     db_conn.execute(
         "create table _ledger_gating_pages (id bigint primary key, "
@@ -283,7 +284,7 @@ def test_reset_nulls_gating_cursor_atomically(db_conn):
         )
         # Both effects landed: run row gone, cursor nulled.
         assert db_conn.execute(
-            "select count(*) from stage_runs where stage = 'classify'"
+            "select count(*) from job_items where stage = 'classify'"
         ).fetchone()[0] == 0
         assert db_conn.execute(
             "select content_type from _ledger_gating_pages where id = 1"
@@ -306,7 +307,7 @@ def test_reset_nulls_gating_cursor_atomically(db_conn):
             )
         # The delete rolled back — the run row is still there.
         assert db_conn.execute(
-            "select count(*) from stage_runs where stage = 'classify'"
+            "select count(*) from job_items where stage = 'classify'"
         ).fetchone()[0] == 1
     finally:
         db_conn.execute("drop table if exists _ledger_gating_pages")
@@ -316,10 +317,10 @@ def test_reset_nulls_gating_cursor_atomically(db_conn):
 # Boundary — RLS keeps the ledger admin/pipeline-only
 # --------------------------------------------------------------------------
 
-def test_anon_cannot_read_stage_runs(db_conn):
+def test_anon_cannot_read_job_items(db_conn):
     db_conn.execute("set role anon")
     try:
         with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            db_conn.execute("select * from stage_runs limit 1")
+            db_conn.execute("select * from job_items limit 1")
     finally:
         db_conn.execute("reset role")

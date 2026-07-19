@@ -1,6 +1,6 @@
 """Re-apply resolved overrides after a stage run, and supersede stale proposals.
 
-The pin is a re-apply, not a lock: the durable truth is the `stage_reviews` row
+The pin is a re-apply, not a lock: the durable truth is the `human_reviews` row
 (the stage_fn never touches it); after each run we re-stamp the human value onto
 the live output table via `apply_review()`. So a version bump recomputes freely
 and the fix always wins the live row.
@@ -37,7 +37,7 @@ def supersede_stale(conn, *, stage: str, ids: Iterable[str]) -> int:
     if not id_list:
         return 0
     cur = conn.execute(
-        "update stage_reviews "
+        "update human_reviews "
         "set state = 'dismissed', reviewed_by = 'system:superseded', reviewed_at = now() "
         "where stage = %s and state = 'open' "
         "and origin in ('machine_proposal', 'distance_gate') "

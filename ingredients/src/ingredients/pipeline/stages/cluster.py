@@ -6,7 +6,7 @@ slug set)`` into a cluster key (and a finer variant key). Roles are ephemeral
 (classified inline, never stored); the resolved slug comes from the shared
 ``ingredient_resolutions``. It writes ``recipes.cluster_id`` / ``variant_key``
 and UPSERTs the ``recipe_clusters`` row, recomputing counts at the end. Versioned
-at ``DEDUP_VERSION``; one ``stage_runs`` row per recipe.
+at ``DEDUP_VERSION``; one ``job_items`` row per recipe.
 """
 
 from __future__ import annotations
