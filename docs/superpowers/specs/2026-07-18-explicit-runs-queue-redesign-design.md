@@ -151,21 +151,42 @@ error). Membership freezes at Start.
 "Re-run flagged" from a finished run pre-loads exactly those entities (keep or change the
 LLM tier). Ad hoc: select already-`applied` entities on the add page to force reprocessing.
 
-## Migration & phasing
+## Delivery
 
-This is a large schema change over a live staging DB. Suggested decomposition (each its own
-plan/PR):
+**One PR** delivers the whole redesign. The four areas below are the internal build order,
+not separate PRs:
 
-1. **Schema + worker core** — new `jobs` columns, `stage_runs`→`job_items` (rename + `state`/
-   `outcome_payload`/membership semantics), `audit.log.job_id`; worker reads the job's explicit
-   `job_items` instead of the version predicate; drop the folded tables. Data migration:
-   existing `stage_runs` rows → most-recent `job_items` per entity.
+1. **Schema + worker core** — new `jobs` columns + `draft` state (drop `awaiting_approval`),
+   `stage_runs`→`job_items` (rename + `state`/`outcome_payload`/membership), `audit.log.job_id`;
+   worker reads the job's explicit `job_items` instead of the version predicate; drop the folded
+   tables.
 2. **Run detail UI** — runs list, New run, detail view (LLM selector, start-confirm, tasks
    table with the three modes).
 3. **Add-tasks UI** — eligible-pool browse, JIRA filtering, sort, persistent selection,
    select-all-matching.
 4. **Apply gate + human_reviews** — `apply_mode`, bulk Apply, fold `taxonomy_proposals` and
    port the existing reviews UI to `human_reviews`.
+
+## Data migration
+
+**There are no existing `jobs`/runs to preserve** — only cold-build output. The migration must
+carry that output into the new tables so the status facets are populated from day one:
+
+- **`stage_runs` → `job_items`.** `job_items` requires a `job_id`, so create **one synthetic
+  backfill `jobs` row per stage** (`state='done'`, `method='deterministic'`, a clear
+  `created_by=system` marker) and attach the migrated rows to it. Map outcomes to task states:
+  `resolved → applied` (content was written to live), `failed → failed`, and
+  `pending`/`abstain`/`proposes_new → flagged` (parked — no content written, needs an LLM/human
+  pass). Carry the old `version` → `job_items.code_version`. Result: the add-page status facets
+  immediately show what the cold build did, and every parked item is selectable into a first
+  real (LLM) run — the exact workflow that motivated this redesign.
+- **`stage_reviews` → `human_reviews`** — preserve state/payload/origin.
+- **`taxonomy_proposals` → `human_reviews`** — `pending→open`, `approved→resolved`,
+  `rejected→dismissed`, taxonomy candidate list into the payload.
+- Drop the folded tables only after their data is migrated, in the same migration.
+- Going forward, cold-start data enters runs via the **"load all eligible"** seed on a stage
+  with no `job_items` — but after this backfill, stages already have `job_items`, so the normal
+  add-tasks flow applies.
 
 ## Non-goals
 
