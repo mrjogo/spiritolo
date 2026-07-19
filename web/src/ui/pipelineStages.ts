@@ -5,6 +5,7 @@
 // client configured.
 export const PIPELINE_STAGES = [
   'discover', 'classify', 'fetch', 'extract-recipe', 'parse-ingredients', 'map-ingredient',
+  'combine-nodes', 'connect-nodes',
   'convert-steps', 'cluster-recipes', 'export-recipegf',
 ] as const;
 

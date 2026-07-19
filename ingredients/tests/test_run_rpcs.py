@@ -206,6 +206,65 @@ def test_add_run_items_by_filter(conn):
 
 
 # ---------------------------------------------------------------------------
+# node run universe (combine-nodes / connect-nodes)
+# ---------------------------------------------------------------------------
+def _node(conn, *, display_name, status="provisional") -> int:
+    """A taxonomy node with the given harmonization status."""
+    slug = f"n-{uuid.uuid4().hex[:12]}"
+    return conn.execute(
+        "insert into taxonomy_nodes (slug, display_name, status) "
+        "values (%s, %s, %s) returning id",
+        (slug, display_name, status),
+    ).fetchone()[0]
+
+
+def test_eligible_pool_node_universe(conn):
+    """combine-nodes/connect-nodes browse the taxonomy_nodes universe, with the
+    node's status mapped onto the `source` column so the source facet becomes a
+    live/provisional filter."""
+    conn.execute("truncate table taxonomy_nodes cascade")
+    prov = _node(conn, display_name="Provisional Amaro", status="provisional")
+    live = _node(conn, display_name="Live Gin", status="live")
+
+    rows = conn.execute(
+        "select entity_id, title, source from "
+        "_eligible_base('combine-nodes', '{}'::jsonb) order by title"
+    ).fetchall()
+    by_id = {r[0]: r for r in rows}
+    assert set(by_id) == {prov, live}
+    # status is surfaced as the `source` facet value.
+    assert by_id[prov][2] == "provisional"
+    assert by_id[live][2] == "live"
+    assert by_id[prov][1] == "Provisional Amaro"
+
+    # A source filter of ['provisional'] narrows to just the provisional node —
+    # the default "residue" view the operator starts from.
+    narrowed = conn.execute(
+        "select entity_id from _eligible_base('combine-nodes', %s)",
+        ('{"source":["provisional"]}',),
+    ).fetchall()
+    assert [r[0] for r in narrowed] == [prov]
+
+
+def test_add_run_items_by_filter_node_stage(conn):
+    """add_run_items_by_filter for a node stage inserts job_items keyed to
+    taxonomy_node entities."""
+    conn.execute("truncate table taxonomy_nodes cascade")
+    prov = _node(conn, display_name="Provisional Amaro", status="provisional")
+    _node(conn, display_name="Live Gin", status="live")
+
+    jid = conn.execute("select create_run('combine-nodes')").fetchone()[0]
+    n = conn.execute(
+        "select add_run_items_by_filter(%s, %s)", (jid, '{"source":["provisional"]}')
+    ).fetchone()[0]
+    assert n == 1
+    rows = conn.execute(
+        "select entity_type, entity_id from job_items where job_id=%s", (jid,)
+    ).fetchall()
+    assert rows == [("taxonomy_node", prov)]
+
+
+# ---------------------------------------------------------------------------
 # run_items + facets
 # ---------------------------------------------------------------------------
 def test_run_items_and_facets(conn):
