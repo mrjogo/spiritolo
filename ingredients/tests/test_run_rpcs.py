@@ -280,3 +280,18 @@ def test_estimate_cents_token_based(conn):
     assert est("openai", 1000) == 180     # 1000 * (1200*0.75 + 200*4.50)/1e4
     assert est("anthropic", 1000) == 220  # 1000 * (1200*1.00 + 200*5.00)/1e4
     assert est(None, 1000) == 0           # unknown / no provider -> free
+
+
+def test_estimate_run_cents_rpc(conn):
+    """The public estimate_run_cents RPC (the draft-UI preview) returns the same
+    values start_run stamps via _estimate_cents — one source of truth for cost."""
+
+    def rpc(provider, items):
+        return conn.execute(
+            "select estimate_run_cents(%s::text, null::text, %s::int)", (provider, items)
+        ).fetchone()[0]
+
+    assert rpc("ollama", 1000) == 0
+    assert rpc("deepseek", 1000) == 22
+    assert rpc("openai", 1000) == 180
+    assert rpc("anthropic", 1000) == 220

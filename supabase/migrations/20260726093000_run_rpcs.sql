@@ -435,6 +435,26 @@ begin
 end;
 $$;
 
+-- estimate_run_cents(provider, model, items) -> estimated cents. THE single
+-- source of truth for the cost estimate: the draft UI calls this for its live
+-- preview and start_run stamps `cost_estimate_cents` from the same
+-- `_estimate_cents` helper — so the preview and the charge can never drift (no
+-- duplicated price table on the client).
+create or replace function public.estimate_run_cents(provider text, model text, items int)
+returns int
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if not public.is_admin() then
+    raise exception 'permission denied: not admin' using errcode = '42501';
+  end if;
+  return public._estimate_cents(provider, model, items);
+end;
+$$;
+
 -- ---------------------------------------------------------------------------
 -- 3. Browsing RPCs — eligible_pool / run_items + their facet siblings.
 -- ---------------------------------------------------------------------------
@@ -620,6 +640,9 @@ grant execute on function public.set_run_llm(bigint, text, text) to authenticate
 
 revoke all on function public.start_run(bigint, int) from public;
 grant execute on function public.start_run(bigint, int) to authenticated;
+
+revoke all on function public.estimate_run_cents(text, text, int) from public;
+grant execute on function public.estimate_run_cents(text, text, int) to authenticated;
 
 revoke all on function public.apply_run_items(bigint, bigint[]) from public;
 grant execute on function public.apply_run_items(bigint, bigint[]) to authenticated;

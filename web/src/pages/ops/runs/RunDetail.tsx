@@ -12,7 +12,8 @@ import {
   type Sort,
 } from '../../../ui/runs/useRunItems';
 import { buildPFilter, type RunFilterState } from '../../../ui/runs/filter';
-import { estimateRunCents, type LlmTier } from '../../../ui/runs/llmTiers';
+import type { LlmTier } from '../../../ui/runs/llmTiers';
+import { useEstimatedRunCents } from '../../../ui/runs/useEstimate';
 import './runs.css';
 
 const PAGE_SIZE = 50;
@@ -51,6 +52,15 @@ export function RunDetail() {
   const removeItems = useRemoveRunItems(jobId ?? 0);
   const applyItems = useApplyRunItems(jobId ?? 0);
 
+  // Live draft estimate from the server (single source of truth); must be called
+  // before the early returns to respect the rules of hooks.
+  const draftEstimate = useEstimatedRunCents(
+    activeTier?.provider,
+    activeTier?.model,
+    run?.task_count,
+    run?.state === 'draft',
+  );
+
   if (runStatus === 'loading') return <div className="ops-run-detail">Loading…</div>;
   if (!run || jobId == null) {
     return (
@@ -61,8 +71,8 @@ export function RunDetail() {
     );
   }
 
-  const estimateCents = run.cost_estimate_cents ?? estimateRunCents(activeTier, run.task_count);
   const isDraft = run.state === 'draft';
+  const estimateCents = run.cost_estimate_cents ?? draftEstimate;
 
   function handleTierChange(next: LlmTier) {
     setTierOverride(next);

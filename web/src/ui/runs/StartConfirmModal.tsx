@@ -3,7 +3,7 @@ import { ModalShell } from '../Modal';
 import { formatCents } from '../formatCents';
 import type { RunHeader } from './useRun';
 import type { LlmTier } from './llmTiers';
-import { estimateRunCents } from './llmTiers';
+import { useEstimatedRunCents } from './useEstimate';
 
 interface Props {
   run: RunHeader;
@@ -28,7 +28,10 @@ export function StartConfirmModal({
 }: Props) {
   const [capInput, setCapInput] = useState(defaultCapDollars.toFixed(2));
 
-  const estimateCents = run.cost_estimate_cents ?? estimateRunCents(tier, run.task_count);
+  const draftEstimate = useEstimatedRunCents(
+    tier.provider, tier.model, run.task_count, run.cost_estimate_cents == null,
+  );
+  const estimateCents = run.cost_estimate_cents ?? draftEstimate;
   const capDollars = Number.parseFloat(capInput);
   const capValid = Number.isFinite(capDollars) && capDollars > 0;
   const startEnabled = capValid && !submitting;

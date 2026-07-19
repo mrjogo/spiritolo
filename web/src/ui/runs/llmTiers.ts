@@ -2,18 +2,18 @@
 // two values set_run_llm(job_id, provider, model) takes; `label` is the human
 // string shown in the picker and confirm modal. Only ollama is free (local);
 // every other tier is metered and routes the run through the approval gate.
+//
+// Cost is NOT modelled here — the estimate is computed server-side by the
+// `estimate_run_cents` RPC (the same `_estimate_cents` helper start_run stamps),
+// so pricing lives in exactly one place (SQL). See useEstimatedRunCents.
 export interface LlmTier {
   provider: string;
   model: string;
-  /** Display name in the picker, e.g. "DeepSeek · deepseek-chat — metered". */
+  /** Display name in the picker, e.g. "DeepSeek · deepseek-v4-flash — metered". */
   label: string;
-  /** Short name for the confirm modal / run header, e.g. "DeepSeek · deepseek-chat". */
+  /** Short name for the confirm modal / run header, e.g. "DeepSeek · deepseek-v4-flash". */
   shortLabel: string;
   metered: boolean;
-  /** Published price in USD per 1M input / output tokens (2026-07). Drives the
-   *  cost estimate; free/local tiers are 0. */
-  inputPerMTok: number;
-  outputPerMTok: number;
 }
 
 export const LLM_TIERS: LlmTier[] = [
@@ -23,38 +23,27 @@ export const LLM_TIERS: LlmTier[] = [
     label: 'Ollama · qwen3:14b — free (local)',
     shortLabel: 'Ollama · qwen3:14b',
     metered: false,
-    inputPerMTok: 0,
-    outputPerMTok: 0,
   },
   {
-    // deepseek-v4-flash (succeeds deepseek-chat); $0.14/$0.28 per 1M (api-docs.deepseek.com).
     provider: 'deepseek',
     model: 'deepseek-v4-flash',
     label: 'DeepSeek · deepseek-v4-flash — metered',
     shortLabel: 'DeepSeek · deepseek-v4-flash',
     metered: true,
-    inputPerMTok: 0.14,
-    outputPerMTok: 0.28,
   },
   {
-    // gpt-5.4-mini (succeeds gpt-5-mini); $0.75/$4.50 per 1M (developers.openai.com).
     provider: 'openai',
     model: 'gpt-5.4-mini',
     label: 'OpenAI · gpt-5.4-mini — metered',
     shortLabel: 'OpenAI · gpt-5.4-mini',
     metered: true,
-    inputPerMTok: 0.75,
-    outputPerMTok: 4.5,
   },
   {
-    // claude-haiku-4-5 $1.00/$5.00 per 1M.
     provider: 'anthropic',
     model: 'claude-haiku-4-5',
     label: 'Claude · claude-haiku-4-5 — metered',
     shortLabel: 'Claude · claude-haiku-4-5',
     metered: true,
-    inputPerMTok: 1.0,
-    outputPerMTok: 5.0,
   },
 ];
 
@@ -68,23 +57,4 @@ export function tierKey(t: Pick<LlmTier, 'provider' | 'model'>): string {
 export function findTier(provider: string | null | undefined, model: string | null | undefined): LlmTier | undefined {
   if (!provider || !model) return undefined;
   return LLM_TIERS.find((t) => t.provider === provider && t.model === model);
-}
-
-// Per-item token estimate for a hosted LLM call in the pipeline. This MUST stay
-// in sync with the server's `_estimate_cents` (supabase/migrations/…_run_rpcs.sql)
-// so the draft-side estimate agrees with what start_run stamps — no jump at
-// confirm. Deliberately assumes every item reaches the LLM tier (the
-// deterministic tier resolves most first), so it over-estimates.
-const INPUT_TOKENS_PER_ITEM = 1200;
-const OUTPUT_TOKENS_PER_ITEM = 200;
-
-/** Estimated cents for running `taskCount` tasks on `tier`; null when the count
- *  isn't known yet. Token-based against the tier's published $/1M rates; free
- *  (ollama) tiers price to 0. */
-export function estimateRunCents(tier: LlmTier, taskCount: number | null | undefined): number | null {
-  if (taskCount == null) return null;
-  // per-item cents = (in_tokens * in_$perM + out_tokens * out_$perM) / 1e4
-  const perItemCents =
-    (INPUT_TOKENS_PER_ITEM * tier.inputPerMTok + OUTPUT_TOKENS_PER_ITEM * tier.outputPerMTok) / 10000;
-  return Math.round(taskCount * perItemCents);
 }
