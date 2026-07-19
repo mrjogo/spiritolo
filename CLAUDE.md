@@ -2,12 +2,12 @@
 
 # spiritolo
 
-Cocktail recipe scraper + verification UI, in two zones. **Zone 1 (`scraper/`)** crawls: discover → classify_url → fetch (runs HTML validation + drink scoring inline), caching page HTML. **Zone 2 (`ingredients/`)** builds the relational recipe from those pages: extract → parse → map → convert → cluster → export, each a versioned stage over the `stage_runs` ledger. Vite/React SPA reads `recipes_public`.
+Cocktail recipe scraper + verification UI, in two zones. **Zone 1 (`scraper/`)** crawls: discover → classify_url → fetch (runs HTML validation + drink scoring inline), caching page HTML. **Zone 2 (`ingredients/`)** builds the relational recipe from those pages: extract → parse → map → convert → cluster → export. An operator assembles explicit **runs** in `/ops` (a `jobs` row that owns per-entity `job_items`); the worker processes a run's `pending` `job_items`. Vite/React SPA reads `recipes_public`.
 
 - `scraper/` — Python 3.11+ (uv), pytest. Zone-1 stage CLIs in `scraper/src/scraper/{discover,classify,fetch,validate}.py`. Work queue: `data/scraper.db` (SQLite).
 - `ingredients/` — Zone-2 content pipeline + the always-on worker. Stages in `ingredients/src/ingredients/pipeline/stages/`; depends on `common/`, not on `scraper/`.
 - `common/` — shared utilities (`supabase_client`, `providers`, `progress`, `summary`, `cli_common`), a root-level uv workspace both zones depend on.
-- `supabase/migrations/` — `recipes`/`recipe_ingredients`/`recipe_steps`, `taxonomy_*`, `ingredient_resolutions`, `recipe_clusters`, `jobs` + `stage_runs`.
+- `supabase/migrations/` — `recipes`/`recipe_ingredients`/`recipe_steps`, `taxonomy_*`, `ingredient_resolutions`, `recipe_clusters`, `jobs` (runs) + `job_items` (per-entity membership + outcome) + `human_reviews`.
 - `web/` — Vite + React + TS + Vitest.
 - `docs/` — design + roadmap.
 
@@ -56,7 +56,7 @@ URL classifier needs ollama: `ollama pull qwen3:14b`.
 
 **Zone 2 — Supabase (relational content model).** The recipe is stored across `recipes` (header + raw Schema.org `source` JSON-LD), `recipe_ingredients` (RecipeGF ingredient rows), and `recipe_steps` (verb-frame steps). Ingredient → taxonomy resolution is **shared and name-keyed** in `ingredient_resolutions` — fix a name once and every recipe that uses it follows, so a taxonomy correction never rewrites a recipe. Drink identity is derived into `recipe_clusters` (+ `recipes.cluster_id`/`variant_key`). Taxonomy is `taxonomy_nodes` / `taxonomy_edges` / `taxonomy_aliases` (multi-parent DAG, see Spirits Taxonomy below). The RecipeGF bundle a consumer imports is generated on demand from these rows; only a published export is frozen (`recipe_exports`). The website reads `recipes_public`.
 
-**Run ledgers.** Every Zone-2 stage records exactly one latest-only `stage_runs` row per `(entity, stage)` at its version constant; a stage's queue is "content qualifies AND no `stage_runs` row at the current version," so deleting rows re-queues work. The worker claims `jobs` rows (dispatch intent — "run `<stage>` over `<payload scope>`"): free/deterministic stages enqueue straight to `queued`, metered LLM stages enqueue to `awaiting_approval` for a confirm-before-cost gate.
+**Runs, not derived queues.** A **run** is a `jobs` row (`draft → queued → claimed → running → done`/`failed`) that carries a per-run LLM tier (`llm_provider`/`llm_model`) and an `apply_mode` (`auto`|`hold`). Its membership is the set of `job_items` it owns — one per `(job, entity)`, in state `pending → running → {applied | pending_apply | flagged | failed}`. **`job_items` replaced `stage_runs`**: it's both the run's membership (when `pending`) and the per-entity outcome (when terminal), append-only across runs so an entity can be re-run. "Current status of entity X at stage Y" = its most recent terminal `job_item`; that derived status index powers the `/ops` add-tasks filter facets. The operator assembles a run in `/ops` (create → filter/select entities → load `pending` items → **Start**); the single cost gate is the Start-confirm modal (metered = the run's LLM tier is a hosted API; local `ollama` is free — no separate approval step). The worker claims a `queued` job and processes exactly its `pending` `job_items`.
 
 ## Pipeline conventions
 
@@ -65,9 +65,9 @@ URL classifier needs ollama: `ollama pull qwen3:14b`.
 - `validate --reset` clears `validate_html_runs` + `classify_drink_runs` together.
 - `classify --reset` also nulls `pages.content_type` (its queue gates on `content_type IS NULL`, not eval-row presence).
 
-**Zone-2 stages** take no reset flags; you re-queue by deleting the relevant `stage_runs` rows (or bumping the version constant, which drops the old rows out of the queue).
+**Zone-2 stages** are driven by explicit runs, not a version predicate. To (re)process entities, assemble a run in `/ops` and select them — including already-`applied` ones to force a re-run — then Start. There are no reset flags and no auto-requeue on version bump. (The CLI cold-build still uses the legacy NOT-EXISTS predicate path when `job["id"] is None` — see Two run surfaces.)
 
-**Versioning:** every stage/evaluator carries a version constant recorded on its run rows. When you change logic, bump the constant so prior-version rows fall back onto the work queue.
+**Versioning:** every stage/evaluator carries a version constant, stamped onto each `job_items` row as `code_version` for provenance and as an add-tasks filter ("processed before v4"). Bumping a constant no longer auto-requeues anything — re-processing is an explicit operator run.
 
 Zone 1:
 
@@ -144,13 +144,13 @@ Taxonomy nodes are managed on staging via the curation UI; they are not maintain
   cd ingredients && uv run python -m ingredients.worker
   ```
 
-  Jobs are enqueued via the `enqueue_job` RPC (the `/ops` console) — a free stage lands in `queued`, a metered one in `awaiting_approval` until an admin approves it.
+  Runs are assembled in the `/ops` console: `create_run` (draft) → `add_run_items`/`add_run_items_by_filter` (load `pending` members) → `start_run` (draft → `queued`). The worker then claims the `queued` job and processes its `pending` `job_items`. `apply_run_items` flips `pending_apply → applied` for `hold`-mode runs. (The legacy `enqueue_job`/`approve_job`/`awaiting_approval` path is gone.)
 
 **The stages:**
 
 - **extract** — reads a classified page's cached HTML from the object store, finds the Schema.org Recipe JSON-LD, and UPSERTs a `recipes` row (raw `source` verbatim + derived title/author/image). No Recipe JSON-LD → the LLM tier synthesizes a recipe source from the page, else it abstains.
 - **parse** — parses each `recipes.source` `recipeIngredient` string with strict abstain discipline into `recipe_ingredients` (RecipeGF shape: name + amount/amount_max/unit + `string[]` modifiers). `PARSER_VERSION` in [parser.py](ingredients/src/ingredients/parser.py); bump on any rule or unit-table change.
-- **map** — resolves each `recipe_ingredients.name` to a taxonomy slug in the **shared** `ingredient_resolutions` (name-keyed — resolved once for every recipe that uses it): alias → lexical → LLM tier → abstain. An LLM `propose_brand`/expression whose parent slug already exists auto-creates the node + edge + `taxonomy_provenance` (`is_cluster_node=false`) and writes the resolution; a `propose_form` queues a `taxonomy_proposals` row for human review (the curation UI) and parks the name.
+- **map** — resolves each `recipe_ingredients.name` to a taxonomy slug in the **shared** `ingredient_resolutions` (name-keyed — resolved once for every recipe that uses it): alias → lexical → LLM tier → abstain. An LLM `propose_brand`/expression whose parent slug already exists auto-creates the node + edge + `taxonomy_provenance` (`is_cluster_node=false`) and writes the resolution; a `propose_form` queues a `human_reviews` machine-proposal row for human review (the curation UI) and parks the name.
 - **convert** — deterministic technique keyword scan → RecipeGF verb-frame `recipe_steps`. Anything uncertain (no technique, muddle, untranslatable unit, unresolved ingredient) records a `pending` / `proposes_new` outcome in `stage_runs` and writes no steps.
 - **cluster** — normalizes the cocktail name (`NORMALIZER_VERSION`), role-tags ingredients and rolls them up to the curated antichain, then writes `recipe_clusters` (+ `recipes.cluster_id`/`variant_key`). Cluster identity is `hash(canonical_name, role-tagged rolled-up ingredient set)`; two recipes share a variant iff they also share amounts and brand call-outs, so identical recipes from multiple sources collapse to one variant with `source_count > 1`.
 - **export** — freezes the on-demand bundle into `recipe_exports`, keyed by recipe + `CONVERTER_VERSION`.
@@ -248,7 +248,7 @@ Main suite: [normalizeRecipe.test.ts](web/src/normalizeRecipe.test.ts) covers me
 
 Recipe for a UI walkthrough:
 
-1. **Local stack + fake data.** Bring the stack up (see Local environment), `supabase db reset`, then seed *fake* data straight into the tables the views read — plain `INSERT`s, no staging restore needed for a demo. For `/ops`: `recipes` / `recipe_ingredients` / `recipe_steps` / `stage_runs` (+ one `stage_live_version` row per stage at that stage's version constant, or the dashboard/reviews views show nothing) / `recipe_clusters` / `recipe_exports` / `stage_reviews`; audit-log rows generate themselves via the table triggers.
+1. **Local stack + fake data.** Bring the stack up (see Local environment), `supabase db reset`, then seed *fake* data straight into the tables the views read — plain `INSERT`s, no staging restore needed for a demo. For `/ops`: `recipes` / `recipe_ingredients` / `recipe_steps` / `jobs` (runs) + `job_items` (per-entity, with varied `state` so the add-tasks facets show something) / `recipe_clusters` / `recipe_exports` / `human_reviews`; audit-log rows generate themselves via the table triggers.
 2. **Serve.** `web/.env.local` + `cd web && npm run dev` (`:5173`).
 3. **Headless admin auth (no email).** `POST http://127.0.0.1:54321/auth/v1/admin/generate_link` with the `service_role` key, body `{"type":"magiclink","email":"admin@local.test","options":{"redirect_to":"http://localhost:5173/auth/callback"}}` → navigate the returned `action_link` in Playwright to land an authenticated session (`redirect_to` must be allow-listed — see `additional_redirect_urls` in `supabase/config.toml`). Then `page.goto` each route + `screenshot({ fullPage: true })`. Install Playwright + chromium in the scratchpad.
 4. **Assemble + prove.** `showboat init/note/exec/image` (an `exec` psql row-count block makes good re-runnable proof), then `showboat verify`. Optionally render to a self-contained HTML artifact (inline the PNGs as `data:` URIs) for viewing.
