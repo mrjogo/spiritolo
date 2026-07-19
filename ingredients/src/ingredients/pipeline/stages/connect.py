@@ -106,12 +106,12 @@ def _candidate_parents(
         where n.status = 'live'
           and n.id <> %(nid)s
           and (
-                %(tokens)s::text[] && string_to_array(lower(n.display_name), ' ')
-             or %(tokens)s::text[] && string_to_array(replace(lower(n.slug), '-', ' '), ' ')
+                %(tokens)s::text[] && regexp_split_to_array(lower(coalesce(n.display_name, '')), '[^a-z0-9]+')
+             or %(tokens)s::text[] && regexp_split_to_array(lower(n.slug), '[^a-z0-9]+')
              or similarity(n.display_name, %(q)s) >= 0.35
           )
         order by
-          (%(tokens)s::text[] && string_to_array(lower(n.display_name), ' ')) desc,
+          (%(tokens)s::text[] && regexp_split_to_array(lower(coalesce(n.display_name, '')), '[^a-z0-9]+')) desc,
           similarity(n.display_name, %(q)s) desc,
           n.slug
         limit %(lim)s

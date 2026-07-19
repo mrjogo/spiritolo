@@ -152,6 +152,25 @@ def test_connect_place_antichain_violation_raises(conn):
     ).fetchone()[0] == "provisional"
 
 
+def test_connect_place_antichain_rejects_cluster_descendant(conn):
+    # The guard is two-sided: a node can't become a cluster node ABOVE an existing
+    # cluster node either (that would give the descendant a cluster ancestor).
+    parent = _node(conn, "spirits")
+    node = _node(conn, "mid-node", status="provisional")
+    child_cluster = _node(conn, "bourbon", is_cluster_node=True)
+    conn.execute(
+        "insert into taxonomy_edges (parent_id, child_id) values (%s, %s)",
+        (node, child_cluster),
+    )
+    with pytest.raises(psycopg.errors.RaiseException):
+        conn.execute(
+            "select connect_place(%s, %s, %s, %s)", (node, None, ["spirits"], True)
+        )
+    assert conn.execute(
+        "select status from taxonomy_nodes where id=%s", (node,)
+    ).fetchone()[0] == "provisional"
+
+
 # --- apply_review dispatch via resolve_review -------------------------------
 
 @pytest.fixture
