@@ -5,7 +5,7 @@ Resolution is name-keyed, not per recipe row: a name resolves once into
 that uses that name follows, so a taxonomy correction is a single-row edit. The
 deterministic tier is the alias + lexical layers (which return a taxonomy node
 id — joined to its slug here); misses route to the LLM tier (provider chain),
-which returns a slug or abstains. A per-recipe `stage_runs` row records whether
+which returns a slug or abstains. A per-recipe `job_items` row records whether
 that recipe's names are all resolved at `MAPPER_VERSION` while the resolutions
 themselves stay shared.
 """
@@ -111,9 +111,13 @@ def map_stage_fn(
     a single transaction. Per-recipe outcome/count semantics are unchanged.
     """
     site, limit = base.scope(job)
-    recipe_ids = base.recipe_queue(
-        conn, stage=STAGE, version=MAPPER_VERSION, site=site, limit=limit
-    )
+    apply_mode = job.get("apply_mode") or "auto"
+    if job.get("id"):
+        recipe_ids = base.run_item_ids(conn, job_id=job["id"], stage=STAGE)
+    else:
+        recipe_ids = base.recipe_queue(
+            conn, stage=STAGE, version=MAPPER_VERSION, site=site, limit=limit
+        )
     aliases = fetch_aliases_dict(conn) if recipe_ids else {}
     counts = {"resolved": 0, "pending": 0}
 
@@ -172,5 +176,5 @@ def map_stage_fn(
                 )
 
             # 5. One ledger executemany for the chunk.
-            base.record_many(conn, records)
+            base.record_many(conn, records, apply_mode=apply_mode)
     return counts

@@ -5,7 +5,7 @@ object-store HTML corpus read by ingredients.pipeline.corpus). It replaces the
 scraper's SQLite
 `pages` table with a lightweight per-URL row in Postgres — no
 snapshot/attempts/fetch_error bookkeeping (that history now lives in
-stage_runs.payload / audit_log).
+job_items.payload / audit_log).
 
 This is the sole migration for `pages`; ingredients/tests/test_corpus_reader.py
 covers only the read-side corpus module and adds no migration of its own.
@@ -49,7 +49,7 @@ def test_pages_columns(db_conn):
 def test_pages_no_snapshot_or_attempts_columns(db_conn):
     # The legacy SQLite pages table (scraper/src/scraper/db.py) tracked
     # per-field snapshots and attempt/error bookkeeping directly on the row.
-    # That history now lives in stage_runs.payload / audit_log; none of it
+    # That history now lives in job_items.payload / audit_log; none of it
     # belongs on the lightweight Postgres `pages` row.
     cols = set(_columns(db_conn, "pages"))
     legacy = {

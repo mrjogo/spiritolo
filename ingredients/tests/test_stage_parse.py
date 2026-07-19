@@ -19,10 +19,10 @@ from ingredients.pipeline.stages.parse import parse_stage_fn
 def conn(test_db_url: str):
     with psycopg.connect(test_db_url, autocommit=True) as c:
         c.execute("truncate recipes restart identity cascade")
-        c.execute("truncate stage_runs restart identity cascade")
+        c.execute("truncate job_items restart identity cascade")
         yield c
         c.execute("truncate recipes restart identity cascade")
-        c.execute("truncate stage_runs restart identity cascade")
+        c.execute("truncate job_items restart identity cascade")
 
 
 def _seed_recipe(conn, url, ingredients):
@@ -50,7 +50,7 @@ def test_parse_writes_recipe_ingredients(conn):
     assert rows[1][1] == "lime juice"
 
     run = conn.execute(
-        "select stage, version, outcome, method from stage_runs "
+        "select stage, code_version, outcome, method from job_items "
         "where entity_type='recipe' and entity_id=%s and stage='parse'",
         (rid,),
     ).fetchone()
@@ -76,7 +76,7 @@ def test_parse_stores_unparseable_row_but_abstains(conn):
     ).fetchone()
     assert row[0] is None and row[1] == "???"
     outcome = conn.execute(
-        "select outcome from stage_runs where entity_id=%s and stage='parse'", (rid,)
+        "select outcome from job_items where entity_id=%s and stage='parse'", (rid,)
     ).fetchone()[0]
     assert outcome == "abstain"
 
@@ -97,14 +97,14 @@ def test_parse_batches_across_chunk_boundary(conn):
     # c3 (???) abstains → empty; the other four structure at least one row.
     assert counts == {"parsed": 4, "empty": 1}
 
-    # Every recipe got its ingredient rows and exactly one stage_runs row.
+    # Every recipe got its ingredient rows and exactly one job_items row.
     for rid, (_, ings) in zip(rids, specs):
         n_rows = conn.execute(
             "select count(*) from recipe_ingredients where recipe_id=%s", (rid,)
         ).fetchone()[0]
         assert n_rows == len(ings)
     total_runs = conn.execute(
-        "select count(*) from stage_runs where stage='parse'"
+        "select count(*) from job_items where stage='parse'"
     ).fetchone()[0]
     assert total_runs == len(rids)
 
@@ -116,7 +116,7 @@ def test_parse_batches_across_chunk_boundary(conn):
     ).fetchall()
     assert row[0] == ("vodka", 1.5, "oz")
     abstain = conn.execute(
-        "select outcome from stage_runs where entity_id=%s and stage='parse'",
+        "select outcome from job_items where entity_id=%s and stage='parse'",
         (rids[2],),
     ).fetchone()[0]
     assert abstain == "abstain"
@@ -129,6 +129,6 @@ def test_parse_scopes_by_site(conn):
     parse_stage_fn(_job(site="punch"), conn, None)
     # Only the punch recipe was parsed.
     n = conn.execute(
-        "select count(*) from stage_runs where stage='parse'"
+        "select count(*) from job_items where stage='parse'"
     ).fetchone()[0]
     assert n == 1

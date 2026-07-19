@@ -20,12 +20,12 @@ def conn(test_db_url: str):
     with psycopg.connect(test_db_url, autocommit=True) as c:
         c.execute("truncate recipes restart identity cascade")
         c.execute("truncate ingredient_resolutions restart identity cascade")
-        c.execute("truncate stage_runs restart identity cascade")
+        c.execute("truncate job_items restart identity cascade")
         c.execute("truncate recipe_exports restart identity cascade")
         yield c
         c.execute("truncate recipes restart identity cascade")
         c.execute("truncate ingredient_resolutions restart identity cascade")
-        c.execute("truncate stage_runs restart identity cascade")
+        c.execute("truncate job_items restart identity cascade")
         c.execute("truncate recipe_exports restart identity cascade")
 
 
@@ -98,7 +98,7 @@ def test_export_freezes_bundle_and_records_resolved(conn):
     assert conn.execute("select recipe_slug from recipes where id=%s", (rid,)).fetchone()[0] == "old-fashioned"
 
     outcome = conn.execute(
-        "select outcome from stage_runs where entity_id=%s and stage='export'", (rid,)
+        "select outcome from job_items where entity_id=%s and stage='export'", (rid,)
     ).fetchone()[0]
     assert outcome == "resolved"
 
@@ -111,7 +111,7 @@ def test_export_pending_when_ingredient_unresolved(conn):
     assert counts["pending"] == 1
     assert conn.execute("select count(*) from recipe_exports").fetchone()[0] == 0
     outcome = conn.execute(
-        "select outcome from stage_runs where entity_id=%s and stage='export'", (rid,)
+        "select outcome from job_items where entity_id=%s and stage='export'", (rid,)
     ).fetchone()[0]
     assert outcome == "pending"
 
@@ -147,6 +147,6 @@ def test_export_batches_across_chunk_boundary(conn):
             == "old-fashioned"
         )
         outcome = conn.execute(
-            "select outcome from stage_runs where entity_id=%s and stage='export'", (rid,)
+            "select outcome from job_items where entity_id=%s and stage='export'", (rid,)
         ).fetchone()[0]
         assert outcome == "resolved"

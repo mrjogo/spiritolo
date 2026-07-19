@@ -15,7 +15,7 @@ interface RunRow {
   entity_type: string;
   entity_id: number;
   stage: string;
-  version: string;
+  code_version: string;
   outcome: string;
   method: string;
   cost_cents: number | null;
@@ -37,7 +37,7 @@ function mockSupabase(rows: RunRow[], detailRow: unknown = null) {
   const detailEq = vi.fn(() => ({ maybeSingle }));
 
   fromMock.mockImplementation((table: string) => {
-    if (table !== 'stage_runs') throw new Error(`unexpected table ${table}`);
+    if (table !== 'job_items') throw new Error(`unexpected table ${table}`);
     return {
       select: (_sel: string, opts?: { count?: string }) =>
         (opts && opts.count ? listChain : { eq: detailEq }),
@@ -67,9 +67,9 @@ beforeEach(() => {
 });
 
 describe('<StageRunsBrowser>', () => {
-  it('lists stage_runs rows with outcome as a StatusPill', async () => {
+  it('lists job_items rows with outcome as a StatusPill', async () => {
     mockSupabase([
-      { id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse', version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null },
+      { id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse', code_version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null },
     ]);
     renderBrowser(makeClient());
     // Scoped to the table: 'parse'/'resolved' also appear as filter <option>
@@ -81,8 +81,8 @@ describe('<StageRunsBrowser>', () => {
 
   it('selecting a row fetches and renders its full detail including payload', async () => {
     const { detailEq } = mockSupabase(
-      [{ id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse', version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null }],
-      { id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse', version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null, payload: { structured: 3 } },
+      [{ id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse', code_version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null }],
+      { id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse', code_version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null, payload: { structured: 3 } },
     );
     renderBrowser(makeClient());
     const row = await within(await screen.findByRole('table')).findByRole('button');
@@ -102,7 +102,7 @@ describe('<StageRunsBrowser>', () => {
     await waitFor(() => {
       expect(listEqCalls).toContainEqual(['stage', 'map']);
       expect(listEqCalls).toContainEqual(['outcome', 'failed']);
-      expect(listEqCalls).toContainEqual(['version', 'v2']);
+      expect(listEqCalls).toContainEqual(['code_version', 'v2']);
     });
   });
 });

@@ -5,10 +5,11 @@ connects via ``SUPABASE_DB_URL``, installs SIGINT/SIGTERM handlers for a clean
 Railway restart, and serves the global ``STAGE_FNS`` registry (stages register
 themselves at import; empty until stages register).
 
-The provider implementations and the local-provider proxy transport are wired
-in by the Docker/Tailscale image. The batch-reconcile boot hook is bound here
-when a batch provider is configured — otherwise it stays ``None`` and boot just
-runs the reaper.
+Provider implementations are built from the environment by
+``build_provider_impls`` (Ollama always; OpenAI / Claude / DeepSeek when their
+API keys are set); the local-provider proxy transport is wired in by the
+Docker/Tailscale image. Which providers a stage actually uses — and in what
+order — is the ``PROVIDER_CHAIN_CONFIG`` file, not this wiring.
 """
 
 from __future__ import annotations
@@ -24,21 +25,10 @@ from dotenv import load_dotenv
 
 import ingredients.pipeline.stages  # noqa: F401 -- registers stage_fns into STAGE_FNS
 
-from ingredients.worker.batches import OpenAIBatchReconcileClient, build_reconcile_hook
 from ingredients.worker.dispatch import STAGE_FNS
 from ingredients.worker.loop import serve
 from ingredients.worker.providers import load_configs
-
-
-def _build_reconcile_hook():
-    """Bind the OpenAI async-Batch reconciler when a key is configured.
-
-    Batch is an opt-in accelerator; with no ``OPENAI_API_KEY`` the worker skips
-    reconciliation entirely (returns ``None``) and boot just runs the reaper.
-    """
-    if not os.environ.get("OPENAI_API_KEY"):
-        return None
-    return build_reconcile_hook(OpenAIBatchReconcileClient.from_env())
+from ingredients.worker.providers_local import build_provider_impls
 
 
 def _load_chain_configs() -> dict:
@@ -71,10 +61,9 @@ def main() -> None:
             conn,
             stage_fns=STAGE_FNS,
             configs=_load_chain_configs(),
-            provider_impls={},  # the real provider clients are wired in here
+            provider_impls=build_provider_impls(),  # {id -> impl}, keyed on env keys
             worker_id=os.environ.get("WORKER_ID"),
             conn_factory=lambda: psycopg.connect(db_url, autocommit=True),
-            reconcile_hook=_build_reconcile_hook(),
             stop_event=stop_event,
         )
     finally:

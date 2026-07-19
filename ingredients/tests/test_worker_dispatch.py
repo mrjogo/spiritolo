@@ -61,7 +61,7 @@ def test_register_adds_to_global_registry():
 
 def test_stage_fn_lookup_unknown_marks_failed(test_db_url, db_conn):
     db_conn.execute("truncate table jobs restart identity cascade")
-    db_conn.execute("truncate table stage_runs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
     jid = db_conn.execute(
         "insert into jobs (stage, state) values ('does_not_exist', 'queued') "
         "returning id"
@@ -79,18 +79,26 @@ def test_stage_fn_lookup_unknown_marks_failed(test_db_url, db_conn):
     ).fetchone()
     assert state == "failed"
     assert error_code == "unknown_stage"
-    assert db_conn.execute("select count(*) from stage_runs").fetchone()[0] == 0
+    assert db_conn.execute("select count(*) from job_items").fetchone()[0] == 0
 
 
 def test_idempotent_rerun(test_db_url, db_conn):
     db_conn.execute("truncate table jobs restart identity cascade")
-    db_conn.execute("truncate table stage_runs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
     payload = {"entity_ids": [301], "entity_type": "recipe", "version": "vt"}
     jid = db_conn.execute(
         "insert into jobs (stage, payload, state) values "
         "('demo', %s, 'queued') returning id",
         (Json(payload),),
     ).fetchone()[0]
+    # The run's member row pre-exists (as add_run_items would have created it);
+    # the stage_fn UPDATEs it in place, so a re-run cannot duplicate it.
+    db_conn.execute(
+        "insert into job_items (entity_type, entity_id, stage, code_version, "
+        "outcome, method, state, job_id) "
+        "values ('recipe', 301, 'demo', '', 'pending', 'deterministic', 'pending', %s)",
+        (jid,),
+    )
 
     def fn(job, conn, providers):
         for eid in job["payload"]["entity_ids"]:
@@ -115,10 +123,10 @@ def test_idempotent_rerun(test_db_url, db_conn):
         conn.close()
 
     n_rows = db_conn.execute(
-        "select count(*) from stage_runs where entity_type='recipe' "
+        "select count(*) from job_items where entity_type='recipe' "
         "and entity_id=301 and stage='demo'"
     ).fetchone()[0]
-    assert n_rows == 1, "UPSERT keeps exactly one row per (entity, stage)"
+    assert n_rows == 1, "the member row is UPDATEd in place, not duplicated"
 
     cost_actual = db_conn.execute(
         "select cost_actual_cents from jobs where id=%s", (jid,)

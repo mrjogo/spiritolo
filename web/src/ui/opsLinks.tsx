@@ -19,7 +19,7 @@ export function auditRowHref(table: string, pk: string): string | null {
       return recipeHref(pk);
     case 'recipe_exports':
       return exportHref(pk);
-    case 'stage_reviews':
+    case 'human_reviews':
       return '/ops/reviews';
     default:
       return null;

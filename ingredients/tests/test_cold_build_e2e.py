@@ -73,7 +73,7 @@ def _seed_taxonomy(conn: psycopg.Connection) -> None:
 @pytest.fixture()
 def conn(test_db_url: str):
     with psycopg.connect(test_db_url, autocommit=True) as c:
-        for t in ("recipes", "pages", "stage_runs", "ingredient_resolutions",
+        for t in ("recipes", "pages", "job_items", "ingredient_resolutions",
                   "recipe_clusters", "recipe_exports"):
             c.execute(f"truncate {t} restart identity cascade")
         _seed_taxonomy(c)
@@ -119,15 +119,15 @@ def test_cold_build_produces_bundle_and_one_run_per_stage(conn):
     ).fetchone()[0] == 3
 
     # Exactly one stage_run per content stage for this recipe/page.
-    recipe_stage_runs = {
+    recipe_job_items = {
         r[0] for r in conn.execute(
-            "select stage from stage_runs where entity_type='recipe' and entity_id=%s",
+            "select stage from job_items where entity_type='recipe' and entity_id=%s",
             (recipe[0],),
         ).fetchall()
     }
-    assert {"parse", "map", "convert", "cluster", "export"} <= recipe_stage_runs
+    assert {"parse", "map", "convert", "cluster", "export"} <= recipe_job_items
     page_runs = conn.execute(
-        "select count(*) from stage_runs where entity_type='page' and stage='extract'"
+        "select count(*) from job_items where entity_type='page' and stage='extract'"
     ).fetchone()[0]
     assert page_runs == 1
     # Every content stage ran.

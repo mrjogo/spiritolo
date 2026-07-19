@@ -6,7 +6,7 @@ UPSERTs a `recipes` row (raw `source` jsonb verbatim + derived
 title/author/image; equipment stays empty until the convert stage). A page
 with no Recipe JSON-LD falls through to the LLM tier (provider chain) which
 synthesizes the recipe source from the page; with no provider it abstains. One
-`stage_runs` row per page records the outcome at `EXTRACTOR_VERSION` (the page
+`job_items` row per page records the outcome at `EXTRACTOR_VERSION` (the page
 is the entity here — extract consumes pages and produces recipes).
 
 The corpus reader is injected via `set_corpus_reader` (tests pass a fake); at
@@ -66,9 +66,9 @@ def _page_queue(
         "p.content_type = any(%s)",
         "p.corpus_key is not null",
         """not exists (
-            select 1 from stage_runs r
+            select 1 from job_items r
             where r.entity_type = 'page' and r.entity_id = p.id
-              and r.stage = 'extract' and r.version = %s
+              and r.stage = 'extract' and r.code_version = %s
         )""",
     ]
     params: list[Any] = [list(RECIPE_CONTENT_TYPES), EXTRACTOR_VERSION]
@@ -106,6 +106,20 @@ def _upsert_recipe(conn: psycopg.Connection, page: dict[str, Any], recipe: dict[
     )
 
 
+def _pages_by_ids(conn: psycopg.Connection, page_ids: list[int]) -> list[dict[str, Any]]:
+    """Load the explicit page members of a run (same row shape as _page_queue)."""
+    if not page_ids:
+        return []
+    rows = conn.execute(
+        "select p.id, p.url, p.site, p.corpus_key from pages p "
+        "where p.id = any(%s) order by p.id",
+        (page_ids,),
+    ).fetchall()
+    return [
+        {"id": r[0], "url": r[1], "site": r[2], "corpus_key": r[3]} for r in rows
+    ]
+
+
 def _record(conn, page_id, *, outcome, method, job, error_code=None):
     ledger.record_run(
         conn,
@@ -115,6 +129,7 @@ def _record(conn, page_id, *, outcome, method, job, error_code=None):
         version=EXTRACTOR_VERSION,
         outcome=outcome,
         method=method,
+        state=base.item_state(outcome, job.get("apply_mode") or "auto"),
         job_id=job.get("id"),
         error_code=error_code,
     )
@@ -152,7 +167,10 @@ def extract_stage_fn(
     tier, and every DB write run on the calling thread in queue order.
     """
     site, limit = base.scope(job)
-    pages = _page_queue(conn, site, limit)
+    if job.get("id"):
+        pages = _pages_by_ids(conn, base.run_item_ids(conn, job_id=job["id"], stage=STAGE))
+    else:
+        pages = _page_queue(conn, site, limit)
     counts = {"extracted": 0, "no_recipe": 0, "html_missing": 0}
     if not pages:
         return counts
@@ -182,10 +200,6 @@ def extract_stage_fn(
                 counts["extracted"] += 1
                 _record(conn, page["id"], outcome="resolved", method=method, job=job)
 
-    # Point extract's live version so needs_review / the dashboard track it.
-    # (Extract is page-keyed and its reviews are recipe-keyed, so per-recipe
-    # override re-apply isn't wired here — extract header overrides are rare.)
-    ledger.set_live_version(conn, stage=STAGE, version=EXTRACTOR_VERSION)
     return counts
 
 

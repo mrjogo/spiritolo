@@ -29,7 +29,7 @@ def _hash_stored(output) -> str:
 
 
 def test_chain_order_from_config():
-    """A stage config ['deterministic','local'] calls providers in that order;
+    """A stage config ['deterministic','lexical'] calls providers in that order;
     reordering the config reorders the calls with no code change."""
     order: list[str] = []
 
@@ -39,18 +39,18 @@ def test_chain_order_from_config():
             return {}  # abstain on everything so both tiers are reached
         return DeterministicProvider(fn)
 
-    providers = {"deterministic": recorder("deterministic"), "local": recorder("local")}
+    providers = {"deterministic": recorder("deterministic"), "lexical": recorder("lexical")}
     items = [Item("a", "vodka")]
 
-    cfg_a = load_stage_config("map", {"providers": ["deterministic", "local"], "pack_size": 1})
+    cfg_a = load_stage_config("map", {"providers": ["deterministic", "lexical"], "pack_size": 1})
     run_chain(items, cfg_a, providers)
-    assert order == ["deterministic", "local"]
+    assert order == ["deterministic", "lexical"]
 
     order.clear()
     # Only the config data changed — no code path edited between the two runs.
-    cfg_b = load_stage_config("map", {"providers": ["local", "deterministic"], "pack_size": 1})
+    cfg_b = load_stage_config("map", {"providers": ["lexical", "deterministic"], "pack_size": 1})
     run_chain(items, cfg_b, providers)
-    assert order == ["local", "deterministic"]
+    assert order == ["lexical", "deterministic"]
 
 
 def test_deterministic_short_circuits():
@@ -110,12 +110,13 @@ def test_metered_flag_and_cost():
     assert by_id["openai"].metered is True
 
 
-def test_local_tier_is_free_and_unmetered():
-    """A local (barbot/ollama) LLM tier is packed like any LLM but reports
-    zero cost and metered=false because its per-call cost is 0."""
-    local = FakeProvider(canned_map={"a": {"n": 1}}, cost_per_call=0)
-    cfg = load_stage_config("map", {"providers": ["local"], "pack_size": 10})
-    res = run_chain([Item("a", "x")], cfg, {"local": local})
+def test_local_llm_tier_is_free_and_unmetered():
+    """The local `ollama` LLM tier is packed like any LLM but reports zero cost
+    and metered=false because its per-call cost is 0. Its runtime *kind* is
+    "local" (free LLM) — a classification distinct from the provider id."""
+    ollama = FakeProvider(canned_map={"a": {"n": 1}}, cost_per_call=0)
+    cfg = load_stage_config("map", {"providers": ["ollama"], "pack_size": 10})
+    res = run_chain([Item("a", "x")], cfg, {"ollama": ollama})
     assert res.resolved == {"a": {"n": 1}}
     assert res.cost_cents == 0
     assert res.metered is False

@@ -4,7 +4,7 @@ The audit trigger (``audit.log_change``) derives ``actor_kind='worker'`` from
 the transaction-local GUC ``app.job_id`` and records ``app.source`` verbatim.
 A worker job transaction calls :func:`set_job_context` at the top of the txn so
 every mutation it makes is attributed to the originating job (and, through the
-``jobs`` row, to the ``stage_runs`` row that caused it) rather than to 'system'.
+``jobs`` row, to the ``job_items`` row that caused it) rather than to 'system'.
 
 The GUCs are set with ``set_config(..., is_local => true)`` — i.e. ``SET LOCAL``
 — so the attribution is transaction-scoped and clears automatically at

@@ -12,7 +12,7 @@ from ingredients.recipegf.version import CONVERTER_VERSION
 @pytest.fixture()
 def conn(test_db_url: str):
     with psycopg.connect(test_db_url, autocommit=True) as c:
-        for t in ("recipes", "stage_runs", "ingredient_resolutions",
+        for t in ("recipes", "job_items", "ingredient_resolutions",
                   "taxonomy_nodes", "cocktail_aliases"):
             c.execute(f"truncate {t} restart identity cascade")
         for slug, role in [("bourbon", "base_spirit"), ("simple-syrup", "sweetener"),
@@ -29,7 +29,7 @@ def conn(test_db_url: str):
                 (name, slug),
             )
         yield c
-        for t in ("recipes", "stage_runs", "ingredient_resolutions",
+        for t in ("recipes", "job_items", "ingredient_resolutions",
                   "taxonomy_nodes", "cocktail_aliases"):
             c.execute(f"truncate {t} restart identity cascade")
 
@@ -76,7 +76,7 @@ def test_convert_writes_steps_and_equipment(conn):
     assert equipment[1] == "old-fashioned"
 
     run = conn.execute(
-        "select outcome, version from stage_runs where entity_id=%s and stage='convert'", (rid,)
+        "select outcome, code_version from job_items where entity_id=%s and stage='convert'", (rid,)
     ).fetchone()
     assert run == ("resolved", CONVERTER_VERSION)
 
@@ -101,7 +101,7 @@ def test_convert_batches_across_chunk_boundary(conn):
         assert "mixing_glass" in equip[0]
         assert equip[1] == "old-fashioned"
         assert conn.execute(
-            "select outcome from stage_runs where entity_id=%s and stage='convert'", (rid,)
+            "select outcome from job_items where entity_id=%s and stage='convert'", (rid,)
         ).fetchone()[0] == "resolved"
 
 
@@ -111,6 +111,6 @@ def test_convert_pending_when_ingredient_unresolved(conn):
     assert counts["pending"] == 1
     assert conn.execute("select count(*) from recipe_steps where recipe_id=%s", (rid,)).fetchone()[0] == 0
     outcome = conn.execute(
-        "select outcome from stage_runs where entity_id=%s and stage='convert'", (rid,)
+        "select outcome from job_items where entity_id=%s and stage='convert'", (rid,)
     ).fetchone()[0]
     assert outcome == "pending"

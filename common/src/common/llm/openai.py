@@ -1,4 +1,4 @@
-"""OpenAI sync provider. Defaults to gpt-5-mini.
+"""OpenAI sync provider. Defaults to gpt-5.4-mini.
 
 For batch (50% off, ~24h SLA), see openai_batch.py.
 
@@ -7,7 +7,7 @@ so the budget must cover both the (invisible) reasoning trace and the
 (visible) output. We default to 2048 to leave headroom; for our pure
 structured-retrieval prompts we also pin `reasoning_effort='minimal'`
 so the model doesn't burn the budget thinking about a question that
-doesn't need thinking. Without these two together, gpt-5-mini routinely
+doesn't need thinking. Without these two together, gpt-5.4-mini routinely
 returns empty content with finish_reason='length'.
 """
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from .provider import ProviderResult
 
-DEFAULT_MODEL = "gpt-5-mini"
+DEFAULT_MODEL = "gpt-5.4-mini"
 DEFAULT_MAX_TOKENS = 2048
 
 
@@ -34,15 +34,35 @@ class OpenAIProvider:
     max_tokens: int = DEFAULT_MAX_TOKENS
 
     @classmethod
-    def from_env(cls, *, model_id: str = DEFAULT_MODEL) -> "OpenAIProvider":
+    def from_env(
+        cls,
+        *,
+        model_id: str = DEFAULT_MODEL,
+        base_url: str | None = None,
+        http_client: object | None = None,
+        api_key: str | None = None,
+        api_key_env: str = "OPENAI_API_KEY",
+    ) -> "OpenAIProvider":
+        """Build a provider over the OpenAI SDK.
+
+        ``base_url`` targets an OpenAI-compatible endpoint (DeepSeek reuses this
+        with ``https://api.deepseek.com``); ``http_client`` injects a pre-built
+        transport (the worker's direct-route client); ``api_key`` overrides the
+        env read (else ``api_key_env`` is consulted).
+        """
         import openai
-        api_key = os.environ.get("OPENAI_API_KEY")
-        if not api_key:
+        key = api_key or os.environ.get(api_key_env)
+        if not key:
             raise RuntimeError(
-                "OPENAI_API_KEY not set. Add it to .env or export before "
-                "running --provider openai."
+                f"{api_key_env} not set. Add it to .env or export before using "
+                "this provider."
             )
-        return cls(client=openai.OpenAI(api_key=api_key), model_id=model_id)
+        client_kwargs: dict[str, object] = {"api_key": key}
+        if base_url is not None:
+            client_kwargs["base_url"] = base_url
+        if http_client is not None:
+            client_kwargs["http_client"] = http_client
+        return cls(client=openai.OpenAI(**client_kwargs), model_id=model_id)
 
     def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
         kwargs = {

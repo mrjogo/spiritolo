@@ -1,8 +1,8 @@
 """Per-provider unit-cost lookup for the provider chain.
 
-A tier's cost is `calls * unit_cost`. Deterministic and local (barbot/ollama)
-providers cost nothing and are *not metered*; hosted providers (openai, claude,
-deepseek) carry a positive per-call cost and are metered. A provider may
+A tier's cost is `calls * unit_cost`. The `deterministic` heuristic tier and the
+local `ollama` LLM cost nothing and are *not metered*; hosted providers (openai,
+claude, deepseek) carry a positive per-call cost and are metered. A provider may
 self-report its per-call cost via a `cost_per_call` attribute (the fake seam
 uses this so tests control cost); otherwise the id-keyed default table applies.
 """
@@ -14,8 +14,6 @@ from typing import Any
 # through config/self-report, not baked into stage code.
 UNIT_COST_CENTS: dict[str, int] = {
     "deterministic": 0,
-    "local": 0,
-    "barbot": 0,
     "ollama": 0,
     "openai": 1,
     "claude": 2,

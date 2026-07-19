@@ -112,9 +112,13 @@ def convert_stage_fn(
     transaction.
     """
     site, limit = base.scope(job)
-    recipe_ids = base.recipe_queue(
-        conn, stage=STAGE, version=CONVERTER_VERSION, site=site, limit=limit
-    )
+    apply_mode = job.get("apply_mode") or "auto"
+    if job.get("id"):
+        recipe_ids = base.run_item_ids(conn, job_id=job["id"], stage=STAGE)
+    else:
+        recipe_ids = base.recipe_queue(
+            conn, stage=STAGE, version=CONVERTER_VERSION, site=site, limit=limit
+        )
     aliases = fetch_aliases_dict(conn) if recipe_ids else {}
     counts = {"converted": 0, "pending": 0, "proposes_new": 0}
 
@@ -198,7 +202,7 @@ def convert_stage_fn(
                         "update recipes set equipment = %s, recipe_slug = %s where id = %s",
                         equipment_updates,
                     )
-            base.record_many(conn, records)
+            base.record_many(conn, records, apply_mode=apply_mode)
             base.finalize_run(
                 conn, stage=STAGE, version=CONVERTER_VERSION,
                 ids=[str(r) for r in chunk],

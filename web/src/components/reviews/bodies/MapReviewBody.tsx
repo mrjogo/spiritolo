@@ -2,7 +2,7 @@ import type { StageReview } from '../ReviewCard';
 
 // Read-only body for a `map`-stage review: shows the slug the mapper proposed
 // and the ranked candidates it considered. Payload is untyped jsonb off the
-// stage_reviews row, so every field is narrowed defensively.
+// human_reviews row, so every field is narrowed defensively.
 interface MapPayload {
   proposed_slug?: unknown;
   candidates?: unknown;

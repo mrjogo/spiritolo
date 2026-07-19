@@ -1,6 +1,6 @@
 """Worker loop: boot + claim/dispatch/heartbeat/finalize tick.
 
-``boot`` runs once at process start: it invokes the batch-reconcile seam and
+``boot`` runs once at process start: it invokes the optional boot hook and
 then the reaper (requeue jobs whose heartbeat went stale — the Railway-restart
 retry story). ``tick`` is one pass of the run loop:
 
@@ -14,9 +14,9 @@ providers in tests — no live model, no live network.
 
 Idempotency + safety come from the pieces this composes: the claim is
 ``FOR UPDATE SKIP LOCKED`` (queue/claim), the reaper is a no-op on a job already
-requeued (queue/reaper), stage writes are latest-only ``stage_run`` UPSERTs
+requeued (queue/reaper), stage writes are latest-only ``job_items`` UPSERTs
 (pipeline/ledger), and ``cost_actual_cents`` is recomputed as the SUM of the
-job's ``stage_runs.cost_cents`` — so a rerun overwrites rather than accumulates.
+job's ``job_items.cost_cents`` — so a rerun overwrites rather than accumulates.
 """
 
 from __future__ import annotations
@@ -93,10 +93,10 @@ def boot(
 ) -> int:
     """Run the boot sequence once; return the number of jobs the reaper requeued.
 
-    Order matters: the batch-reconcile seam (``reconcile_hook``) runs BEFORE the
-    reaper/claim loop so a completed batch's rows exist before any dependent
-    stage claims. This function only guarantees the seam is invoked — it has no
-    batch logic of its own.
+    Order matters: the boot hook (``reconcile_hook``) runs BEFORE the
+    reaper/claim loop so any rows it produces exist before a dependent stage
+    claims. This function only guarantees the seam is invoked — it has no logic
+    of its own.
     """
     if reconcile_hook is not None:
         reconcile_hook(conn)
@@ -175,7 +175,7 @@ def _finalize_success(conn: psycopg.Connection, job: dict[str, Any], result: Any
             finished_at       = now(),
             progress          = %s,
             cost_actual_cents = coalesce(
-                (select sum(cost_cents) from stage_runs where job_id = %s), 0
+                (select sum(cost_cents) from job_items where job_id = %s), 0
             )::int
         where id = %s
         """,
@@ -185,7 +185,7 @@ def _finalize_success(conn: psycopg.Connection, job: dict[str, Any], result: Any
 
 
 def _finalize_failed(conn: psycopg.Connection, job: dict[str, Any], error_code: str) -> None:
-    # Clear any aborted-transaction state first; already-committed stage_runs
+    # Clear any aborted-transaction state first; already-committed job_items
     # (e.g. items paid for before a cost abort) survive the rollback.
     conn.rollback()
     conn.execute(
@@ -195,7 +195,7 @@ def _finalize_failed(conn: psycopg.Connection, job: dict[str, Any], error_code: 
             finished_at       = now(),
             error_code        = %s,
             cost_actual_cents = coalesce(
-                (select sum(cost_cents) from stage_runs where job_id = %s), 0
+                (select sum(cost_cents) from job_items where job_id = %s), 0
             )::int
         where id = %s
         """,
