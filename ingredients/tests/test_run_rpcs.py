@@ -264,3 +264,19 @@ def test_create_run_admin_only(conn):
             conn.execute("select create_run('map','auto')")
     finally:
         conn.execute("reset role")
+
+
+def test_estimate_cents_token_based(conn):
+    """_estimate_cents prices ~1200 input + 200 output tokens per item at each
+    provider's published $/1M rate (matches web estimateRunCents); ollama free."""
+
+    def est(provider, items):
+        return conn.execute(
+            "select _estimate_cents(%s::text, null::text, %s::int)", (provider, items)
+        ).fetchone()[0]
+
+    assert est("ollama", 1000) == 0
+    assert est("deepseek", 1000) == 22    # 1000 * (1200*0.14 + 200*0.28)/1e4
+    assert est("openai", 1000) == 70      # 1000 * (1200*0.25 + 200*2.00)/1e4
+    assert est("anthropic", 1000) == 220  # 1000 * (1200*1.00 + 200*5.00)/1e4
+    assert est(None, 1000) == 0           # unknown / no provider -> free

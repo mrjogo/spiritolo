@@ -67,16 +67,27 @@ begin
 end;
 $$;
 
--- _estimate_cents: rough per-item cost estimate for a stage on a provider. Free
--- (deterministic) work is 0; any hosted LLM tier is a nominal 1 cent/item — the
--- estimate is a confirm-modal hint, not a billing figure.
-create or replace function public._estimate_cents(p_stage text, p_provider text)
+-- _estimate_cents: token-based cost estimate for `p_items` items on a hosted LLM
+-- tier. Models ~1200 input + ~200 output tokens per item, priced at each
+-- provider's published $/1M rates (2026-07): deepseek-chat (=v4-flash non-thinking)
+-- $0.14/$0.28, gpt-5-mini $0.25/$2.00, claude-haiku-4-5 $1.00/$5.00. Local ollama
+-- is free (0). Deliberately assumes every pending item reaches the LLM tier (the
+-- deterministic tier resolves most first), so it OVER-estimates. A confirm-modal
+-- hint bounded by the run's hard cost cap — not a billing figure. Keep the token
+-- counts + rates in sync with web/src/ui/runs/llmTiers.ts (estimateRunCents).
+create or replace function public._estimate_cents(p_provider text, p_model text, p_items int)
 returns int
 language sql
 immutable
 set search_path = ''
 as $$
-  select case when p_provider is null then 0 else 1 end;
+  -- per-item cents = (in_tokens * in_$perM + out_tokens * out_$perM) / 1e4
+  select round(coalesce(p_items, 0) * case p_provider
+    when 'deepseek'  then (1200 * 0.14 + 200 * 0.28) / 10000.0
+    when 'openai'    then (1200 * 0.25 + 200 * 2.00) / 10000.0
+    when 'anthropic' then (1200 * 1.00 + 200 * 5.00) / 10000.0
+    else 0.0
+  end)::int;
 $$;
 
 -- _eligible_base: the stage's eligible pool, one row per candidate entity with
@@ -175,7 +186,7 @@ as $$
 $$;
 
 revoke all on function public._sort_clause(text, text[], text, text) from public;
-revoke all on function public._estimate_cents(text, text) from public;
+revoke all on function public._estimate_cents(text, text, int) from public;
 revoke all on function public._eligible_base(text, jsonb) from public;
 revoke all on function public._run_items_base(bigint, jsonb) from public;
 
@@ -360,12 +371,13 @@ declare
   v_state public.job_state;
   v_stage text;
   v_provider text;
+  v_model text;
   v_pending int;
 begin
   if not public.is_admin() then
     raise exception 'permission denied: not admin' using errcode = '42501';
   end if;
-  select state, stage, llm_provider into v_state, v_stage, v_provider
+  select state, stage, llm_provider, llm_model into v_state, v_stage, v_provider, v_model
   from public.jobs where id = start_run.job_id;
   if v_state is null then
     raise exception 'run % not found', start_run.job_id using errcode = '23503';
@@ -381,7 +393,7 @@ begin
   update public.jobs
   set state               = 'queued'::public.job_state,
       max_cost_cents      = start_run.max_cost_cents,
-      cost_estimate_cents = v_pending * public._estimate_cents(v_stage, v_provider),
+      cost_estimate_cents = public._estimate_cents(v_provider, v_model, v_pending),
       requires_approval   = (v_provider is not null),
       approved            = true,
       approved_by         = auth.uid(),
