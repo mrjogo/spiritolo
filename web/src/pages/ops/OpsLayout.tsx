@@ -33,6 +33,9 @@ export function OpsLayout() {
             </NavLink>
           </li>
           <li>
+            <NavLink to="/ops/runs">Runs</NavLink>
+          </li>
+          <li>
             <NavLink to="/ops/recipes">Recipes</NavLink>
           </li>
           <li>

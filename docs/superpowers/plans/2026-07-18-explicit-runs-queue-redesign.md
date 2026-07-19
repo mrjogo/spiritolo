@@ -142,6 +142,12 @@ def test_backfill_maps_outcome_to_state(conn):
 
 **Interfaces:** Produces the full RPC surface listed in the Naming contract. Consumed by all web hooks (Tasks 5–7).
 
+**Read-side contract the built web UI already assumes (must be satisfied here):**
+- A `runs` view/RPC returning per run: `id, stage, state, apply_mode, llm_provider, llm_model, task_count, flagged_count, never_run_count, failed_count, cost_estimate_cents, max_cost_cents, created_at, created_by`.
+- `eligible_pool` / `run_items` each stamp a `total_count` window column on every row (for the pager) in addition to the row fields.
+- `add_run_items` entity_type is `'recipe'` for the recipe-backed stages (`'page'` for extract).
+- Facet RPCs return `jsonb` shaped `{status:{flagged:N,...}, source:{...}}`.
+
 - [ ] **Step 1: Failing test** covering the create→add→start→apply lifecycle and the filter shape:
 
 ```python
