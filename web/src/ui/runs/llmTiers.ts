@@ -55,11 +55,12 @@ export function findTier(provider: string | null | undefined, model: string | nu
   return LLM_TIERS.find((t) => t.provider === provider && t.model === model);
 }
 
-// A deliberately naive per-item cost heuristic — a stand-in for a real
+// A deliberately naive per-item cost heuristic — the pre-start stand-in for the
 // worker-computed estimate. Free tiers cost nothing; metered tiers use a flat
-// fraction-of-a-cent per task. Only the deterministic-first/LLM-on-residue
-// residue actually bills, so this over-estimates on purpose.
-const METERED_CENTS_PER_ITEM = 0.055;
+// cent per task. This intentionally MATCHES the server's `_estimate_cents`
+// (1¢/pending item, stamped onto `cost_estimate_cents` by start_run) so the
+// draft-side estimate agrees with what Start will charge — no jump at confirm.
+const METERED_CENTS_PER_ITEM = 1;
 
 /** Estimated cents for running `taskCount` tasks on `tier`; null when the
  *  count isn't known yet. Free tiers return 0. */
