@@ -242,6 +242,15 @@ npm test                           # Vitest + @testing-library/react
 
 Main suite: [normalizeRecipe.test.ts](web/src/normalizeRecipe.test.ts) covers messy Schema.org Recipe variants. Supabase must be running on the host for the dev server to load data.
 
+**`package-lock.json` — regenerate under the CI Node version before committing it.** CI (`.github/workflows/web-ci.yml`) pins **Node 20 / npm 10** and runs `npm ci`, which *fails the whole web job* if the lock was written by a different npm major (Node 22 ships npm 11, whose lock format npm 10 rejects — surfaces as `npm error … Missing: <pkg> from lock file`). So whenever a change touches `web/package-lock.json` (a dependency add/bump, or a stray `npm install` rewriting it), before check-in regenerate + verify it under Node 20:
+
+```bash
+nvm use 20                      # match CI (nvm install 20 first if needed)
+cd web && rm -f package-lock.json && npm install && npm ci   # npm ci must pass clean
+```
+
+If you didn't intend to change dependencies, `git checkout -- web/package-lock.json` to drop an incidental rewrite rather than committing it.
+
 ## UI mockups (design phase)
 
 The preferred way to explore UI designs here is **static HTML mockups → screenshot → inspect the image**, iterating with the user before any real code:
