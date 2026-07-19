@@ -19,6 +19,8 @@ taxonomy_nodes (
   slug          text UNIQUE NOT NULL,         -- 'rye-whiskey', 'lemon', 'buffalo-trace-eagle-rare-10'
   display_name  text NOT NULL,                -- 'Rye Whiskey'
   node_kind     text CHECK (node_kind IN ('brand', 'expression')),  -- nullable; see Node kinds below
+  status        text NOT NULL DEFAULT 'live'
+                CHECK (status IN ('live', 'provisional')),  -- see Node status below
   created_at    timestamptz NOT NULL DEFAULT now()
 )
 
@@ -41,6 +43,21 @@ taxonomy_aliases (
 ```
 
 Recursive CTEs (`WITH RECURSIVE`) traverse the DAG. Add a materialized closure table only if recursion becomes a hotspot — at expected node counts (low thousands), it won't.
+
+## Node status
+
+`taxonomy_nodes.status` separates the real, placed taxonomy from stubs still
+being harmonized. A `live` node (the default) is one a curator or the
+`connect-nodes` stage has placed and promoted — it has a settled `node_kind`,
+parent edges, and `is_cluster_node` cut. A `provisional` node is a bare stub
+the `map-ingredient` stage mints mechanically when it can't resolve an
+ingredient name to an existing live node (deterministic kebab slug,
+`node_kind = NULL`, no parent), left for the `combine-nodes` (dedup) and
+`connect-nodes` (place + promote) stages to fold into the live DAG. Only
+`live` nodes are visible to `taxonomy_public` and to the downstream
+`convert-steps` / `cluster-recipes` / `export-recipegf` stages; a recipe whose
+ingredients still resolve to a provisional node produces no steps, cluster, or
+export until those nodes are promoted.
 
 ## Node kinds
 

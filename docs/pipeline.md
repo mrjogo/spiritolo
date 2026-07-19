@@ -9,7 +9,7 @@ bundle.
 Every Zone-2 stage is a `stage_fn` over the `stage_runs` work queue: a stage's
 queue is "content qualifies AND has no run at the current version," so a re-run
 only touches what a prior run left undone. Zone-2 stages run two ways — one-off
-and deterministically via the CLI (`ingredients.cli <stage>` / `cold-build`, where `<stage>` is one of `extract-recipe`, `parse-ingredients`, `map-ingredient`, `convert-steps`, `cluster-recipes`, `export-recipegf`), or
+and deterministically via the CLI (`ingredients.cli <stage>` / `cold-build`, where `<stage>` is one of `extract-recipe`, `parse-ingredients`, `map-ingredient`, `combine-nodes`, `connect-nodes`, `convert-steps`, `cluster-recipes`, `export-recipegf`), or
 continuously via the worker daemon off the `jobs` queue (which adds the LLM
 provider tiers and a per-job cost cap). Command surface and versioning live in
 [CLAUDE.md](../CLAUDE.md).
@@ -38,11 +38,13 @@ flowchart TD
         direction LR
         X["extract-recipe<br/>Recipe JSON-LD → recipes"]
         P["parse-ingredients<br/>recipeIngredient → recipe_ingredients"]
-        M["map-ingredient<br/>name → taxonomy slug"]
+        M["map-ingredient<br/>name → live node, else mint provisional"]
+        CB["combine-nodes<br/>dedup provisional nodes"]
+        CN["connect-nodes<br/>place + promote provisional → live"]
         CV["convert-steps<br/>verb-frame → recipe_steps"]
         CL["cluster-recipes<br/>dedup identity → recipe_clusters"]
         EX["export-recipegf<br/>freeze pin-2 bundle → recipe_exports"]
-        X --> P --> M --> CV --> CL --> EX
+        X --> P --> M --> CB --> CN --> CV --> CL --> EX
     end
 
     F ==>|object-store HTML| X
@@ -50,6 +52,19 @@ flowchart TD
     IR -.-> CV
     IR -.-> EX
 ```
+
+Between mapping and step conversion sit two **taxonomy-harmonization**
+stages, both keyed on the `taxonomy_node` entity. `map-ingredient` resolves
+a name to an existing **live** node or, on abstain, mechanically mints a
+`provisional` stub (deterministic slug, no parent, no LLM). `combine-nodes`
+then dedups those stubs against each other and the live set, and
+`connect-nodes` places each survivor (kind + parents + `is_cluster_node`)
+and flips it `provisional → live`; uncertain cases in either stage open a
+`human_reviews` row and leave the node provisional. Downstream stages —
+`convert-steps`, `cluster-recipes`, `export-recipegf` — treat a recipe with
+any still-`provisional` ingredient node as `pending` and emit nothing for it
+until its nodes are promoted, so provisional nodes never reach a cluster,
+a step set, an export, or the public views.
 
 Only the fetched HTML corpus and the `pages` rows are the crawl's durable
 output; everything downstream regenerates from them, so any stage is safe to

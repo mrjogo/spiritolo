@@ -56,6 +56,28 @@ describe('<ReviewCard>', () => {
     expect(screen.queryByTestId('map-review-body')).not.toBeInTheDocument();
   });
 
+  it('renders CombineReviewBody for a combine-nodes review', () => {
+    const review = makeReview({
+      stage: 'combine-nodes',
+      entity_kind: 'taxonomy_node',
+      payload: { candidates: [{ slug: 'angostura-bitters', display_name: 'Angostura Bitters', status: 'live' }] },
+    });
+    render(<ReviewCard review={review} />, { wrapper: RouterWrapper });
+    expect(screen.getByTestId('combine-review-body')).toBeInTheDocument();
+    expect(screen.queryByTestId('connect-review-body')).not.toBeInTheDocument();
+  });
+
+  it('renders ConnectReviewBody for a connect-nodes review', () => {
+    const review = makeReview({
+      stage: 'connect-nodes',
+      entity_kind: 'taxonomy_node',
+      payload: { candidate_parents: [{ slug: 'aromatic-bitters', display_name: 'Aromatic Bitters' }] },
+    });
+    render(<ReviewCard review={review} />, { wrapper: RouterWrapper });
+    expect(screen.getByTestId('connect-review-body')).toBeInTheDocument();
+    expect(screen.queryByTestId('combine-review-body')).not.toBeInTheDocument();
+  });
+
   it('shows the editable payload JSON for a stage without a body', () => {
     const review = makeReview({ stage: 'cluster-recipes', payload: { foo: 'bar' } });
     render(<ReviewCard review={review} />, { wrapper: RouterWrapper });

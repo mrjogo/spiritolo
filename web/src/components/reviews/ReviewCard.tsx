@@ -4,6 +4,8 @@ import { resolveReview, dismissReview } from '../../reviews/flagReview';
 import { CrossLink, reviewEntityHref } from '../../ui/opsLinks';
 import { MapReviewBody } from './bodies/MapReviewBody';
 import { ParseReviewBody } from './bodies/ParseReviewBody';
+import { CombineReviewBody } from './bodies/CombineReviewBody';
+import { ConnectReviewBody } from './bodies/ConnectReviewBody';
 
 // Mirrors a `human_reviews` row (the committed DB surface). Owned here because
 // the card and its per-stage bodies all key off this shape.
@@ -23,6 +25,8 @@ export interface StageReview {
 const BODIES: Record<string, ComponentType<{ review: StageReview }>> = {
   'map-ingredient': MapReviewBody,
   'parse-ingredients': ParseReviewBody,
+  'combine-nodes': CombineReviewBody,
+  'connect-nodes': ConnectReviewBody,
 };
 
 // What Resolve writes: the payload is applied by the SQL apply_review() per
