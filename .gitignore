@@ -32,6 +32,9 @@ htmlcov/
 # Brainstorm visual companion mockups
 .superpowers/
 
+# Ad-hoc UI mockups (HTML → screenshot scratch, kept local, never committed)
+.mockups/
+
 # DevPod build scratch (regenerated per `devpod up`)
 .devcontainer/.devpod-internal/
 

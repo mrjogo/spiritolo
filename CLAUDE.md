@@ -15,7 +15,7 @@ Run `cd scraper && uv run …`, `cd ingredients && uv run …`, and `cd web && n
 
 ## Workflow
 
-**PRs:** `gh pr create` against `main` (occasionally `development`). Optional one-paragraph description, up to 8 bullets. No sections, no test plan. After merge: check out main, pull, delete branch.
+**PRs:** `gh pr create` against `main` (occasionally `development`). Optional one-paragraph description, up to 8 bullets. No sections, no test plan. After merge: check out main, pull, delete branch. **Then tear down anything local you spun up for the work** — stop dev servers/workers, and if you started the local Supabase stack for this task, `supabase stop` it (and drop any ad-hoc test DBs you created). Don't leave orphaned processes or the local cluster holding ports; be a good citizen (see the shared-ports gotcha under Local environment).
 
 **Branches for AI agent sessions:** stay on the `claude/<topic>-<short-id>` branch named in the session task. Never push elsewhere.
 
@@ -241,6 +241,16 @@ npm test                           # Vitest + @testing-library/react
 ```
 
 Main suite: [normalizeRecipe.test.ts](web/src/normalizeRecipe.test.ts) covers messy Schema.org Recipe variants. Supabase must be running on the host for the dev server to load data.
+
+## UI mockups (design phase)
+
+The preferred way to explore UI designs here is **static HTML mockups → screenshot → inspect the image**, iterating with the user before any real code:
+
+1. Build the mockup(s) as plain HTML/CSS (throwaway), render each to a PNG with headless chromium (Playwright: chromium is cached under `~/.cache/ms-playwright/…`; import `playwright` and pass `executablePath`), at both desktop and mobile widths.
+2. **`Read` the PNGs** — the user reviews the rendered images inline and reacts; iterate on the HTML and re-screenshot. Don't write a markdown gallery unless asked; the Read-the-image flow is the review surface.
+3. Keep all of it in `.mockups/` (gitignored) — never commit mockup HTML/PNGs.
+
+**Caveat — images only render over the app's remote-control surface.** Inline image viewing (both you reading a PNG and the user seeing it) works in the desktop/web app when the user is driving via **remote-control**, but **not from the plain CLI**, which can't display images to the model. You generally *can't tell* which surface the user is on, so when you set out to produce screenshots for review, say so up front — if the user is on the CLI they'll tell you to switch, or ask for an alternative (e.g. a self-contained HTML file they open themselves).
 
 ## Walkthroughs (showboat)
 
