@@ -118,7 +118,10 @@ def test_auto_run_applies_only_its_members(conn):
 
 
 def test_unresolved_member_is_flagged(conn):
-    r1 = _recipe(conn, ["mystery cordial"])  # no alias, no LLM -> parked
+    # An un-slugifiable name can't mint a node, so it abstains -> the recipe stays
+    # pending -> the member is flagged. (A slugifiable miss would instead mint a
+    # provisional node and resolve.)
+    r1 = _recipe(conn, ["!!!"])  # no alias, no LLM, no valid slug -> parked
     jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]
     _start(conn, jid, [r1])
     map_stage_fn(_job(conn, jid), conn, None)  # providers None -> LLM tier skipped

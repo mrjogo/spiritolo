@@ -5,9 +5,11 @@ Resolution is name-keyed, not per recipe row: a name resolves once into
 that uses that name follows, so a taxonomy correction is a single-row edit. The
 deterministic tier is the alias + lexical layers (which return a taxonomy node
 id — joined to its slug here); misses route to the LLM tier (provider chain),
-which returns a slug or abstains. A per-recipe `job_items` row records whether
-that recipe's names are all resolved at `MAPPER_VERSION` while the resolutions
-themselves stay shared.
+which may only attach a name to an existing node or abstain. Anything still
+unresolved is mechanically minted as a provisional node (deterministic, no LLM),
+so every non-garbage name ends up resolved to a live or provisional node. A
+per-recipe `job_items` row records whether that recipe's names are all resolved
+at `MAPPER_VERSION` while the resolutions themselves stay shared.
 """
 
 from __future__ import annotations
@@ -20,12 +22,15 @@ from common.providers.packing import Item
 from ingredients.mapping.alias_layer import fetch_aliases_dict
 from ingredients.mapping.lexical_layer import resolve_lexical
 from ingredients.mapping.llm_actions import apply_llm_action
-from ingredients.mapping.resolutions import write_resolution
+from ingredients.mapping.mint import mint_provisional_node
+from ingredients.mapping.resolutions import write_abstain, write_resolution
 from ingredients.mapping.types import Resolved
 from ingredients.pipeline.stages import base
 
 STAGE = "map-ingredient"
-MAPPER_VERSION = "v1"
+# v2: map no longer proposes/auto-creates taxonomy structure. Unresolved names
+# now mint a provisional node (deterministic) instead of parking as pending.
+MAPPER_VERSION = "v2"
 
 
 def _slug_for_node(conn: psycopg.Connection, node_id: int) -> str | None:
@@ -51,11 +56,14 @@ def _resolve_names(
     conn: psycopg.Connection, names: list[str], aliases: dict[str, int], providers: Any
 ) -> None:
     """Resolve every name lacking a resolution at MAPPER_VERSION into the shared
-    table: alias -> lexical -> LLM tier -> abstain.
+    table: alias -> lexical -> LLM tier (existing node only) -> mint provisional.
 
-    The LLM tier's answer per name may choose a slug, propose a brand/expression
-    (auto-created via ``apply_llm_action``), propose a form node (queued for
-    review, leaving the name parked), or abstain."""
+    The LLM tier may only attach a name to an *existing* node (``chose_slug``) or
+    abstain; it never proposes or creates structure. Any name the three tiers
+    leave without a non-null slug is then mechanically minted as a provisional
+    node — deterministically, needing no LLM — so this final pass runs regardless
+    of whether ``providers`` was available (e.g. the CLI cold build). A name that
+    can't produce a valid kebab slug falls back to a recorded abstain."""
     pending = [n for n in names if n not in _already_resolved(conn, names)]
     llm_names: list[str] = []
     for name in pending:
@@ -85,6 +93,29 @@ def _resolve_names(
             conn, normalized_name=name, answer=resolved_by_llm.get(name),
             version=MAPPER_VERSION,
         )
+
+    _mint_unresolved(conn, pending)
+
+
+def _mint_unresolved(conn: psycopg.Connection, names: list[str]) -> None:
+    """Mint a provisional node for every name in ``names`` still without a
+    non-null resolution at MAPPER_VERSION. Deterministic — no LLM involved."""
+    if not names:
+        return
+    rows = conn.execute(
+        "select normalized_name from ingredient_resolutions "
+        "where version = %s and taxonomy_slug is not null and normalized_name = any(%s)",
+        (MAPPER_VERSION, names),
+    ).fetchall()
+    have = {r[0] for r in rows}
+    for name in names:
+        if name in have:
+            continue
+        slug = mint_provisional_node(
+            conn, normalized_name=name, version=MAPPER_VERSION
+        )
+        if slug is None:
+            write_abstain(conn, normalized_name=name, version=MAPPER_VERSION)
 
 
 def _recipe_names(conn: psycopg.Connection, recipe_id: int) -> list[str]:
@@ -134,9 +165,9 @@ def map_stage_fn(
         union_names = list({n: None for names in recipe_names.values() for n in names})
 
         # 2. Resolve the union once (shared, resolve-each-name-once). This stays
-        #    outside the chunk transaction: the shared resolution helpers
-        #    (e.g. enqueue_form_proposal) own their own commits, exactly as when
-        #    the per-recipe loop ran them under the autocommit connection.
+        #    outside the chunk transaction: the shared resolution helpers own
+        #    their own writes on the autocommit connection, exactly as when the
+        #    per-recipe loop ran them.
         _resolve_names(conn, union_names, aliases, providers)
 
         # Pin: re-stamp any human overrides the auto-resolution just clobbered,

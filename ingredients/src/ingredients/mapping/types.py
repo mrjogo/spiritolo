@@ -30,26 +30,5 @@ class Abstain:
     """Phase 2 considered the string and declined; no node assigned."""
 
 
-@dataclass(frozen=True)
-class BrandProposal:
-    """LLM proposed a new brand/expression node with an existing parent."""
-    proposed_slug: str
-    proposed_display_name: str
-    parent_node_id: int
-    role: Literal["brand", "expression"]
-
-
-@dataclass(frozen=True)
-class FormProposal:
-    """LLM proposed a new form node; goes to taxonomy_proposals queue."""
-    proposed_slug: str
-    proposed_display_name: str
-    parent_node_id: int
-    candidates: list[dict]        # [{node_id, display_name, similarity}]
-
-
 # Phase 1 layer return type.
 Phase1Result = Resolved | Pending
-
-# Phase 2 LLM-call return type.
-Phase2Result = Resolved | BrandProposal | FormProposal | Abstain

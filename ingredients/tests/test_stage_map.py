@@ -78,18 +78,24 @@ def test_resolution_is_shared_across_recipes(conn):
         assert outcome == "resolved"
 
 
-def test_unresolved_name_records_pending(conn):
+def test_unresolved_name_mints_provisional_node(conn):
+    # No live match and no providers (CLI cold-build): the name is mechanically
+    # minted as a provisional node and resolved to it.
     rid = _recipe(conn, "https://ex.test/u", ["Unobtanium"])
     counts = map_stage_fn(_job(), conn, None)
-    assert counts["pending"] == 1
+    assert counts["resolved"] == 1
     row = conn.execute(
         "select taxonomy_slug, method from ingredient_resolutions where normalized_name='unobtanium'"
     ).fetchone()
-    assert row == (None, "abstain")
+    assert row == ("unobtanium", "provisional")
+    node = conn.execute(
+        "select node_kind, status, is_cluster_node from taxonomy_nodes where slug='unobtanium'"
+    ).fetchone()
+    assert node == (None, "provisional", False)
     outcome = conn.execute(
         "select outcome from job_items where entity_id=%s and stage='map-ingredient'", (rid,)
     ).fetchone()[0]
-    assert outcome == "pending"
+    assert outcome == "resolved"
 
 
 def test_llm_tier_resolves_misses(conn):
@@ -110,8 +116,9 @@ def test_map_is_idempotent_via_ledger(conn):
 
 
 def test_chunk_boundary_matches_single_chunk(conn):
-    # Several recipes spanning multiple chunk_size=2 chunks; mix of resolvable
-    # (bourbon alias) and unresolvable names, plus a shared name across recipes.
+    # Several recipes spanning multiple chunk_size=2 chunks; mix of alias-resolved
+    # (bourbon) and mint-resolved (unobtanium) names, plus a shared name across
+    # recipes and across a chunk boundary.
     specs = [
         ("https://ex.test/c0", ["Bourbon"]),
         ("https://ex.test/c1", ["Unobtanium"]),
@@ -123,8 +130,8 @@ def test_chunk_boundary_matches_single_chunk(conn):
 
     counts = map_stage_fn(_job(), conn, None, chunk_size=2)
 
-    # c0 + c3 resolve (bourbon); c1, c2, c4 pending (unobtanium unresolved).
-    assert counts == {"resolved": 2, "pending": 3}
+    # Every name resolves now: bourbon by alias, unobtanium by mint.
+    assert counts == {"resolved": 5, "pending": 0}
 
     outcomes = {
         rid: conn.execute(
@@ -132,20 +139,22 @@ def test_chunk_boundary_matches_single_chunk(conn):
         ).fetchone()[0]
         for rid in rids
     }
-    assert outcomes == {
-        rids[0]: "resolved",
-        rids[1]: "pending",
-        rids[2]: "pending",
-        rids[3]: "resolved",
-        rids[4]: "pending",
-    }
+    assert all(o == "resolved" for o in outcomes.values())
 
-    # Shared, name-keyed: exactly one row per distinct name regardless of chunking.
+    # Shared, name-keyed: exactly one row per distinct name regardless of chunking;
+    # 'unobtanium' minted once even though it spans two chunks (c1 then c2/c4).
     rows = conn.execute(
         "select normalized_name, taxonomy_slug, method from ingredient_resolutions "
         "order by normalized_name"
     ).fetchall()
     assert rows == [
         ("bourbon", "bourbon", "alias"),
-        ("unobtanium", None, "abstain"),
+        ("unobtanium", "unobtanium", "provisional"),
     ]
+    # Exactly one provisional node for the shared unobtanium name.
+    assert (
+        conn.execute(
+            "select count(*) from taxonomy_nodes where slug='unobtanium'"
+        ).fetchone()[0]
+        == 1
+    )
