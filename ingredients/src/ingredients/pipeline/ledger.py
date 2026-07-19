@@ -1,4 +1,4 @@
-"""stage_runs run-ledger access.
+"""job_items run-ledger access.
 
 One polymorphic latest-only ledger for every pipeline stage. Three operations,
 mirroring the per-stage ``record_*`` / ``get_pending_*`` / ``clear_*`` helpers
@@ -33,10 +33,14 @@ from typing import Any, Sequence
 from psycopg.types.json import Json
 
 
-_RECORD_RUN_SQL = """
-    insert into stage_runs (
-        entity_type, entity_id, stage, version, outcome, method,
-        confidence, model_id, cost_cents, error_code, batch_id, job_id,
+# Cold-build ledger upsert (job_id IS NULL). Append-versioned: keyed on the
+# partial unique index over (entity_type, entity_id, stage, code_version) that
+# covers only the ledger rows; run-member rows (job_id NOT NULL) take the UPDATE
+# path below instead.
+_UPSERT_LEDGER_SQL = """
+    insert into job_items (
+        entity_type, entity_id, stage, code_version, outcome, method,
+        confidence, model_id, cost_cents, error_code, job_id, state,
         payload, finished_at
     )
     values (
@@ -44,22 +48,54 @@ _RECORD_RUN_SQL = """
         %s, %s, %s, %s, %s, %s,
         %s, coalesce(%s, now())
     )
-    on conflict (entity_type, entity_id, stage, version) do update set
+    on conflict (entity_type, entity_id, stage, code_version) where job_id is null
+    do update set
         outcome     = excluded.outcome,
         method      = excluded.method,
         confidence  = excluded.confidence,
         model_id    = excluded.model_id,
         cost_cents  = excluded.cost_cents,
         error_code  = excluded.error_code,
-        batch_id    = excluded.batch_id,
         job_id      = excluded.job_id,
+        state       = excluded.state,
         payload     = excluded.payload,
         started_at  = now(),
         finished_at = excluded.finished_at
 """
 
+# Run-member UPDATE (job_id IS NOT NULL). The member row was inserted 'pending'
+# by add_run_items; the worker fills in the outcome + terminal state in place,
+# keyed on membership (job_id, entity, stage), NOT on code_version — so it never
+# collides with a prior run's row for the same entity. outcome_payload (carrying
+# why_added) is deliberately left untouched.
+_UPDATE_MEMBER_SQL = """
+    update job_items set
+        code_version = %s,
+        outcome      = %s,
+        method       = %s,
+        confidence   = %s,
+        model_id     = %s,
+        cost_cents   = %s,
+        error_code   = %s,
+        state        = %s,
+        payload      = %s,
+        started_at   = now(),
+        finished_at  = coalesce(%s, now())
+    where job_id = %s and entity_type = %s and entity_id = %s and stage = %s
+"""
 
-def _record_run_params(
+
+def _default_state(outcome: str) -> str:
+    """The auto-mode terminal state for an outcome (used when a caller does not
+    pass an explicit ``state``)."""
+    if outcome == "resolved":
+        return "applied"
+    if outcome == "failed":
+        return "failed"
+    return "flagged"
+
+
+def _upsert_params(
     *,
     entity_type: str,
     entity_id: int,
@@ -67,58 +103,74 @@ def _record_run_params(
     version: str,
     outcome: str,
     method: str,
+    state: str | None = None,
     confidence: float | None = None,
     model_id: str | None = None,
     cost_cents: float | None = None,
     error_code: str | None = None,
-    batch_id: int | None = None,
     job_id: int | None = None,
     payload: Any | None = None,
     finished_at: Any | None = None,
 ) -> tuple:
     return (
         entity_type, entity_id, stage, version, outcome, method,
-        confidence, model_id, cost_cents, error_code, batch_id, job_id,
+        confidence, model_id, cost_cents, error_code, job_id,
+        state or _default_state(outcome),
         Json(payload) if payload is not None else None, finished_at,
     )
 
 
-def record_run(conn, **kwargs) -> None:
-    """UPSERT the run for ``(entity_type, entity_id, stage, version)``.
-
-    Append-versioned: re-running at the SAME version overwrites that version's
-    row in place, but a NEW version inserts a new row — so a bump keeps the prior
-    version's decision (in ``payload``) instead of destroying it. ``finished_at``
-    defaults to now() when not supplied. See ``_record_run_params`` for keywords.
-    """
-    conn.execute(_RECORD_RUN_SQL, _record_run_params(**kwargs))
-
-
-def set_live_version(conn, *, stage: str, version: str) -> None:
-    """Point ``stage`` at ``version`` as the live/materialized version.
-
-    Option-3 default: the latest run wins, so a stage upserts this to its own
-    version on every run. The deferred promote/rollback flips it deliberately.
-    """
-    conn.execute(
-        "insert into stage_live_version (stage, version) values (%s, %s) "
-        "on conflict (stage) do update set version = excluded.version",
-        (stage, version),
+def _member_params(
+    *,
+    entity_type: str,
+    entity_id: int,
+    stage: str,
+    version: str,
+    outcome: str,
+    method: str,
+    state: str | None = None,
+    confidence: float | None = None,
+    model_id: str | None = None,
+    cost_cents: float | None = None,
+    error_code: str | None = None,
+    job_id: int | None = None,
+    payload: Any | None = None,
+    finished_at: Any | None = None,
+) -> tuple:
+    return (
+        version, outcome, method, confidence, model_id, cost_cents, error_code,
+        state or _default_state(outcome),
+        Json(payload) if payload is not None else None, finished_at,
+        job_id, entity_type, entity_id, stage,
     )
 
 
+def record_run(conn, **kwargs) -> None:
+    """Record one stage outcome for an entity.
+
+    When ``job_id`` is set the entity is a run MEMBER (added by add_run_items);
+    the member row is UPDATEd in place with the outcome + terminal ``state``.
+    When ``job_id`` is None (the CLI cold-build) the row is UPSERTed into the
+    append-versioned ledger. ``finished_at`` defaults to now() when not supplied.
+    """
+    if kwargs.get("job_id") is not None:
+        conn.execute(_UPDATE_MEMBER_SQL, _member_params(**kwargs))
+    else:
+        conn.execute(_UPSERT_LEDGER_SQL, _upsert_params(**kwargs))
+
+
 def record_runs(conn, rows: Sequence[dict[str, Any]]) -> None:
-    """Batch form of ``record_run``: UPSERT one stage_runs row per dict in
-    ``rows`` (each dict is the keyword set ``record_run`` takes) in a single
-    ``executemany``. psycopg pipelines the batch, so a chunk of N recipes is one
-    round-trip's worth of latency instead of N — the whole point of chunking a
-    stage's ledger writes. The caller owns the transaction (wrap a chunk in
-    ``conn.transaction()`` so it commits once)."""
-    params = [_record_run_params(**row) for row in rows]
-    if not params:
-        return
+    """Batch form of ``record_run``: one round-trip per SQL shape. Rows with a
+    ``job_id`` UPDATE their member row; rows without one UPSERT the cold-build
+    ledger. Each group is a single ``executemany`` (psycopg pipelines the batch).
+    The caller owns the transaction (wrap a chunk in ``conn.transaction()``)."""
+    members = [r for r in rows if r.get("job_id") is not None]
+    ledger_rows = [r for r in rows if r.get("job_id") is None]
     with conn.cursor() as cur:
-        cur.executemany(_RECORD_RUN_SQL, params)
+        if members:
+            cur.executemany(_UPDATE_MEMBER_SQL, [_member_params(**r) for r in members])
+        if ledger_rows:
+            cur.executemany(_UPSERT_LEDGER_SQL, [_upsert_params(**r) for r in ledger_rows])
 
 
 def work_queue(
@@ -136,7 +188,7 @@ def work_queue(
     ``version``.
 
     The NOT-EXISTS predicate is the generalization of every ``get_pending_*``
-    query: an entity is queued when no stage_runs row exists for it at the
+    query: an entity is queued when no job_items row exists for it at the
     current version. The ledger is append-versioned (≤1 row per (entity, stage,
     version), history kept), so an entity whose only rows are at older versions
     still qualifies — the predicate keys on the current version, so prior-version
@@ -151,11 +203,11 @@ def work_queue(
         select c.id
         from {content_table} c
         where not exists (
-            select 1 from stage_runs r
+            select 1 from job_items r
             where r.entity_type = %s
               and r.entity_id   = c.id
               and r.stage       = %s
-              and r.version     = %s
+              and r.code_version = %s
         )
     """
     qparams: list[Any] = [entity_type, stage, version]
@@ -194,7 +246,7 @@ def reset(
         clauses = ["stage = %s"]
         params: list[Any] = [stage]
         if except_version is not None:
-            clauses.append("version <> %s")
+            clauses.append("code_version <> %s")
             params.append(except_version)
         if entity_type is not None:
             clauses.append("entity_type = %s")
@@ -211,7 +263,7 @@ def reset(
             params.append(site)
 
         cur = conn.execute(
-            f"delete from stage_runs where {' and '.join(clauses)}", params
+            f"delete from job_items where {' and '.join(clauses)}", params
         )
         deleted = cur.rowcount
 

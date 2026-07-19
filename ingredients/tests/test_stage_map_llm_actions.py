@@ -52,8 +52,8 @@ def conn(test_db_url: str):
 def _truncate(c: psycopg.Connection) -> None:
     for t in (
         "recipes",
-        "stage_reviews",
-        "stage_runs",
+        "human_reviews",
+        "job_items",
         "ingredient_resolutions",
         "taxonomy_provenance",
         "taxonomy_aliases",
@@ -170,7 +170,7 @@ def test_propose_form_queues_proposal_and_parks(conn):
     prop = c.execute(
         "select entity_id, stage, origin, state, "
         "payload->>'proposed_slug', (payload->>'proposed_parent_id')::bigint "
-        "from stage_reviews where entity_id = 'lemon zest' and stage = 'map'"
+        "from human_reviews where entity_id = 'lemon zest' and stage = 'map'"
     ).fetchone()
     assert prop == ("lemon zest", "map", "machine_proposal", "open",
                     "lemon-zest", ids["lemon"])
@@ -186,7 +186,7 @@ def test_propose_form_queues_proposal_and_parks(conn):
     assert slug is None or slug[0] is None
 
     outcome = c.execute(
-        "select outcome from stage_runs where entity_id = %s and stage = 'map'", (rid,)
+        "select outcome from job_items where entity_id = %s and stage = 'map'", (rid,)
     ).fetchone()[0]
     assert outcome == "pending"
 
@@ -234,6 +234,6 @@ def test_review_proposals_path_resolves(conn):
     assert res == ("lemon-zest",)
 
     state = c.execute(
-        "select state from stage_reviews where id = %s", (proposal["id"],)
+        "select state from human_reviews where id = %s", (proposal["id"],)
     ).fetchone()[0]
     assert state == "resolved"

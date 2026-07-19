@@ -28,9 +28,7 @@ export function OpsLayout() {
       <nav aria-label="ops" ref={navRef}>
         <ul>
           <li>
-            <NavLink to="/ops" end>
-              Dashboard
-            </NavLink>
+            <NavLink to="/ops/runs">Runs</NavLink>
           </li>
           <li>
             <NavLink to="/ops/recipes">Recipes</NavLink>

@@ -9,7 +9,7 @@ import { Pager } from '../../ui/Pager';
 const PAGE_SIZE = 50;
 const STUCK_CAP = 100;
 
-// needs_review reasons that are NOT an actionable stage_reviews row — the
+// needs_review reasons that are NOT an actionable human_reviews row — the
 // pipeline couldn't finish (no human/machine review to resolve yet).
 const STUCK_REASONS = new Set(['abstain', 'proposes_new', 'low_confidence']);
 

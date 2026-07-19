@@ -1,6 +1,6 @@
 """Schema-shape tests for the Postgres-as-queue tables.
 
-Asserts the ``jobs`` + ``job_batches`` migrations produce the columns,
+Asserts the ``jobs`` migrations produce the columns,
 enum, CHECKs, defaults, partial indexes, RLS + realtime membership the
 worker/UI depend on. Runs against ``TEST_DB_URL`` (skips-loud if unset,
 mirroring the taxonomy-RPC suite; the migrations conftest auto-applies
@@ -52,12 +52,16 @@ def test_jobs_shape(db_conn):
         "stage", "version", "kind", "payload", "state",
         "requires_approval", "approved", "approved_by", "approved_at",
         "cost_estimate_cents", "cost_actual_cents", "max_cost_cents",
-        "progress", "error_code", "batch_id", "worker_id",
+        "progress", "error_code", "worker_id",
         "last_heartbeat", "created_by", "created_at", "started_at",
         "finished_at",
+        # explicit-runs additions
+        "llm_provider", "llm_model", "apply_mode",
     ]
     for c in expected:
         assert c in cols, f"jobs missing column {c!r}"
+    # batch_id folded away with job_batches.
+    assert "batch_id" not in cols
 
     # state is the job_state enum.
     assert cols["state"][0] == "USER-DEFINED"
@@ -75,7 +79,10 @@ def test_jobs_shape(db_conn):
             "where t.typname = 'job_state'"
         ).fetchall()
     }
-    assert {"queued", "awaiting_approval", "running", "succeeded", "failed"} <= labels
+    assert {
+        "queued", "awaiting_approval", "running", "succeeded", "failed",
+        "draft", "done",
+    } <= labels
 
     # kind CHECK(run,reset,reconcile).
     kind_checks = [c for c in _checks(db_conn, "jobs") if "kind" in c]
@@ -105,12 +112,11 @@ def test_jobs_shape(db_conn):
     assert "state = 'queued'" in d
     assert "requires_approval" in d and "approved" in d
 
-    # batch_id FK -> job_batches.
-    fks = db_conn.execute(
-        "select confrelid::regclass::text from pg_constraint "
-        "where conrelid = 'public.jobs'::regclass and contype = 'f'"
-    ).fetchall()
-    assert any("job_batches" in r[0] for r in fks), f"no FK to job_batches in {fks}"
+    # apply_mode CHECK(auto,hold).
+    am_checks = [c for c in _checks(db_conn, "jobs") if "apply_mode" in c]
+    assert any(
+        "'auto'" in c and "'hold'" in c for c in am_checks
+    ), f"no apply_mode CHECK found in {am_checks}"
 
 
 def test_jobs_rls_and_realtime(db_conn):
@@ -139,51 +145,3 @@ def test_jobs_rls_and_realtime(db_conn):
             db_conn.execute("select * from jobs").fetchall()
     finally:
         db_conn.execute("reset role")
-
-
-# ---------------------------------------------------------------------------
-# job_batches
-# ---------------------------------------------------------------------------
-
-def test_job_batches_shape(db_conn):
-    cols = _columns(db_conn, "job_batches")
-    for c in ["provider", "provider_batch_id", "state", "custom_id_map"]:
-        assert c in cols, f"job_batches missing column {c!r}"
-
-    # provider default 'openai'.
-    pdef = db_conn.execute(
-        "select column_default from information_schema.columns "
-        "where table_schema = 'public' and table_name = 'job_batches' "
-        "and column_name = 'provider'"
-    ).fetchone()[0]
-    assert pdef is not None and "openai" in pdef
-
-    # provider_batch_id unique (constraint or unique index).
-    idx_defs = [
-        r[0].lower()
-        for r in db_conn.execute(
-            "select indexdef from pg_indexes "
-            "where schemaname = 'public' and tablename = 'job_batches'"
-        ).fetchall()
-    ]
-    assert any(
-        "provider_batch_id" in d and "unique" in d for d in idx_defs
-    ), f"no unique index on provider_batch_id in {idx_defs}"
-
-    # state CHECK(submitted,in_progress,completed,failed,ingested).
-    wanted = ["'submitted'", "'in_progress'", "'completed'", "'failed'", "'ingested'"]
-    assert any(
-        all(s in c for s in wanted) for c in _checks(db_conn, "job_batches")
-    ), "no state CHECK covering all five batch states"
-
-    # custom_id_map jsonb.
-    assert cols["custom_id_map"][0] == "jsonb"
-
-    # Partial open index scoped to submitted/in_progress.
-    open_idx = db_conn.execute(
-        "select indexdef from pg_indexes "
-        "where schemaname = 'public' and indexname = 'job_batches_open_idx'"
-    ).fetchone()
-    assert open_idx is not None, "job_batches_open_idx missing"
-    od = open_idx[0].lower()
-    assert "submitted" in od and "in_progress" in od

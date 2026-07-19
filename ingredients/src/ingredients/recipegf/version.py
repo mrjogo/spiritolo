@@ -6,7 +6,7 @@ keyword table, step templates, slug-minting rules, ingredient/unit handling,
 the id encoding version, or the set of spiritolo/ extension verbs emitted.
 
 Bumping requires re-running the export stage (``ingredients.cli export``):
-delete the export stage's ``stage_runs`` rows (or rely on the version bump
+delete the export stage's ``job_items`` rows (or rely on the version bump
 itself) so prior-version bundles fall back onto the export work queue.
 
 This is a distinct axis from the recipe-id ``:vN`` encoding version (which

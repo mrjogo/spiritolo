@@ -5,7 +5,7 @@ resolution + verb-defs (`generate_bundle`), then FREEZES that snapshot into
 `recipe_exports` (keyed by recipe + converter version) — the live representation
 stays generated-on-demand and current with the taxonomy; only the published
 snapshot is frozen. The minted slug is written back to `recipes.recipe_slug` so
-the drink's identity is stable across regenerations. One `stage_runs` row records
+the drink's identity is stable across regenerations. One `job_items` row records
 the outcome at `CONVERTER_VERSION`: `resolved` (frozen), `pending` (an
 ingredient isn't resolved yet — comes back after the map stage), or `failed`
 (a seam violation, e.g. an unbuildable recipe).
@@ -58,9 +58,13 @@ def export_stage_fn(
     UPDATEs, and ledger rows flush together in one transaction.
     """
     site, limit = base.scope(job)
-    recipe_ids = base.recipe_queue(
-        conn, stage=STAGE, version=CONVERTER_VERSION, site=site, limit=limit
-    )
+    apply_mode = job.get("apply_mode") or "auto"
+    if job.get("id"):
+        recipe_ids = base.run_item_ids(conn, job_id=job["id"], stage=STAGE)
+    else:
+        recipe_ids = base.recipe_queue(
+            conn, stage=STAGE, version=CONVERTER_VERSION, site=site, limit=limit
+        )
     imported_at = datetime.now(timezone.utc).isoformat()
     counts = {"exported": 0, "pending": 0, "failed": 0}
 
@@ -105,5 +109,5 @@ def export_stage_fn(
                 with conn.cursor() as cur:
                     cur.executemany(_FREEZE_EXPORT_SQL, export_rows)
                     cur.executemany(_FREEZE_SLUG_SQL, slug_updates)
-            base.record_many(conn, records)
+            base.record_many(conn, records, apply_mode=apply_mode)
     return counts

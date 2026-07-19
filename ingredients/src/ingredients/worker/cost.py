@@ -12,7 +12,7 @@ immediately without ever consulting the cap, so a free chain is uncapped even
 under a zero budget. That is the ``test_free_stage_no_cap_check`` invariant.
 
 The meter is the *enforcement* mechanism; the durable truth of what was spent is
-the sum of ``stage_runs.cost_cents`` the worker rolls up into
+the sum of ``job_items.cost_cents`` the worker rolls up into
 ``jobs.cost_actual_cents`` afterwards. The two agree, but the ledger — not the
 meter — is authoritative.
 """

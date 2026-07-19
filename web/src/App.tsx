@@ -21,9 +21,6 @@ const Taxonomy = lazy(() =>
 const OpsLayout = lazy(() =>
   import('./pages/ops/OpsLayout').then((m) => ({ default: m.OpsLayout })),
 );
-const OpsDashboard = lazy(() =>
-  import('./pages/ops/Dashboard').then((m) => ({ default: m.Dashboard })),
-);
 const OpsRecipesBrowser = lazy(() =>
   import('./pages/ops/RecipesBrowser').then((m) => ({ default: m.RecipesBrowser })),
 );
@@ -41,6 +38,15 @@ const OpsExportsBrowser = lazy(() =>
 );
 const OpsReviewsBrowser = lazy(() =>
   import('./pages/ops/ReviewsBrowser').then((m) => ({ default: m.ReviewsBrowser })),
+);
+const OpsRunsList = lazy(() =>
+  import('./pages/ops/runs/RunsList').then((m) => ({ default: m.RunsList })),
+);
+const OpsRunDetail = lazy(() =>
+  import('./pages/ops/runs/RunDetail').then((m) => ({ default: m.RunDetail })),
+);
+const OpsAddTasks = lazy(() =>
+  import('./pages/ops/runs/AddTasks').then((m) => ({ default: m.AddTasks })),
 );
 
 function OpsChunkFallback() {
@@ -124,7 +130,7 @@ export default function App() {
                 index
                 element={
                   <Suspense fallback={<OpsChunkFallback />}>
-                    <OpsDashboard />
+                    <OpsRunsList />
                   </Suspense>
                 }
               />
@@ -173,6 +179,30 @@ export default function App() {
                 element={
                   <Suspense fallback={<OpsChunkFallback />}>
                     <OpsReviewsBrowser />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="runs"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsRunsList />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="runs/:id"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsRunDetail />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="runs/:id/add"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsAddTasks />
                   </Suspense>
                 }
               />

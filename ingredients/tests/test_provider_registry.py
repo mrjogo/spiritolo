@@ -26,8 +26,8 @@ def test_registers_only_hosted_providers_with_credentials():
 
     assert set(impls) == {"ollama", "openai", "deepseek"}
     assert isinstance(impls["deepseek"], OpenAIProvider)
-    assert impls["deepseek"].model_id == "deepseek-chat"
-    assert impls["openai"].model_id == "gpt-5-mini"
+    assert impls["deepseek"].model_id == "deepseek-v4-flash"
+    assert impls["openai"].model_id == "gpt-5.4-mini"
 
 
 def test_all_providers_registered_when_all_keys_present():

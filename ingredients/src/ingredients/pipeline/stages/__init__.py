@@ -1,9 +1,9 @@
 """Pipeline stages as `stage_fn(job, conn, providers)` callables.
 
-Each stage is a versioned function over the `stage_runs` ledger: it resolves its
+Each stage is a versioned function over the `job_items` ledger: it resolves its
 work queue ("content qualifies AND no run at the current version"), does its
 work over a provider chain (deterministic tier first, LLM tier for abstains),
-writes its content rows, and UPSERTs one `stage_runs` row per entity. Importing
+writes its content rows, and UPSERTs one `job_items` row per entity. Importing
 this package registers every stage into `worker.dispatch.STAGE_FNS`, so the
 worker (and the cold-build orchestrator) can dispatch by stage name.
 """

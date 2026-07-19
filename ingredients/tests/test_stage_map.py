@@ -29,7 +29,7 @@ class _FakeChain:
 @pytest.fixture()
 def conn(test_db_url: str):
     with psycopg.connect(test_db_url, autocommit=True) as c:
-        for t in ("recipes", "stage_runs", "ingredient_resolutions", "taxonomy_nodes"):
+        for t in ("recipes", "job_items", "ingredient_resolutions", "taxonomy_nodes"):
             c.execute(f"truncate {t} restart identity cascade")
         nid = c.execute(
             "insert into taxonomy_nodes (slug, display_name, default_role) "
@@ -37,7 +37,7 @@ def conn(test_db_url: str):
         ).fetchone()[0]
         c.execute("insert into taxonomy_aliases (node_id, alias) values (%s, 'bourbon')", (nid,))
         yield c
-        for t in ("recipes", "stage_runs", "ingredient_resolutions", "taxonomy_nodes"):
+        for t in ("recipes", "job_items", "ingredient_resolutions", "taxonomy_nodes"):
             c.execute(f"truncate {t} restart identity cascade")
 
 
@@ -73,7 +73,7 @@ def test_resolution_is_shared_across_recipes(conn):
 
     for rid in (a, b):
         outcome = conn.execute(
-            "select outcome from stage_runs where entity_id=%s and stage='map'", (rid,)
+            "select outcome from job_items where entity_id=%s and stage='map'", (rid,)
         ).fetchone()[0]
         assert outcome == "resolved"
 
@@ -87,7 +87,7 @@ def test_unresolved_name_records_pending(conn):
     ).fetchone()
     assert row == (None, "abstain")
     outcome = conn.execute(
-        "select outcome from stage_runs where entity_id=%s and stage='map'", (rid,)
+        "select outcome from job_items where entity_id=%s and stage='map'", (rid,)
     ).fetchone()[0]
     assert outcome == "pending"
 
@@ -128,7 +128,7 @@ def test_chunk_boundary_matches_single_chunk(conn):
 
     outcomes = {
         rid: conn.execute(
-            "select outcome from stage_runs where entity_id=%s and stage='map'", (rid,)
+            "select outcome from job_items where entity_id=%s and stage='map'", (rid,)
         ).fetchone()[0]
         for rid in rids
     }

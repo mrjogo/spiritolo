@@ -16,7 +16,7 @@ from ingredients.pipeline.stages.cluster import cluster_stage_fn
 @pytest.fixture()
 def conn(test_db_url: str):
     with psycopg.connect(test_db_url, autocommit=True) as c:
-        for t in ("recipes", "stage_runs", "ingredient_resolutions",
+        for t in ("recipes", "job_items", "ingredient_resolutions",
                   "recipe_clusters", "taxonomy_nodes", "cocktail_aliases"):
             c.execute(f"truncate {t} restart identity cascade")
         for slug, role in [("gin", "base_spirit"), ("campari", "modifier"),
@@ -34,7 +34,7 @@ def conn(test_db_url: str):
                 (name, slug),
             )
         yield c
-        for t in ("recipes", "stage_runs", "ingredient_resolutions",
+        for t in ("recipes", "job_items", "ingredient_resolutions",
                   "recipe_clusters", "taxonomy_nodes", "cocktail_aliases"):
             c.execute(f"truncate {t} restart identity cascade")
 
@@ -124,7 +124,7 @@ def test_chunk_boundary_matches_single_chunk(conn):
 
     # One resolved stage_run per recipe at the current version.
     runs = conn.execute(
-        "select entity_id, outcome, version from stage_runs where stage='cluster' order by entity_id"
+        "select entity_id, outcome, code_version from job_items where stage='cluster' order by entity_id"
     ).fetchall()
     assert [r[0] for r in runs] == sorted(rids)
     assert all(r[1] == "resolved" and r[2] == DEDUP_VERSION for r in runs)
@@ -136,6 +136,6 @@ def test_cluster_is_idempotent_via_ledger(conn):
     assert cluster_stage_fn(_job(), conn, None) == {"clustered": 0}
     # The stage_run is at the current DEDUP_VERSION.
     v = conn.execute(
-        "select version from stage_runs where stage='cluster' limit 1"
+        "select code_version from job_items where stage='cluster' limit 1"
     ).fetchone()[0]
     assert v == DEDUP_VERSION

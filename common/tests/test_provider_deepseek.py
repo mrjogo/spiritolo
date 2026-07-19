@@ -21,14 +21,14 @@ def test_build_targets_deepseek_base_url_and_model(monkeypatch):
     provider = build_deepseek_provider(api_key="sk-deepseek", http_client=http)
 
     assert isinstance(provider, OpenAIProvider)
-    assert provider.model_id == DEEPSEEK_DEFAULT_MODEL == "deepseek-chat"
+    assert provider.model_id == DEEPSEEK_DEFAULT_MODEL == "deepseek-v4-flash"
     assert captured["api_key"] == "sk-deepseek"
     assert captured["base_url"] == DEEPSEEK_BASE_URL == "https://api.deepseek.com"
     assert captured["http_client"] is http
 
 
 def test_non_gpt5_model_omits_reasoning_effort(monkeypatch):
-    """deepseek-chat is not a gpt-5 model, so the OpenAI resolve path must not
+    """deepseek-v4-flash is not a gpt-5 model, so the OpenAI resolve path must not
     send ``reasoning_effort`` (DeepSeek would reject it)."""
     from unittest.mock import MagicMock
 
