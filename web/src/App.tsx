@@ -21,9 +21,6 @@ const Taxonomy = lazy(() =>
 const OpsLayout = lazy(() =>
   import('./pages/ops/OpsLayout').then((m) => ({ default: m.OpsLayout })),
 );
-const OpsDashboard = lazy(() =>
-  import('./pages/ops/Dashboard').then((m) => ({ default: m.Dashboard })),
-);
 const OpsRecipesBrowser = lazy(() =>
   import('./pages/ops/RecipesBrowser').then((m) => ({ default: m.RecipesBrowser })),
 );
@@ -133,7 +130,7 @@ export default function App() {
                 index
                 element={
                   <Suspense fallback={<OpsChunkFallback />}>
-                    <OpsDashboard />
+                    <OpsRunsList />
                   </Suspense>
                 }
               />

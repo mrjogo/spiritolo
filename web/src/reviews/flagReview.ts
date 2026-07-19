@@ -11,7 +11,7 @@ export interface FlagReviewArgs {
   note?: string;
 }
 
-// Open a human_flag review; resolves to the new stage_reviews.id (bigint).
+// Open a human_flag review; resolves to the new human_reviews.id (bigint).
 export async function flagReview(a: FlagReviewArgs): Promise<number> {
   const { data, error } = await supabase.rpc('flag_review', {
     p_entity_kind: a.entityKind,

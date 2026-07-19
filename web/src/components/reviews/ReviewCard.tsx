@@ -5,7 +5,7 @@ import { CrossLink, reviewEntityHref } from '../../ui/opsLinks';
 import { MapReviewBody } from './bodies/MapReviewBody';
 import { ParseReviewBody } from './bodies/ParseReviewBody';
 
-// Mirrors a `stage_reviews` row (the committed DB surface). Owned here because
+// Mirrors a `human_reviews` row (the committed DB surface). Owned here because
 // the card and its per-stage bodies all key off this shape.
 export interface StageReview {
   id: number;
@@ -18,7 +18,7 @@ export interface StageReview {
   note: string | null;
 }
 
-// Per-stage read-only summary bodies, keyed by `stage_reviews.stage`. A stage
+// Per-stage read-only summary bodies, keyed by `human_reviews.stage`. A stage
 // without a registered body just shows the editable payload below.
 const BODIES: Record<string, ComponentType<{ review: StageReview }>> = {
   map: MapReviewBody,

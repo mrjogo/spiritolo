@@ -19,7 +19,7 @@ interface StageRunListRow {
   entity_type: string;
   entity_id: number;
   stage: string;
-  version: string;
+  code_version: string;
   outcome: string;
   method: string;
   cost_cents: number | null;
@@ -39,7 +39,7 @@ interface StageRunDetailRow extends StageRunListRow {
 const OUTCOMES = ['resolved', 'abstain', 'pending', 'failed', 'proposes_new'];
 
 const LIST_SELECT =
-  'id, entity_type, entity_id, stage, version, outcome, method, cost_cents, started_at';
+  'id, entity_type, entity_id, stage, code_version, outcome, method, cost_cents, started_at';
 
 const COLUMNS: DataTableColumn<StageRunListRow>[] = [
   { key: 'id', header: 'id' },
@@ -53,7 +53,7 @@ const COLUMNS: DataTableColumn<StageRunListRow>[] = [
         ? <CrossLink to={recipeHref(r.entity_id)}>{r.entity_id}</CrossLink>
         : r.entity_id,
   },
-  { key: 'version', header: 'version' },
+  { key: 'code_version', header: 'version' },
   { key: 'outcome', header: 'outcome', render: (r) => <StatusPill kind={r.outcome} /> },
   {
     key: 'cost_cents',
@@ -94,10 +94,10 @@ export function StageRunsBrowser() {
   const filters: PostgrestFilter[] = [];
   if (stage) filters.push({ col: 'stage', op: 'eq', value: stage });
   if (outcome) filters.push({ col: 'outcome', op: 'eq', value: outcome });
-  if (version) filters.push({ col: 'version', op: 'eq', value: version });
+  if (version) filters.push({ col: 'code_version', op: 'eq', value: version });
 
   const { rows, total } = usePagedQuery<StageRunListRow>({
-    table: 'stage_runs',
+    table: 'job_items',
     select: LIST_SELECT,
     filters,
     order: { col: 'id', asc: false },
@@ -148,7 +148,7 @@ function StageRunDetail({ id }: { id: string | null }) {
     queryKey: ['stageRunDetail', id],
     queryFn: async () => {
       const { data, error } = await supabase
-        .from('stage_runs')
+        .from('job_items')
         .select('*')
         .eq('id', Number(id))
         .maybeSingle();
@@ -182,7 +182,7 @@ function StageRunDetail({ id }: { id: string | null }) {
         </dd>
         <dt>stage / version</dt>
         <dd>
-          <CrossLink to={stageRunsHref(row.stage)}>{row.stage}</CrossLink> @ {row.version}
+          <CrossLink to={stageRunsHref(row.stage)}>{row.stage}</CrossLink> @ {row.code_version}
         </dd>
         <dt>method</dt>
         <dd>{row.method}{row.model_id ? ` (${row.model_id})` : ''}</dd>

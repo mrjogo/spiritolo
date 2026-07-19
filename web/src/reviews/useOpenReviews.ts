@@ -2,10 +2,10 @@ import { useQuery } from '@tanstack/react-query';
 import { supabase } from '../supabase';
 import type { StageReview } from '../components/reviews/ReviewCard';
 
-// Full open stage_reviews rows — the actionable queue (human flags + machine
+// Full open human_reviews rows — the actionable queue (human flags + machine
 // proposals) an admin can resolve or dismiss. Distinct from `needs_review`,
 // which also surfaces non-actionable pipeline gaps (abstains) that have no
-// stage_reviews row. Admin-only read is enforced by the table's RLS policy.
+// human_reviews row. Admin-only read is enforced by the table's RLS policy.
 export async function fetchOpenReviews(
   page = 1,
   pageSize = 50,
@@ -13,7 +13,7 @@ export async function fetchOpenReviews(
   const from = (page - 1) * pageSize;
   const to = from + pageSize - 1;
   const { data, count, error } = await supabase
-    .from('stage_reviews')
+    .from('human_reviews')
     .select('id, entity_kind, entity_id, stage, state, origin, payload, note', {
       count: 'exact',
     })

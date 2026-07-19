@@ -14,7 +14,7 @@ function renderAt(path: string) {
         <Route path="/recipes" element={<div>recipes-page</div>} />
         <Route element={<RequireAdmin />}>
           <Route path="/ops" element={<OpsLayout />}>
-            <Route index element={<div>dashboard-child</div>} />
+            <Route index element={<div>runs-child</div>} />
           </Route>
         </Route>
       </Routes>
@@ -27,15 +27,15 @@ describe('<OpsLayout>', () => {
     useIsAdminMock.mockReturnValue({ isAdmin: false, isLoading: false });
     renderAt('/ops');
     expect(screen.getByText('recipes-page')).toBeInTheDocument();
-    expect(screen.queryByText('dashboard-child')).not.toBeInTheDocument();
+    expect(screen.queryByText('runs-child')).not.toBeInTheDocument();
   });
 
   it('renders the left nav and the Outlet child for an admin', () => {
     useIsAdminMock.mockReturnValue({ isAdmin: true, isLoading: false });
     renderAt('/ops');
     expect(screen.getByRole('navigation', { name: /ops/i })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /dashboard/i })).toBeInTheDocument();
-    expect(screen.getByText('dashboard-child')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^runs$/i })).toHaveAttribute('href', '/ops/runs');
+    expect(screen.getByText('runs-child')).toBeInTheDocument();
   });
 
   it('links to every /ops DB browser', () => {
