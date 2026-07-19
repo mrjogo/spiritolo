@@ -136,6 +136,7 @@ def test_cold_build_produces_bundle_and_one_run_per_stage(conn):
     # Every content stage ran.
     assert set(STAGE_ORDER) == {
         "extract-recipe", "parse-ingredients", "map-ingredient",
+        "combine-nodes", "connect-nodes",
         "convert-steps", "cluster-recipes", "export-recipegf",
     }
 

@@ -198,6 +198,42 @@ def record(
     )
 
 
+def record_node(
+    conn: psycopg.Connection,
+    *,
+    node_id: int,
+    stage: str,
+    version: str,
+    outcome: str,
+    method: str,
+    job_id: int | None = None,
+    cost_cents: float | None = None,
+    model_id: str | None = None,
+    error_code: str | None = None,
+    payload: Any | None = None,
+) -> None:
+    """Record a taxonomy node's `job_items` outcome for this stage/version.
+
+    The node analogue of ``record`` — used by the harmonization stages
+    (``combine-nodes`` / ``connect-nodes``) whose entity is a ``taxonomy_node``,
+    not a recipe. Same run-member vs cold-build UPSERT semantics."""
+    ledger.record_run(
+        conn,
+        entity_type=ENTITY_TAXONOMY_NODE,
+        entity_id=node_id,
+        stage=stage,
+        version=version,
+        outcome=outcome,
+        method=method,
+        state=item_state(outcome),
+        job_id=job_id,
+        cost_cents=cost_cents,
+        model_id=model_id,
+        error_code=error_code,
+        payload=payload,
+    )
+
+
 def finalize_run(
     conn: psycopg.Connection, *, stage: str, version: str, ids: Sequence[str]
 ) -> None:
