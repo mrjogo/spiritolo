@@ -179,6 +179,19 @@ export function AddTasks() {
           </div>
         )}
 
+        {/* The table header (with its select-all) is hidden on mobile where rows
+            linearize into cards, so surface a select-all control that stays
+            visible there. */}
+        <label className="runs-mobile-selectall">
+          <input
+            type="checkbox"
+            aria-label="select all on page (mobile)"
+            checked={allVisibleSelected}
+            onChange={toggleAllVisible}
+          />
+          Select all on page
+        </label>
+
         <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>

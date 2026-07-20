@@ -558,7 +558,45 @@
     padding: 10px 12px;
   }
   .runs-batchbar { flex-wrap: wrap; }
-  .runs-popover { left: 8px; right: 8px; width: auto; }
+  /* Filter dropdowns become a bottom-sheet — an absolutely-positioned dropdown
+     was clipped by the viewport on mobile. */
+  .runs-popover {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: auto;
+    max-height: 75vh;
+    overflow-y: auto;
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -14px 34px rgba(16, 21, 33, 0.22);
+    animation: runs-sheet-up 0.18s ease-out;
+  }
+  .runs-pfoot {
+    position: sticky;
+    bottom: 0;
+    background: var(--ops-surface);
+  }
+  /* The table header's select-all is hidden with the <thead> on mobile; show
+     the standalone control instead. */
+  .runs-mobile-selectall { display: flex; }
+}
+
+@keyframes runs-sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+/* Standalone mobile select-all: hidden on desktop (the table header has it). */
+.runs-mobile-selectall {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 2px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--runs-slate);
 }
 
 /* --- Run states added with the cockpit (cancel lifecycle) --------------- */
