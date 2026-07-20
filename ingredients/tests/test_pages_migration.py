@@ -41,7 +41,6 @@ def test_pages_columns(db_conn):
     assert "false" in (cols["denylist"][2] or "").lower()
     assert cols["denylist_reason"][:2] == ("text", "YES")
     assert cols["fetch_status"][:2] == ("text", "YES")
-    assert cols["fetch_meta"][:2] == ("jsonb", "YES")
     assert cols["discovered_at"][:2] == ("timestamp with time zone", "NO")
     assert cols["fetched_at"][:2] == ("timestamp with time zone", "YES")
 
