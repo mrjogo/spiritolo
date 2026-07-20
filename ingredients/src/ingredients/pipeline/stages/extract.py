@@ -32,8 +32,8 @@ STAGE = "extract-recipe"
 EXTRACTOR_VERSION = "v1"
 
 # Page classification labels the extract queue accepts — the Zone-1 classifier's
-# recipe verdicts (mirrors scraper.db.EXTRACT_CONTENT_TYPES; ingredients doesn't
-# depend on scraper, so the values are duplicated rather than imported).
+# recipe verdicts. Duplicated here rather than imported: ingredients doesn't
+# depend on scraper.
 RECIPE_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink")
 
 # Corpus GETs are the extract bottleneck (one network round-trip per page), so
