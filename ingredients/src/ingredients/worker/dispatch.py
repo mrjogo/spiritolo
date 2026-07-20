@@ -9,7 +9,7 @@ A ``stage_fn`` has the signature ``fn(job, conn, providers)`` where:
   - ``job``       is the claimed job row (a dict with ``stage`` / ``payload`` /
                   ``id`` / ``max_cost_cents`` / …),
   - ``conn``      is the worker's psycopg connection (the stage writes its
-                  ``stage_run`` UPSERTs through it),
+                  ``job_items`` UPSERTs through it),
   - ``providers`` is the run's ``ProviderChain`` (its chosen LLM tier, bound to
                   the job's cost meter) or ``None`` for a run that needs none.
 
