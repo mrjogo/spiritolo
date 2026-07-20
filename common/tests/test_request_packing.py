@@ -5,11 +5,13 @@ re-map to inputs by id (order-independent); a packed call where some items
 error parks exactly those and resolves the rest; a re-run re-submits only
 the parked ones.
 
-Pure Python — the LLM seam is FakeProvider.
+Exercises ``common.providers.packing.run_packed`` directly (the config-driven
+chain seam is gone; packing is now the unit under test). Pure Python — the LLM
+seam is FakeProvider.
 """
 from __future__ import annotations
 
-from common.providers import FakeProvider, Item, load_stage_config, run_chain
+from common.providers import FakeProvider, Item, run_packed
 
 
 def test_packs_n_items_per_call():
@@ -18,16 +20,14 @@ def test_packs_n_items_per_call():
     items = [Item(f"i{n}", f"name{n}") for n in range(25)]
     canned = {f"i{n}": {"idx": n} for n in range(25)}
     fake = FakeProvider(canned_map=canned, cost_per_call=1)
-    cfg = load_stage_config("map", {"providers": ["openai"], "pack_size": 10})
 
-    res = run_chain(items, cfg, {"openai": fake})
+    resolved, parked, calls = run_packed(fake, items, 10)
 
-    assert fake.calls == 3  # ceil(25 / 10)
+    assert calls == 3  # ceil(25 / 10)
     # id-keyed re-map: each item carries its own answer despite the fake
     # emitting each chunk's answers in reversed order.
-    assert res.resolved == canned
-    assert res.parked == []
-    assert res.cost_cents == 3  # 3 calls * 1 cent
+    assert resolved == canned
+    assert parked == []
 
 
 def test_partial_failure_parks_right_items():
@@ -38,21 +38,20 @@ def test_partial_failure_parks_right_items():
     bad = {"i3", "i7"}
 
     fake = FakeProvider(canned_map=canned, cost_per_call=1, raises_for=bad)
-    cfg = load_stage_config("map", {"providers": ["openai"], "pack_size": 10})
-    res = run_chain(items, cfg, {"openai": fake})
+    resolved, parked, calls = run_packed(fake, items, 10)
 
-    assert fake.calls == 1  # single packed call over all 10
-    assert set(res.resolved) == set(canned) - bad  # 8 resolved
-    assert set(res.parked) == bad  # exactly the 2 that errored
+    assert calls == 1  # single packed call over all 10
+    assert set(resolved) == set(canned) - bad  # 8 resolved
+    assert set(parked) == bad  # exactly the 2 that errored
     for n in range(10):
         if f"i{n}" not in bad:
-            assert res.resolved[f"i{n}"] == {"idx": n}
+            assert resolved[f"i{n}"] == {"idx": n}
 
     # Re-run re-submits ONLY the parked items (now healthy).
-    parked_items = [it for it in items if it.id in res.parked]
+    parked_items = [it for it in items if it.id in parked]
     fake2 = FakeProvider(canned_map=canned, cost_per_call=1)  # no forced failures
-    res2 = run_chain(parked_items, cfg, {"openai": fake2})
+    resolved2, parked2, calls2 = run_packed(fake2, parked_items, 10)
 
-    assert fake2.calls == 1
-    assert set(res2.resolved) == bad  # only the 2 re-submitted, now resolved
-    assert res2.parked == []
+    assert calls2 == 1
+    assert set(resolved2) == bad  # only the 2 re-submitted, now resolved
+    assert parked2 == []

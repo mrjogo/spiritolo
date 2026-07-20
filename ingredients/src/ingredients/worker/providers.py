@@ -1,20 +1,29 @@
-"""Config-not-code provider chain for the worker.
+"""The worker's run-driven provider chain.
 
-``ProviderChain`` wires a stage's ordered provider tiers (from external config,
-never DB schema) into a single ``resolve(items)`` call that:
+A run selects its LLM tier at assembly time (``jobs.llm_provider`` +
+``jobs.llm_model``); the worker builds exactly that one provider and wraps it in
+a ``ProviderChain``. Deterministic tiers (alias / lexical) are NOT wired here —
+they live inside each stage_fn (e.g. ``map._resolve_names``), which resolves
+what it can deterministically first and only hands the residue to the chain. So
+the chain is a single LLM tier plus per-call cost enforcement.
 
-- **short-circuits** — once every item is resolved, later tiers' providers are
-  never touched;
+``ProviderChain.resolve(items)``:
+
+- **short-circuits** — once every item is resolved, later tiers are never
+  touched (with one LLM tier this simply means an empty ``items`` is a no-op);
 - **packs** LLM tiers — many items per request, re-mapped to entity ids by
   custom id (order-independent), so a partial provider failure parks only the
   failed items;
 - **meters cost** — before each metered call it charges the job's ``CostMeter``,
   which raises ``CostCapExceeded`` if the call would breach ``max_cost_cents``.
-  Deterministic / local tiers are free and never consult the cap.
+  Local (``ollama``) tiers are free and never consult the cap.
 
 It reuses the ``common.providers`` primitives (cost table, request packing, the
-``ChainResult``/``TierResult`` shapes) rather than re-deriving them — the worker
-layer only adds per-call cost enforcement on top of the shared chain semantics.
+``ChainResult`` / ``TierResult`` shapes) rather than re-deriving them.
+
+``pack_size`` — how many items an LLM tier bundles per call — is a per-stage code
+constant (``STAGE_PACK_SIZE``, default ``DEFAULT_PACK_SIZE``), the one knob the
+old external chain config carried that survives.
 """
 
 from __future__ import annotations
@@ -23,28 +32,50 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from common.providers import ChainResult, TierResult, cost as _cost, packing as _packing
-from common.providers.config import StageChainConfig, load_chain_configs
 from common.providers.packing import Item
 
 from ingredients.worker.cost import CostMeter
 
+# How many items an LLM tier packs per call, per stage. LLM stages default to
+# DEFAULT_PACK_SIZE; a stage not listed here uses the default. (This is the one
+# knob the removed external chain config carried — now a code constant.)
+DEFAULT_PACK_SIZE = 10
+STAGE_PACK_SIZE: dict[str, int] = {
+    "extract-recipe": DEFAULT_PACK_SIZE,
+    "parse-ingredients": DEFAULT_PACK_SIZE,
+    "map-ingredient": DEFAULT_PACK_SIZE,
+    "combine-nodes": DEFAULT_PACK_SIZE,
+    "connect-nodes": DEFAULT_PACK_SIZE,
+    "convert-steps": DEFAULT_PACK_SIZE,
+    "cluster-recipes": DEFAULT_PACK_SIZE,
+    "export-recipegf": DEFAULT_PACK_SIZE,
+}
+
+
+def pack_size_for(stage: str) -> int:
+    """The LLM pack size for ``stage`` (``DEFAULT_PACK_SIZE`` if unlisted)."""
+    return STAGE_PACK_SIZE.get(stage, DEFAULT_PACK_SIZE)
+
 
 @dataclass
 class ProviderChain:
-    """A stage's provider chain, bound to an optional per-job cost meter.
+    """A run's provider chain, bound to an optional per-job cost meter.
 
-    ``providers`` maps a provider id to its implementation — a deterministic
-    tier exposes ``resolve_items(items) -> {id: output}``; an LLM tier exposes
-    the ``LLMProvider.resolve(*, system_prompt, user_prompt)`` protocol and is
-    driven through packing. ``meter`` (default: unbounded) enforces the cost cap.
+    ``tiers`` is an ordered list of ``(provider_id, impl)`` pairs — keeping the
+    ``provider_id`` alongside the impl so cost metering can look up the per-call
+    cost. A deterministic tier's impl exposes ``resolve_items(items) -> {id:
+    output}``; an LLM tier's impl exposes the ``LLMProvider.resolve(*,
+    system_prompt, user_prompt)`` protocol and is driven through packing.
+    ``pack_size`` governs LLM bundling; ``meter`` (default: unbounded) enforces
+    the cost cap.
     """
 
-    config: StageChainConfig
-    providers: dict[str, Any]
+    tiers: list[tuple[str, Any]]
+    pack_size: int = DEFAULT_PACK_SIZE
     meter: CostMeter = field(default_factory=CostMeter)
 
     def resolve(self, items: list[Item], *, system_prompt: str = "") -> ChainResult:
-        """Resolve ``items`` through the configured tiers in order.
+        """Resolve ``items`` through the tiers in order.
 
         Returns a ``ChainResult`` (resolved map, parked ids, aggregate cost,
         metered flag, per-tier breakdown). May raise ``CostCapExceeded`` from a
@@ -57,10 +88,9 @@ class ProviderChain:
         total_cost = 0
         any_metered = False
 
-        for provider_id in self.config.provider_ids:
+        for provider_id, provider in self.tiers:
             if not pending:
                 break  # short-circuit: everything resolved
-            provider = self.providers[provider_id]
 
             if hasattr(provider, "resolve_items"):
                 newly = self._run_deterministic(provider, pending, resolved)
@@ -134,7 +164,7 @@ class ProviderChain:
         calls = 0
         tier_cost = 0
 
-        for group in _packing.chunk(pending, self.config.pack_size):
+        for group in _packing.chunk(pending, self.pack_size):
             if metered:
                 # Cost cap is enforced BEFORE the call, so a breaching chunk is
                 # never spent and its items stay unprocessed (raises out).
@@ -154,33 +184,3 @@ class ProviderChain:
                     parked.append(it.id)  # dropped/errored -> park this item
 
         return newly, parked, calls, tier_cost, metered
-
-
-def build_chain(
-    stage: str,
-    *,
-    configs: dict[str, StageChainConfig],
-    provider_impls: dict[str, Any],
-    meter: CostMeter | None = None,
-) -> ProviderChain:
-    """Build the ``ProviderChain`` for ``stage`` from external config.
-
-    ``configs`` is the parsed ``{stage -> StageChainConfig}`` map (see
-    ``load_configs``); ``provider_impls`` is the flat ``{provider_id -> impl}``
-    registry the chain references by id. ``meter`` binds the per-job cost cap
-    (default: unbounded).
-    """
-    return ProviderChain(
-        config=configs[stage],
-        providers=provider_impls,
-        meter=meter if meter is not None else CostMeter(),
-    )
-
-
-def load_configs(raw: dict[str, dict[str, Any]]) -> dict[str, StageChainConfig]:
-    """Parse the external chain config (``{stage: {providers, pack_size}}``).
-
-    A thin pass-through to ``common.providers.load_chain_configs`` so callers
-    build the worker's config from the same small dict/JSON the owner rewires.
-    """
-    return load_chain_configs(raw)

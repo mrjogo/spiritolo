@@ -10,8 +10,8 @@ A ``stage_fn`` has the signature ``fn(job, conn, providers)`` where:
                   ``id`` / ``max_cost_cents`` / …),
   - ``conn``      is the worker's psycopg connection (the stage writes its
                   ``stage_run`` UPSERTs through it),
-  - ``providers`` is the stage's ``ProviderChain`` (config-not-code, bound to the
-                  job's cost meter) or ``None`` for a stage that needs none.
+  - ``providers`` is the run's ``ProviderChain`` (its chosen LLM tier, bound to
+                  the job's cost meter) or ``None`` for a run that needs none.
 
 It returns an optional mapping recorded as the job's ``progress``. Dispatch does
 NOT catch stage errors — an unknown stage raises ``UnknownStage`` and any stage
