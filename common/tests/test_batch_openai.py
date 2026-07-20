@@ -49,7 +49,7 @@ def test_submit_uploads_jsonl_then_creates_batch():
     assert lines[0]["body"]["messages"][1] == {"role": "user", "content": "u0"}
     # gpt-5-family token + reasoning settings (see openai_batch.py docstring).
     assert lines[0]["body"]["max_completion_tokens"] == 2048
-    assert lines[0]["body"]["reasoning_effort"] == "minimal"
+    assert lines[0]["body"]["reasoning_effort"] == "none"
     assert lines[0]["body"]["response_format"] == {"type": "json_object"}
 
     # batches.create called with the uploaded file id + 24h window.

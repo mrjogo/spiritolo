@@ -27,6 +27,7 @@ def test_resolve_posts_to_generate_endpoint_and_returns_text():
     assert payload["system"] == "sys"
     assert payload["prompt"] == "u"
     assert payload["stream"] is False
+    assert payload["think"] is False  # qwen3 thinking mode disabled
 
 
 def test_model_id_property_matches_constructor():
