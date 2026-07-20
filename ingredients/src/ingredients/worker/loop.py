@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import psycopg
@@ -33,7 +33,8 @@ from ingredients.queue import claim_one, heartbeat as _heartbeat, requeue_stale
 from ingredients.worker import dispatch
 from ingredients.worker.cost import CostCapExceeded, CostMeter
 from ingredients.worker.dispatch import UnknownStage
-from ingredients.worker.providers import build_chain
+from ingredients.worker.providers import ProviderChain, pack_size_for
+from ingredients.worker.providers_local import build_provider_for_run
 
 DEFAULT_REAPER_SECONDS = 120.0
 DEFAULT_HEARTBEAT_SECONDS = 15.0
@@ -110,8 +111,9 @@ def tick(
     conn: psycopg.Connection,
     *,
     stage_fns: dict[str, Callable[..., Any]] | None = None,
-    configs: dict[str, Any] | None = None,
-    provider_impls: dict[str, Any] | None = None,
+    env: Mapping[str, str] | None = None,
+    client_factory: Callable[..., Any] | None = None,
+    providers_builder: Callable[[dict[str, Any]], Any] | None = None,
     worker_id: str | None = None,
     max_cost_cents: int | None = None,
     conn_factory: Callable[[], psycopg.Connection] | None = None,
@@ -122,6 +124,11 @@ def tick(
     Claims the oldest runnable job (respecting the approval + max-cost gates),
     commits the claim, dispatches it under a heartbeat thread, then finalizes the
     job to ``succeeded`` / ``failed``. An empty queue is a no-op.
+
+    The claimed job's LLM tier is built from its own ``llm_provider`` /
+    ``llm_model`` (see ``_build_providers``); ``env`` supplies the API keys and
+    ``client_factory`` the httpx transport. ``providers_builder`` overrides that
+    wiring wholesale (tests inject a fake-provider chain through it).
     """
     job = claim_one(conn, worker_id=worker_id, max_cost_cents=max_cost_cents)
     if job is None:
@@ -129,7 +136,10 @@ def tick(
         return False
     conn.commit()  # release the row lock; the job is now 'running'
 
-    providers = _build_providers(job, configs, provider_impls)
+    if providers_builder is not None:
+        providers = providers_builder(job)
+    else:
+        providers = _build_providers(job, env=env, client_factory=client_factory)
 
     hb: Heartbeat | None = None
     if conn_factory is not None:
@@ -153,17 +163,31 @@ def tick(
 
 def _build_providers(
     job: dict[str, Any],
-    configs: dict[str, Any] | None,
-    provider_impls: dict[str, Any] | None,
+    *,
+    env: Mapping[str, str] | None = None,
+    client_factory: Callable[..., Any] | None = None,
 ) -> Any:
-    """Build the job's ``ProviderChain`` (bound to its cost meter) when the stage
-    is wired in external config; otherwise ``None`` (free stages need no chain)."""
-    if configs and provider_impls is not None and job["stage"] in configs:
-        meter = CostMeter(job.get("max_cost_cents"))
-        return build_chain(
-            job["stage"], configs=configs, provider_impls=provider_impls, meter=meter
-        )
-    return None
+    """Build the run's ``ProviderChain`` from its chosen LLM tier, or ``None``.
+
+    A run carries its tier on the job row: ``llm_provider`` selects the provider
+    and ``llm_model`` the model (both set at run assembly via ``set_run_llm``).
+    When the run names no provider — or its API key is absent from ``env`` —
+    ``build_provider_for_run`` returns ``None`` and so do we: that run has no LLM
+    tier and runs deterministic-only (the alias/lexical tiers inside each
+    stage_fn). Otherwise the chain is that single LLM tier, its pack size a
+    per-stage code constant, bound to the job's cost meter."""
+    provider_id = job.get("llm_provider")
+    model_id = job.get("llm_model")
+    impl = build_provider_for_run(
+        provider_id, model_id, env=env, client_factory=client_factory
+    )
+    if impl is None:
+        return None
+    return ProviderChain(
+        tiers=[(provider_id, impl)],
+        pack_size=pack_size_for(job["stage"]),
+        meter=CostMeter(job.get("max_cost_cents")),
+    )
 
 
 def _finalize_success(conn: psycopg.Connection, job: dict[str, Any], result: Any) -> None:
@@ -208,8 +232,9 @@ def serve(
     conn: psycopg.Connection,
     *,
     stage_fns: dict[str, Callable[..., Any]] | None = None,
-    configs: dict[str, Any] | None = None,
-    provider_impls: dict[str, Any] | None = None,
+    env: Mapping[str, str] | None = None,
+    client_factory: Callable[..., Any] | None = None,
+    providers_builder: Callable[[dict[str, Any]], Any] | None = None,
     worker_id: str | None = None,
     max_cost_cents: int | None = None,
     conn_factory: Callable[[], psycopg.Connection] | None = None,
@@ -233,8 +258,9 @@ def serve(
         ran = tick(
             conn,
             stage_fns=stage_fns,
-            configs=configs,
-            provider_impls=provider_impls,
+            env=env,
+            client_factory=client_factory,
+            providers_builder=providers_builder,
             worker_id=worker_id,
             max_cost_cents=max_cost_cents,
             conn_factory=conn_factory,
