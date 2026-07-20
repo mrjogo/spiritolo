@@ -21,6 +21,7 @@ job's ``job_items.cost_cents`` — so a rerun overwrites rather than accumulates
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -33,8 +34,10 @@ from ingredients.queue import claim_one, heartbeat as _heartbeat, requeue_stale
 from ingredients.worker import dispatch
 from ingredients.worker.cost import CostCapExceeded, CostMeter
 from ingredients.worker.dispatch import UnknownStage
-from ingredients.worker.providers import ProviderChain, pack_size_for
+from ingredients.worker.providers import ProviderChain, ProviderUnavailable, pack_size_for
 from ingredients.worker.providers_local import build_provider_for_run
+
+log = logging.getLogger("ingredients.worker.loop")
 
 DEFAULT_REAPER_SECONDS = 120.0
 DEFAULT_HEARTBEAT_SECONDS = 15.0
@@ -135,6 +138,10 @@ def tick(
         conn.rollback()  # release the (empty) claim transaction
         return False
     conn.commit()  # release the row lock; the job is now 'running'
+    log.info(
+        "claimed job %s (stage %s, provider %s)",
+        job["id"], job["stage"], job.get("llm_provider") or "deterministic",
+    )
 
     if providers_builder is not None:
         providers = providers_builder(job)
@@ -149,16 +156,30 @@ def tick(
         result = dispatch.run(job, conn, providers, stage_fns=stage_fns)
         conn.commit()  # flush any stage_fn writes not yet committed
         _finalize_success(conn, job, result)
-    except UnknownStage:
-        _finalize_failed(conn, job, "unknown_stage")
-    except CostCapExceeded:
-        _finalize_failed(conn, job, "cost_cap_exceeded")
-    except Exception:
-        _finalize_failed(conn, job, "stage_error")
+        log.info("job %s (%s) done: %s", job["id"], job["stage"], result)
+    except UnknownStage as exc:
+        log.error("job %s: %s", job["id"], exc)
+        _finalize_failed(conn, job, "unknown_stage", detail=str(exc))
+    except CostCapExceeded as exc:
+        log.warning("job %s stopped at cost cap: %s", job["id"], exc)
+        _finalize_failed(conn, job, "cost_cap_exceeded", detail=str(exc))
+    except ProviderUnavailable as exc:
+        log.error("job %s provider unavailable: %s", job["id"], exc)
+        _finalize_failed(conn, job, "provider_unavailable", detail=str(exc))
+    except Exception as exc:  # noqa: BLE001 - a stage error must fail the job, never crash the loop
+        log.exception("job %s (%s) failed", job["id"], job["stage"])
+        _finalize_failed(conn, job, "stage_error", detail=_error_detail(exc))
     finally:
         if hb is not None:
             hb.stop()
     return True
+
+
+def _error_detail(exc: BaseException) -> str:
+    """A short, single-line reason for ``jobs.error_detail`` — the full
+    traceback goes to the log. Truncated so a giant provider body can't bloat
+    the row."""
+    return f"{type(exc).__name__}: {exc}".splitlines()[0][:500]
 
 
 def _build_providers(
@@ -208,7 +229,12 @@ def _finalize_success(conn: psycopg.Connection, job: dict[str, Any], result: Any
     conn.commit()
 
 
-def _finalize_failed(conn: psycopg.Connection, job: dict[str, Any], error_code: str) -> None:
+def _finalize_failed(
+    conn: psycopg.Connection,
+    job: dict[str, Any],
+    error_code: str,
+    detail: str | None = None,
+) -> None:
     # Clear any aborted-transaction state first; already-committed job_items
     # (e.g. items paid for before a cost abort) survive the rollback.
     conn.rollback()
@@ -218,12 +244,13 @@ def _finalize_failed(conn: psycopg.Connection, job: dict[str, Any], error_code: 
             state             = 'failed',
             finished_at       = now(),
             error_code        = %s,
+            error_detail      = %s,
             cost_actual_cents = coalesce(
                 (select sum(cost_cents) from job_items where job_id = %s), 0
             )::int
         where id = %s
         """,
-        (error_code, job["id"], job["id"]),
+        (error_code, detail, job["id"], job["id"]),
     )
     conn.commit()
 

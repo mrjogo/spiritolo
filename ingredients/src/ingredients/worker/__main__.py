@@ -14,6 +14,7 @@ that names no provider — or whose key is absent — runs deterministic-only.
 
 from __future__ import annotations
 
+import logging
 import os
 import signal
 import threading
@@ -26,9 +27,18 @@ import ingredients.pipeline.stages  # noqa: F401 -- registers stage_fns into STA
 from ingredients.worker.dispatch import STAGE_FNS
 from ingredients.worker.loop import serve
 
+log = logging.getLogger("ingredients.worker")
+
 
 def main() -> None:
     load_dotenv()
+    # The worker's only console is Railway's log stream, so configure logging up
+    # front — without this the loop's claim/finish/failure lines go nowhere and a
+    # stuck run looks (as run #7 did) like a dead worker.
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
     db_url = os.environ.get("SUPABASE_DB_URL")
     if not db_url:
         raise SystemExit("SUPABASE_DB_URL is not set; cannot start the worker")
@@ -41,6 +51,7 @@ def main() -> None:
     signal.signal(signal.SIGINT, _handle)
     signal.signal(signal.SIGTERM, _handle)
 
+    log.info("worker starting; serving stages: %s", ", ".join(sorted(STAGE_FNS)) or "(none)")
     conn = psycopg.connect(db_url)
     try:
         serve(

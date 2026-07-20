@@ -144,6 +144,56 @@ def test_empty_queue_no_op(test_db_url, db_conn):
     assert db_conn.execute("select count(*) from job_items").fetchone()[0] == 0
 
 
+def test_stage_failure_records_error_detail(test_db_url, db_conn):
+    # A stage exception fails the job with a coded error AND a human-readable
+    # detail, so /ops shows WHY instead of a bare "stage_error".
+    db_conn.execute("truncate table jobs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
+    jid = _seed_job(db_conn, stage="boom", payload={})
+
+    def boom_fn(job, conn, providers):
+        raise RuntimeError("kaboom detail")
+
+    conn = psycopg.connect(test_db_url)
+    try:
+        tick(conn, stage_fns={"boom": boom_fn})
+    finally:
+        conn.close()
+
+    state, error_code, error_detail = db_conn.execute(
+        "select state, error_code, error_detail from jobs where id=%s", (jid,)
+    ).fetchone()
+    assert state == "failed"
+    assert error_code == "stage_error"
+    assert "kaboom detail" in (error_detail or "")
+
+
+def test_provider_unavailable_records_specific_code(test_db_url, db_conn):
+    # A systemic provider failure (e.g. DeepSeek 402) is finalized with its own
+    # code + the surfaced message — exactly the run-#7 signal an operator needs.
+    from ingredients.worker.providers import ProviderUnavailable
+
+    db_conn.execute("truncate table jobs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
+    jid = _seed_job(db_conn, stage="pu", payload={})
+
+    def pu_fn(job, conn, providers):
+        raise ProviderUnavailable("deepseek error 402: Insufficient Balance")
+
+    conn = psycopg.connect(test_db_url)
+    try:
+        tick(conn, stage_fns={"pu": pu_fn})
+    finally:
+        conn.close()
+
+    state, error_code, error_detail = db_conn.execute(
+        "select state, error_code, error_detail from jobs where id=%s", (jid,)
+    ).fetchone()
+    assert state == "failed"
+    assert error_code == "provider_unavailable"
+    assert "Insufficient Balance" in (error_detail or "")
+
+
 def test_reaper_on_boot(test_db_url, db_conn):
     db_conn.execute("truncate table jobs restart identity cascade")
     jid = _seed_job(
