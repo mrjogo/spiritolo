@@ -23,10 +23,10 @@ def test_run_dispatches_to_the_named_stage(monkeypatch):
         seen["job"] = job
         return {"parsed": 3}
 
-    monkeypatch.setitem(cli.STAGE_FNS, "parse", fake_parse)
-    args = cli.build_parser().parse_args(["parse", "--site", "imbibe", "--limit", "2"])
+    monkeypatch.setitem(cli.STAGE_FNS, "parse-ingredients", fake_parse)
+    args = cli.build_parser().parse_args(["parse-ingredients", "--site", "imbibe", "--limit", "2"])
     result = cli.run(args, conn=object())
-    assert result == {"parse": {"parsed": 3}}
+    assert result == {"parse-ingredients": {"parsed": 3}}
     assert seen["job"]["payload"] == {"site": "imbibe", "limit": 2}
 
 

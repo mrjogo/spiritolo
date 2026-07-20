@@ -9,7 +9,7 @@ describe('<FilterBar>', () => {
     const onChange = vi.fn();
     render(
       <FilterBar
-        stage="extract"
+        stage="extract-recipe"
         siteOptions={['punch', 'diffordsguide']}
         chipOptions={[
           { key: 'abstain', label: 'abstain' },
@@ -24,7 +24,7 @@ describe('<FilterBar>', () => {
     let call = onChange.mock.calls[0][0];
     expect(call.filters).toEqual([{ col: 'site', op: 'eq', value: 'punch' }]);
     expect(call.scope).toEqual({
-      kind: 'filter', stage: 'extract', site: 'punch', where: call.filters,
+      kind: 'filter', stage: 'extract-recipe', site: 'punch', where: call.filters,
     });
     // The single-object contract: scope.where IS filters, not a copy — the
     // same array feeds usePagedQuery (what you see) and enqueue_job (what

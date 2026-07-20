@@ -22,7 +22,7 @@ beforeEach(() => {
 describe('fetchOpenReviews', () => {
   it('reads a page of open human_reviews rows with an exact count', async () => {
     rangeMock.mockResolvedValue({
-      data: [{ id: 1, entity_kind: 'ingredient_name', entity_id: 'gin', stage: 'map', state: 'open', origin: 'human_flag', payload: null, note: null }],
+      data: [{ id: 1, entity_kind: 'ingredient_name', entity_id: 'gin', stage: 'map-ingredient', state: 'open', origin: 'human_flag', payload: null, note: null }],
       count: 137,
       error: null,
     });

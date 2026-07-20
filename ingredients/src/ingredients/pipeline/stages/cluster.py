@@ -27,7 +27,7 @@ from ingredients.dedup.rollup import roll_up_to_antichain
 from ingredients.dedup.version import DEDUP_VERSION
 from ingredients.pipeline.stages import base, naming
 
-STAGE = "cluster"
+STAGE = "cluster-recipes"
 
 
 def _node_meta(conn: psycopg.Connection) -> dict[int, str]:
@@ -137,7 +137,6 @@ def cluster_stage_fn(
     the loop and shared across chunks; recipes are processed in queue order.
     """
     site, limit = base.scope(job)
-    apply_mode = job.get("apply_mode") or "auto"
     job_id = job.get("id")
     if job_id:
         recipe_ids = base.run_item_ids(conn, job_id=job_id, stage=STAGE)
@@ -151,9 +150,13 @@ def cluster_stage_fn(
     aliases = fetch_aliases_dict(conn)
     node_meta = _node_meta(conn)
     rollup_cache: dict[int, int] = {}
-    counts = {"clustered": 0, "skipped": 0}
+    counts = {"clustered": 0, "skipped": 0, "pending": 0}
 
     for chunk in base.chunked(recipe_ids, chunk_size):
+        # Recipes with any provisional-node ingredient aren't eligible yet — their
+        # taxonomy identity isn't final, so clustering them now would freeze a
+        # wrong key. Gate before any per-recipe rollup/hash work.
+        blocked = base.recipes_with_provisional_ingredients(conn, chunk)
         # Bulk fetch headers, skipping absent ids.
         headers = {
             r[0]: (r[1], r[2])
@@ -175,6 +178,13 @@ def cluster_stage_fn(
         for recipe_id in chunk:
             header = headers.get(recipe_id)
             if header is None:
+                continue
+            if recipe_id in blocked:
+                counts["pending"] += 1
+                records.append({
+                    "recipe_id": recipe_id, "stage": STAGE, "version": DEDUP_VERSION,
+                    "outcome": "pending", "method": "deterministic", "job_id": job_id,
+                })
                 continue
             title, canonical_name = header
             if canonical_name is None:
@@ -211,7 +221,7 @@ def cluster_stage_fn(
                     cur.executemany(_UPSERT_CLUSTER_SQL, cluster_upserts)
                 if recipe_updates:
                     cur.executemany(_UPDATE_CLUSTER_SQL, recipe_updates)
-            base.record_many(conn, records, apply_mode=apply_mode)
+            base.record_many(conn, records)
             base.finalize_run(
                 conn, stage=STAGE, version=DEDUP_VERSION,
                 ids=[str(r) for r in chunk],

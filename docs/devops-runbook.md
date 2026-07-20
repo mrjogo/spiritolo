@@ -38,13 +38,13 @@ var is a path to a JSON file mapping each smart stage to an *ordered* list of
 provider ids (`ollama` / `openai` / `claude` / `deepseek`) plus a `pack_size`.
 The chain tries them left-to-right and short-circuits when everything resolves,
 so order = priority + fallback. It's config-not-code: reordering the file
-reorders the chain with no code change. Example — DeepSeek for `map`, local
-Ollama first with an OpenAI fallback for `parse`:
+reorders the chain with no code change. Example — DeepSeek for `map-ingredient`, local
+Ollama first with an OpenAI fallback for `parse-ingredients`:
 
 ```json
 {
-  "map":   { "providers": ["deepseek"],           "pack_size": 20 },
-  "parse": { "providers": ["ollama", "openai"],   "pack_size": 20 }
+  "map-ingredient":   { "providers": ["deepseek"],         "pack_size": 20 },
+  "parse-ingredients": { "providers": ["ollama", "openai"], "pack_size": 20 }
 }
 ```
 

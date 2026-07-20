@@ -1,10 +1,10 @@
-"""map stage LLM tier: propose_brand auto-create + propose_form review queue.
+"""map stage LLM tier: attach-to-existing-node or abstain (then mint).
 
-The deterministic tiers resolve a name to a taxonomy slug. The LLM tier answers
-with a richer action: choose a slug, propose a brand/expression (auto-created
-when its parent already exists), propose a new form node (queued for human
-review), or abstain. These tests pin the DB writes each action makes, plus the
-review path that turns an approved form proposal into a resolution.
+The deterministic tiers resolve a name to a taxonomy slug. The LLM tier may only
+attach a name to an *existing* node (``chose_slug``) or abstain — it no longer
+proposes or auto-creates taxonomy structure. Any name the LLM abstains on falls
+through to the deterministic mint pass, which mints a provisional node. These
+tests pin the DB writes for both LLM outcomes.
 
 Runs against TEST_DB_URL; the LLM tier is a fake chain emitting action objects.
 """
@@ -17,12 +17,7 @@ import psycopg
 import pytest
 
 from ingredients.mapping.eval_fixture import seed
-from ingredients.mapping.proposals import (
-    approve_form_proposal,
-    fetch_pending_form_proposals,
-)
 from ingredients.pipeline.stages.map import map_stage_fn
-from ingredients.reviews.model import insert_review
 
 
 class _FakeChain:
@@ -81,159 +76,70 @@ def _job():
     return {"id": None, "payload": {}}
 
 
-def test_propose_brand_auto_creates_node_edge_provenance_resolution(conn):
-    c, ids = conn
-    _recipe(c, "https://ex.test/b", ["Nolet Silver"])
-    chain = _FakeChain(
-        {
-            "nolet silver": {
-                "action": "propose_brand",
-                "slug": "nolet-silver",
-                "display_name": "Nolet Silver",
-                "parent_slug": "london-dry-gin",
-                "node_kind": "expression",
-            }
-        }
-    )
+def test_chose_slug_resolves_to_existing_node(conn):
+    c, _ = conn
+    _recipe(c, "https://ex.test/c", ["Dry Gin"])
+    chain = _FakeChain({"dry gin": {"action": "chose_slug", "slug": "gin"}})
     counts = map_stage_fn(_job(), c, chain)
     assert counts["resolved"] == 1
 
+    res = c.execute(
+        "select taxonomy_slug, method from ingredient_resolutions "
+        "where normalized_name = 'dry gin'"
+    ).fetchone()
+    assert res == ("gin", "llm")
+    # No new node was created — it attached to the existing 'gin' node.
+    assert (
+        c.execute(
+            "select count(*) from taxonomy_nodes where status = 'provisional'"
+        ).fetchone()[0]
+        == 0
+    )
+
+
+def test_bare_slug_answer_resolves(conn):
+    c, _ = conn
+    _recipe(c, "https://ex.test/b", ["Fancy Bourbon"])
+    chain = _FakeChain({"fancy bourbon": "bourbon"})
+    counts = map_stage_fn(_job(), c, chain)
+    assert counts["resolved"] == 1
+    res = c.execute(
+        "select taxonomy_slug, method from ingredient_resolutions "
+        "where normalized_name = 'fancy bourbon'"
+    ).fetchone()
+    assert res == ("bourbon", "llm")
+
+
+def test_llm_abstain_falls_through_to_mint(conn):
+    c, _ = conn
+    _recipe(c, "https://ex.test/a", ["Nolet Silver"])
+    chain = _FakeChain({"nolet silver": {"action": "abstain"}})
+    counts = map_stage_fn(_job(), c, chain)
+    # An LLM abstain no longer parks the name: it mints a provisional node.
+    assert counts["resolved"] == 1
+
     node = c.execute(
-        "select id, node_kind, is_cluster_node from taxonomy_nodes where slug = 'nolet-silver'"
+        "select node_kind, status, is_cluster_node from taxonomy_nodes "
+        "where slug = 'nolet-silver'"
     ).fetchone()
-    assert node is not None
-    new_id, node_kind, is_cluster = node
-    assert node_kind == "expression"
-    assert is_cluster is False
-
-    edge = c.execute(
-        "select 1 from taxonomy_edges where parent_id = %s and child_id = %s",
-        (ids["london-dry-gin"], new_id),
-    ).fetchone()
-    assert edge is not None
-
-    prov = c.execute(
-        "select source from taxonomy_provenance where node_id = %s", (new_id,)
-    ).fetchone()
-    assert prov == ("llm-mapper",)
+    assert node == (None, "provisional", False)
 
     res = c.execute(
         "select taxonomy_slug, method from ingredient_resolutions "
         "where normalized_name = 'nolet silver'"
     ).fetchone()
-    assert res == ("nolet-silver", "llm")
+    assert res == ("nolet-silver", "provisional")
 
 
-def test_propose_brand_with_missing_parent_abstains(conn):
+def test_llm_unknown_action_falls_through_to_mint(conn):
     c, _ = conn
-    _recipe(c, "https://ex.test/np", ["Ghost Amaro"])
-    chain = _FakeChain(
-        {
-            "ghost amaro": {
-                "action": "propose_brand",
-                "slug": "ghost-amaro",
-                "display_name": "Ghost Amaro",
-                "parent_slug": "no-such-parent",
-                "node_kind": "brand",
-            }
-        }
-    )
+    _recipe(c, "https://ex.test/x", ["Weird Thing"])
+    # A malformed / removed action object is treated as abstain -> mint.
+    chain = _FakeChain({"weird thing": {"action": "propose_brand", "slug": "x"}})
     counts = map_stage_fn(_job(), c, chain)
-    assert counts["pending"] == 1
-    assert (
-        c.execute("select 1 from taxonomy_nodes where slug = 'ghost-amaro'").fetchone()
-        is None
-    )
+    assert counts["resolved"] == 1
     res = c.execute(
         "select taxonomy_slug, method from ingredient_resolutions "
-        "where normalized_name = 'ghost amaro'"
+        "where normalized_name = 'weird thing'"
     ).fetchone()
-    assert res == (None, "abstain")
-
-
-def test_propose_form_queues_proposal_and_parks(conn):
-    c, ids = conn
-    rid = _recipe(c, "https://ex.test/f", ["Lemon Zest"])
-    chain = _FakeChain(
-        {
-            "lemon zest": {
-                "action": "propose_form",
-                "slug": "lemon-zest",
-                "display_name": "Lemon Zest",
-                "parent_slug": "lemon",
-            }
-        }
-    )
-    counts = map_stage_fn(_job(), c, chain)
-    assert counts["pending"] == 1
-
-    prop = c.execute(
-        "select entity_id, stage, origin, state, "
-        "payload->>'proposed_slug', (payload->>'proposed_parent_id')::bigint "
-        "from human_reviews where entity_id = 'lemon zest' and stage = 'map'"
-    ).fetchone()
-    assert prop == ("lemon zest", "map", "machine_proposal", "open",
-                    "lemon-zest", ids["lemon"])
-
-    # Parked: no taxonomy node yet, no non-null resolution for the name.
-    assert (
-        c.execute("select 1 from taxonomy_nodes where slug = 'lemon-zest'").fetchone()
-        is None
-    )
-    slug = c.execute(
-        "select taxonomy_slug from ingredient_resolutions where normalized_name = 'lemon zest'"
-    ).fetchone()
-    assert slug is None or slug[0] is None
-
-    outcome = c.execute(
-        "select outcome from job_items where entity_id = %s and stage = 'map'", (rid,)
-    ).fetchone()[0]
-    assert outcome == "pending"
-
-
-def test_review_proposals_path_resolves(conn):
-    c, ids = conn
-    insert_review(
-        c,
-        entity_kind="ingredient_name",
-        entity_id="lemon zest",
-        stage="map",
-        origin="machine_proposal",
-        payload={
-            "kind": "form",
-            "proposed_slug": "lemon-zest",
-            "proposed_display_name": "Lemon Zest",
-            "proposed_parent_id": ids["lemon"],
-            "candidates": [],
-        },
-        origin_version="v1",
-    )
-    [proposal] = fetch_pending_form_proposals(c)
-    assert proposal["raw_string"] == "lemon zest"
-
-    new_id = approve_form_proposal(c, proposal=proposal, decided_by="alice", version="v1")
-
-    node = c.execute(
-        "select slug from taxonomy_nodes where id = %s", (new_id,)
-    ).fetchone()
-    assert node == ("lemon-zest",)
-    edge = c.execute(
-        "select 1 from taxonomy_edges where parent_id = %s and child_id = %s",
-        (ids["lemon"], new_id),
-    ).fetchone()
-    assert edge is not None
-    alias = c.execute(
-        "select 1 from taxonomy_aliases where alias = 'lemon zest' and node_id = %s",
-        (new_id,),
-    ).fetchone()
-    assert alias is not None
-
-    res = c.execute(
-        "select taxonomy_slug from ingredient_resolutions where normalized_name = 'lemon zest'"
-    ).fetchone()
-    assert res == ("lemon-zest",)
-
-    state = c.execute(
-        "select state from human_reviews where id = %s", (proposal["id"],)
-    ).fetchone()[0]
-    assert state == "resolved"
+    assert res == ("weird-thing", "provisional")

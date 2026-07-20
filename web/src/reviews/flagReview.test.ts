@@ -17,13 +17,13 @@ describe('flagReview', () => {
     const id = await flagReview({
       entityKind: 'recipe',
       entityId: '42',
-      stage: 'map',
+      stage: 'map-ingredient',
       note: 'looks off',
     });
     expect(rpcMock).toHaveBeenCalledWith('flag_review', {
       p_entity_kind: 'recipe',
       p_entity_id: '42',
-      p_stage: 'map',
+      p_stage: 'map-ingredient',
       p_note: 'looks off',
     });
     expect(id).toBe(123);
@@ -31,11 +31,11 @@ describe('flagReview', () => {
 
   it('passes p_note: null when note is omitted', async () => {
     rpcMock.mockResolvedValue({ data: 1, error: null });
-    await flagReview({ entityKind: 'ingredient', entityId: 'gin', stage: 'parse' });
+    await flagReview({ entityKind: 'ingredient', entityId: 'gin', stage: 'parse-ingredients' });
     expect(rpcMock).toHaveBeenCalledWith('flag_review', {
       p_entity_kind: 'ingredient',
       p_entity_id: 'gin',
-      p_stage: 'parse',
+      p_stage: 'parse-ingredients',
       p_note: null,
     });
   });
@@ -43,7 +43,7 @@ describe('flagReview', () => {
   it('throws when the rpc returns an error', async () => {
     rpcMock.mockResolvedValue({ data: null, error: { message: 'boom' } });
     await expect(
-      flagReview({ entityKind: 'recipe', entityId: '1', stage: 'map' }),
+      flagReview({ entityKind: 'recipe', entityId: '1', stage: 'map-ingredient' }),
     ).rejects.toEqual({ message: 'boom' });
   });
 });

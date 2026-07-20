@@ -4,6 +4,8 @@ import { resolveReview, dismissReview } from '../../reviews/flagReview';
 import { CrossLink, reviewEntityHref } from '../../ui/opsLinks';
 import { MapReviewBody } from './bodies/MapReviewBody';
 import { ParseReviewBody } from './bodies/ParseReviewBody';
+import { CombineReviewBody } from './bodies/CombineReviewBody';
+import { ConnectReviewBody } from './bodies/ConnectReviewBody';
 
 // Mirrors a `human_reviews` row (the committed DB surface). Owned here because
 // the card and its per-stage bodies all key off this shape.
@@ -21,12 +23,15 @@ export interface StageReview {
 // Per-stage read-only summary bodies, keyed by `human_reviews.stage`. A stage
 // without a registered body just shows the editable payload below.
 const BODIES: Record<string, ComponentType<{ review: StageReview }>> = {
-  map: MapReviewBody,
-  parse: ParseReviewBody,
+  'map-ingredient': MapReviewBody,
+  'parse-ingredients': ParseReviewBody,
+  'combine-nodes': CombineReviewBody,
+  'connect-nodes': ConnectReviewBody,
 };
 
 // What Resolve writes: the payload is applied by the SQL apply_review() per
-// stage (map -> resolution slug, parse -> ingredient fields, etc.). The editor
+// stage (map-ingredient -> resolution slug, parse-ingredients -> ingredient
+// fields, etc.). The editor
 // is a raw JSON textarea so a curator can author the fix for ANY stage today;
 // structured per-stage edit forms are a follow-up. Approving a form proposal
 // (which must CREATE a node) is not wired through this editor — dismiss those

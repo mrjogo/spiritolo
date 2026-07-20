@@ -30,7 +30,7 @@ from ingredients.recipegf.converter import (
 )
 from ingredients.recipegf.version import CONVERTER_VERSION
 
-STAGE = "convert"
+STAGE = "convert-steps"
 
 # Converter reasons that mean "an upstream stage isn't done" -> retry (pending);
 # everything else is a genuine review item -> proposes_new.
@@ -112,7 +112,6 @@ def convert_stage_fn(
     transaction.
     """
     site, limit = base.scope(job)
-    apply_mode = job.get("apply_mode") or "auto"
     if job.get("id"):
         recipe_ids = base.run_item_ids(conn, job_id=job["id"], stage=STAGE)
     else:
@@ -134,6 +133,9 @@ def convert_stage_fn(
             }
             present_ids = [rid for rid in chunk if rid in headers]
             ingredients_by_recipe = _fetch_ingredients(conn, present_ids)
+            # Recipes with any provisional-node ingredient aren't eligible yet —
+            # gate before running the converter so no steps are written.
+            blocked = base.recipes_with_provisional_ingredients(conn, present_ids)
 
             canonical_updates: list[tuple] = []
             ok_ids: list[int] = []
@@ -144,6 +146,18 @@ def convert_stage_fn(
             for recipe_id in chunk:
                 header = headers.get(recipe_id)
                 if header is None:
+                    continue
+                if recipe_id in blocked:
+                    counts["pending"] += 1
+                    records.append({
+                        "recipe_id": recipe_id,
+                        "stage": STAGE,
+                        "version": CONVERTER_VERSION,
+                        "outcome": "pending",
+                        "method": "deterministic",
+                        "job_id": job.get("id"),
+                        "payload": None,
+                    })
                     continue
                 _id, title, canonical_name, source_url, source = header
                 if canonical_name is None:
@@ -202,7 +216,7 @@ def convert_stage_fn(
                         "update recipes set equipment = %s, recipe_slug = %s where id = %s",
                         equipment_updates,
                     )
-            base.record_many(conn, records, apply_mode=apply_mode)
+            base.record_many(conn, records)
             base.finalize_run(
                 conn, stage=STAGE, version=CONVERTER_VERSION,
                 ids=[str(r) for r in chunk],

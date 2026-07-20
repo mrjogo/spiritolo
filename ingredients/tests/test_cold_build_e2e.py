@@ -91,8 +91,8 @@ def conn(test_db_url: str):
 
 def test_cold_build_produces_bundle_and_one_run_per_stage(conn):
     results = run_cold_build(conn, providers=None)
-    assert results["extract"]["extracted"] == 1
-    assert results["export"]["exported"] == 1
+    assert results["extract-recipe"]["extracted"] == 1
+    assert results["export-recipegf"]["exported"] == 1
 
     # A frozen bundle exists, valid pin-2 shape.
     row = conn.execute(
@@ -125,19 +125,26 @@ def test_cold_build_produces_bundle_and_one_run_per_stage(conn):
             (recipe[0],),
         ).fetchall()
     }
-    assert {"parse", "map", "convert", "cluster", "export"} <= recipe_job_items
+    assert {
+        "parse-ingredients", "map-ingredient", "convert-steps",
+        "cluster-recipes", "export-recipegf",
+    } <= recipe_job_items
     page_runs = conn.execute(
-        "select count(*) from job_items where entity_type='page' and stage='extract'"
+        "select count(*) from job_items where entity_type='page' and stage='extract-recipe'"
     ).fetchone()[0]
     assert page_runs == 1
     # Every content stage ran.
-    assert set(STAGE_ORDER) == {"extract", "parse", "map", "convert", "cluster", "export"}
+    assert set(STAGE_ORDER) == {
+        "extract-recipe", "parse-ingredients", "map-ingredient",
+        "combine-nodes", "connect-nodes",
+        "convert-steps", "cluster-recipes", "export-recipegf",
+    }
 
 
 def test_cold_build_is_idempotent(conn):
     run_cold_build(conn, providers=None)
     second = run_cold_build(conn, providers=None)
     # Nothing left to do on the second pass.
-    assert second["extract"]["extracted"] == 0
-    assert second["export"]["exported"] == 0
+    assert second["extract-recipe"]["extracted"] == 0
+    assert second["export-recipegf"]["exported"] == 0
     assert conn.execute("select count(*) from recipe_exports").fetchone()[0] == 1

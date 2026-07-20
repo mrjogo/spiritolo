@@ -8,7 +8,6 @@ import { useRun, useSetRunLlm, useStartRun } from '../../../ui/runs/useRun';
 import {
   useRunItems,
   useRemoveRunItems,
-  useApplyRunItems,
   type Sort,
 } from '../../../ui/runs/useRunItems';
 import { buildPFilter, type RunFilterState } from '../../../ui/runs/filter';
@@ -50,7 +49,6 @@ export function RunDetail() {
   const setLlm = useSetRunLlm(jobId ?? 0);
   const startRun = useStartRun(jobId ?? 0);
   const removeItems = useRemoveRunItems(jobId ?? 0);
-  const applyItems = useApplyRunItems(jobId ?? 0);
 
   // Live draft estimate from the server (single source of truth); must be called
   // before the early returns to respect the rules of hooks.
@@ -141,7 +139,6 @@ export function RunDetail() {
 
       <TasksTable
         runState={run.state}
-        applyMode={run.apply_mode}
         items={rows}
         total={total}
         statusFacets={facets.status ?? {}}
@@ -155,9 +152,6 @@ export function RunDetail() {
         selectedIds={selectedIds}
         onSelectionChange={(ids) => setSelectedIds(new Set(ids))}
         onRemove={(ids) => removeItems.mutate({ job_id: run.id, item_ids: ids }, {
-          onSuccess: () => setSelectedIds(new Set()),
-        })}
-        onApply={(ids) => applyItems.mutate({ job_id: run.id, item_ids: ids }, {
           onSuccess: () => setSelectedIds(new Set()),
         })}
       />

@@ -69,20 +69,20 @@ beforeEach(() => {
 describe('<StageRunsBrowser>', () => {
   it('lists job_items rows with outcome as a StatusPill', async () => {
     mockSupabase([
-      { id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse', code_version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null },
+      { id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse-ingredients', code_version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null },
     ]);
     renderBrowser(makeClient());
-    // Scoped to the table: 'parse'/'resolved' also appear as filter <option>
+    // Scoped to the table: 'parse-ingredients'/'resolved' also appear as filter <option>
     // values, so an unscoped query would be ambiguous once data loads.
     const table = await screen.findByRole('table');
-    expect(await within(table).findByText('parse')).toBeInTheDocument();
+    expect(await within(table).findByText('parse-ingredients')).toBeInTheDocument();
     expect(within(table).getByText('resolved')).toBeInTheDocument();
   });
 
   it('selecting a row fetches and renders its full detail including payload', async () => {
     const { detailEq } = mockSupabase(
-      [{ id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse', code_version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null }],
-      { id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse', code_version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null, payload: { structured: 3 } },
+      [{ id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse-ingredients', code_version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null }],
+      { id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse-ingredients', code_version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null, payload: { structured: 3 } },
     );
     renderBrowser(makeClient());
     const row = await within(await screen.findByRole('table')).findByRole('button');
@@ -95,12 +95,12 @@ describe('<StageRunsBrowser>', () => {
     const { listEqCalls } = mockSupabase([]);
     renderBrowser(makeClient());
 
-    await userEvent.selectOptions(screen.getByLabelText('stage'), 'map');
+    await userEvent.selectOptions(screen.getByLabelText('stage'), 'map-ingredient');
     await userEvent.selectOptions(screen.getByLabelText('outcome'), 'failed');
     await userEvent.type(screen.getByLabelText('version'), 'v2');
 
     await waitFor(() => {
-      expect(listEqCalls).toContainEqual(['stage', 'map']);
+      expect(listEqCalls).toContainEqual(['stage', 'map-ingredient']);
       expect(listEqCalls).toContainEqual(['outcome', 'failed']);
       expect(listEqCalls).toContainEqual(['code_version', 'v2']);
     });
