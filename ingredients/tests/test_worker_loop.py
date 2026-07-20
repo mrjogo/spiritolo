@@ -194,6 +194,45 @@ def test_provider_unavailable_records_specific_code(test_db_url, db_conn):
     assert "Insufficient Balance" in (error_detail or "")
 
 
+def test_cooperative_cancel_finalizes_cancelled(test_db_url, db_conn):
+    # A running job flipped to 'cancelling' is observed by the CancelWatcher,
+    # which trips should_stop; the stage bails and the run finalizes 'cancelled'.
+    db_conn.execute("truncate table jobs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
+    jid = _seed_job(db_conn, stage="slowcancel", payload={})
+
+    def slow_fn(job, conn, providers):
+        should_stop = job.get("should_stop")
+        # Simulate an operator calling cancel_run on the running job.
+        killer = psycopg.connect(test_db_url, autocommit=True)
+        try:
+            killer.execute("update jobs set state='cancelling' where id=%s", (job["id"],))
+        finally:
+            killer.close()
+        # Wait for the watcher to observe the cancel and trip the stop signal.
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if should_stop and should_stop():
+                break
+            time.sleep(0.02)
+        assert should_stop and should_stop(), "watcher must trip should_stop"
+        return {"processed": 0}
+
+    conn = psycopg.connect(test_db_url)
+    try:
+        tick(
+            conn,
+            stage_fns={"slowcancel": slow_fn},
+            conn_factory=lambda: psycopg.connect(test_db_url, autocommit=True),
+            cancel_poll_interval=0.05,
+        )
+    finally:
+        conn.close()
+
+    state = db_conn.execute("select state from jobs where id=%s", (jid,)).fetchone()[0]
+    assert state == "cancelled"
+
+
 def test_reaper_on_boot(test_db_url, db_conn):
     db_conn.execute("truncate table jobs restart identity cascade")
     jid = _seed_job(

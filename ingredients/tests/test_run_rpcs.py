@@ -70,6 +70,34 @@ def _terminal_item(conn, *, recipe_id, stage="map-ingredient", state="flagged", 
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
+def test_cancel_run_draft_and_queued_go_cancelled(conn):
+    # A run no worker has claimed is cancelled outright.
+    jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]  # draft
+    conn.execute("select cancel_run(%s)", (jid,))
+    assert conn.execute("select state from jobs where id=%s", (jid,)).fetchone()[0] == "cancelled"
+
+    qid = conn.execute(
+        "insert into jobs (stage, state) values ('map-ingredient', 'queued') returning id"
+    ).fetchone()[0]
+    conn.execute("select cancel_run(%s)", (qid,))
+    assert conn.execute("select state from jobs where id=%s", (qid,)).fetchone()[0] == "cancelled"
+
+
+def test_cancel_run_running_requests_cooperative_stop(conn):
+    # An in-flight run is asked to stop ('cancelling'); the worker turns that into
+    # terminal 'cancelled' once the stage bails.
+    rid = conn.execute(
+        "insert into jobs (stage, state) values ('map-ingredient', 'running') returning id"
+    ).fetchone()[0]
+    conn.execute("select cancel_run(%s)", (rid,))
+    assert conn.execute("select state from jobs where id=%s", (rid,)).fetchone()[0] == "cancelling"
+
+
+def test_cancel_run_missing_raises(conn):
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):  # 23503, per start_run
+        conn.execute("select cancel_run(999999)")
+
+
 def test_run_lifecycle(conn):
     r1, r2 = _recipe(conn), _recipe(conn)
     jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]

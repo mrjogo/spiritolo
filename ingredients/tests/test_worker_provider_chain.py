@@ -262,6 +262,35 @@ def test_llm_fatal_error_aborts_run_fast():
     assert prov.calls == 1  # fatal -> no retry, abort on the first pack
 
 
+@dataclass
+class _CountingProvider:
+    cost_per_call: int = 0
+    calls: int = 0
+
+    def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+        self.calls += 1
+        ids = packing.decode_request(user_prompt)
+        rows = [{"id": i, "answer": f"a:{i}"} for i in ids]
+        return ProviderResult(raw_text=packing.encode_response(rows), model_id="x")
+
+
+def test_chain_stops_between_packs_on_should_stop():
+    # should_stop trips after the first pack -> the remaining packs are never
+    # called and their items are parked (cooperative cancel granularity).
+    prov = _CountingProvider()
+    chain = ProviderChain(
+        tiers=[("ollama", prov)],
+        pack_size=1,
+        should_stop=lambda: prov.calls >= 1,  # stop once the first pack ran
+    )
+
+    res = chain.resolve([Item("1"), Item("2"), Item("3")])
+
+    assert res.resolved == {"1": "a:1"}
+    assert set(res.parked) == {"2", "3"}
+    assert prov.calls == 1
+
+
 def test_llm_circuit_breaker_aborts_after_consecutive_pack_failures(_no_backoff):
     # Persistent transient errors: each pack retries then parks; after
     # _CONSECUTIVE_FAIL_ABORT parked packs the breaker fails the run fast

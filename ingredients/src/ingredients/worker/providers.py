@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -107,6 +108,11 @@ class ProviderChain:
     tiers: list[tuple[str, Any]]
     pack_size: int = DEFAULT_PACK_SIZE
     meter: CostMeter = field(default_factory=CostMeter)
+    # Cooperative-cancel hook: when it returns True the LLM tier stops between
+    # packs, parking the remaining items. The worker wires this to the run's
+    # cancel signal so a cancelled run stops promptly instead of draining every
+    # pack. None (the default) means never stop.
+    should_stop: Callable[[], bool] | None = None
 
     def resolve(self, items: list[Item], *, system_prompt: str = "") -> ChainResult:
         """Resolve ``items`` through the tiers in order.
@@ -200,6 +206,12 @@ class ProviderChain:
         consecutive_failures = 0
 
         for group in _packing.chunk(pending, self.pack_size):
+            if self.should_stop is not None and self.should_stop():
+                # Cancel requested: park the rest of the residue and stop. What's
+                # already resolved this tier stands; the parked items stay
+                # pending for a later re-run.
+                parked.extend(it.id for it in group)
+                break
             if metered:
                 # Cost cap is enforced BEFORE the call, so a breaching chunk is
                 # never spent and its items stay unprocessed (raises out).

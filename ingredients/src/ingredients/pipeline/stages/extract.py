@@ -175,10 +175,15 @@ def extract_stage_fn(
     if not pages:
         return counts
 
+    should_stop = job.get("should_stop")
     fetch = functools.partial(_read_html, _reader())
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for chunk in _windows(pages, window):
+            if should_stop is not None and should_stop():
+                break  # cancel requested: leave the rest pending for a re-run
             for page, html in pool.map(fetch, chunk):
+                if should_stop is not None and should_stop():
+                    break
                 if html is None:
                     counts["html_missing"] += 1
                     _record(conn, page["id"], outcome="failed", method="deterministic",
