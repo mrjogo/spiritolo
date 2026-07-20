@@ -7,15 +7,21 @@ psycopg connection — the caller owns the transaction (commit on success, roll
 back on failure), which is what makes the SKIP-LOCKED contention test possible
 (both connections hold their row locks until they commit).
 
-The claim predicate mirrors the ``jobs_claimable_idx`` partial index:
+The claim predicate:
 
     state = 'queued'
     AND (NOT requires_approval OR approved)          -- approval gate
-    AND (cost_estimate_cents IS NULL                 -- free work, or
+    AND (:max_cost_cents IS NULL                     -- no worker budget = unlimited, or
+         OR cost_estimate_cents IS NULL              -- unestimated work, or
          OR cost_estimate_cents <= :max_cost_cents)  -- within the worker budget
 
-so a metered job whose estimate exceeds the worker's ``max_cost_cents`` budget
-(or that has no budget at all) is left on the queue.
+A ``NULL`` ``max_cost_cents`` means the worker has no budget ceiling and claims
+any job — the real spend ceiling is the *per-job* ``jobs.max_cost_cents`` cap
+(set at run assembly, enforced live by ``CostMeter``). Only a worker given an
+explicit budget leaves an over-estimate job on the queue. (A ``NULL`` estimate
+still always claims.) Without this ``:max_cost_cents IS NULL`` short-circuit,
+``cost_estimate_cents <= NULL`` is SQL ``NULL`` and silently blocks *every*
+estimated run.
 """
 from __future__ import annotations
 
@@ -35,7 +41,8 @@ where id = (
     from jobs
     where state = 'queued'
       and (not requires_approval or approved)
-      and (cost_estimate_cents is null
+      and (%(max_cost_cents)s::int is null
+           or cost_estimate_cents is null
            or cost_estimate_cents <= %(max_cost_cents)s)
     order by created_at
     for update skip locked
