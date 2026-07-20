@@ -96,7 +96,7 @@ export function StageRunsBrowser() {
   if (outcome) filters.push({ col: 'outcome', op: 'eq', value: outcome });
   if (version) filters.push({ col: 'code_version', op: 'eq', value: version });
 
-  const { rows, total } = usePagedQuery<StageRunListRow>({
+  const { rows, total, status } = usePagedQuery<StageRunListRow>({
     table: 'job_items',
     select: LIST_SELECT,
     filters,
@@ -133,6 +133,7 @@ export function StageRunsBrowser() {
           <DataTable
             columns={COLUMNS}
             rows={rows}
+            loading={status === 'loading'}
             rowKey={(r) => r.id}
             onRowClick={(r) => select(String(r.id))}
           />

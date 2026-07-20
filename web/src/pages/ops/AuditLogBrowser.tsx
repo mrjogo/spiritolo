@@ -64,7 +64,7 @@ export function AuditLogBrowser() {
   if (actorKind) filters.push({ col: 'actor_kind', op: 'eq', value: actorKind });
   if (tableName) filters.push({ col: 'table_name', op: 'eq', value: tableName });
 
-  const { rows, total } = usePagedQuery<AuditLogListRow>({
+  const { rows, total, status } = usePagedQuery<AuditLogListRow>({
     table: 'audit_log_public',
     select: LIST_SELECT,
     filters,
@@ -95,6 +95,7 @@ export function AuditLogBrowser() {
           <DataTable
             columns={COLUMNS}
             rows={rows}
+            loading={status === 'loading'}
             rowKey={(r) => r.id}
             onRowClick={(r) => select(String(r.id))}
           />

@@ -43,7 +43,7 @@ const COLUMNS: DataTableColumn<ClusterListRow>[] = [
 // this cluster_key plus every member recipe currently pointing at it.
 export function ClustersBrowser() {
   const [page, setPage] = useState(1);
-  const { rows, total } = usePagedQuery<ClusterListRow>({
+  const { rows, total, status } = usePagedQuery<ClusterListRow>({
     table: 'recipe_clusters',
     select: LIST_SELECT,
     order: { col: 'recipe_count', asc: false },
@@ -59,6 +59,7 @@ export function ClustersBrowser() {
           <DataTable
             columns={COLUMNS}
             rows={rows}
+            loading={status === 'loading'}
             rowKey={(r) => r.cluster_key}
             onRowClick={(r) => select(r.cluster_key)}
           />

@@ -637,3 +637,10 @@
   font-weight: 500;
   margin: 8px 0;
 }
+
+/* --- Runs list loading state ------------------------------------------- */
+.runs-loading {
+  padding: 28px 12px;
+  color: var(--runs-slate);
+  font-size: 14px;
+}

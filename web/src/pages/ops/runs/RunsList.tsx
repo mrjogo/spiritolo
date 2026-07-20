@@ -99,7 +99,11 @@ export function RunsList() {
         </div>
       )}
 
-      {isEmpty ? (
+      {status === 'loading' ? (
+        <div className="runs-loading" aria-busy="true">
+          <span className="ops-spinner" aria-hidden="true" /> Loading runs…
+        </div>
+      ) : isEmpty ? (
         <div className="runs-empty">
           <h3>No runs yet</h3>
           <p>

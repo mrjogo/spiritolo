@@ -44,7 +44,7 @@ const PAGE_SIZE = 50;
 
 export function ExportsBrowser() {
   const [page, setPage] = useState(1);
-  const { rows, total } = usePagedQuery<ExportListRow>({
+  const { rows, total, status } = usePagedQuery<ExportListRow>({
     table: 'recipe_exports',
     select: LIST_SELECT,
     order: { col: 'exported_at', asc: false },
@@ -60,6 +60,7 @@ export function ExportsBrowser() {
           <DataTable
             columns={COLUMNS}
             rows={rows}
+            loading={status === 'loading'}
             rowKey={(r) => r.id}
             onRowClick={(r) => select(String(r.id))}
           />
