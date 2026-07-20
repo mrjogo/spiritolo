@@ -351,7 +351,7 @@ def test_blockers_report_all_dimensions(db):
     # An open map form proposal naming this node as parent is a blocker.
     db.execute(
         "insert into human_reviews (entity_kind, entity_id, stage, origin, payload) "
-        "values ('ingredient_name', 'zest of a', 'map', 'machine_proposal', "
+        "values ('ingredient_name', 'zest of a', 'map-ingredient', 'machine_proposal', "
         "jsonb_build_object('kind','form','proposed_parent_id', 1))"
     )
     db.commit()

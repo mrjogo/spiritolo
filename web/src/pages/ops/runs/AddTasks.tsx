@@ -29,8 +29,16 @@ import type { FacetOption } from '../../../ui/runs/FilterPopover';
 import './runs.css';
 
 const PAGE_SIZE = 50;
-const ENTITY_TYPE = 'recipe';
 const DEFAULT_SORT: Sort = { col: 'last_run', asc: false };
+
+// The entity a run's items point at depends on its stage: the node
+// harmonization stages operate on taxonomy nodes, extract on pages, everything
+// else on recipes. (Mirrors add_run_items_by_filter's server-side v_etype.)
+function entityTypeForStage(stage: string): string {
+  if (stage === 'combine-nodes' || stage === 'connect-nodes') return 'taxonomy_node';
+  if (stage === 'extract-recipe') return 'page';
+  return 'recipe';
+}
 
 const SORT_OPTIONS = [
   { col: 'last_run', label: 'Last run' },
@@ -59,6 +67,7 @@ export function AddTasks() {
 
   const { run } = useRun(jobId);
   const stage = run?.stage ?? '';
+  const entityType = entityTypeForStage(stage);
 
   const [filterState, setFilterState] = useState<RunFilterState>(emptyFilterState);
   const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
@@ -106,7 +115,7 @@ export function AddTasks() {
     if (ids === null) {
       await addByFilter.mutateAsync({ job_id: jobId!, p_filter: pFilter });
     } else if (ids.length > 0) {
-      await addByIds.mutateAsync({ job_id: jobId!, entity_type: ENTITY_TYPE, entity_ids: ids });
+      await addByIds.mutateAsync({ job_id: jobId!, entity_type: entityType, entity_ids: ids });
     }
     navigate(`/ops/runs/${jobId}`);
   }
@@ -183,7 +192,7 @@ export function AddTasks() {
               </th>
               <SortableTh label="Recipe" col="title" sort={sort} onSort={setSort} />
               <SortableTh label="Source" col="source" sort={sort} onSort={setSort} />
-              <SortableTh label="Map status" col="status" sort={sort} onSort={setSort} />
+              <SortableTh label="Status" col="status" sort={sort} onSort={setSort} />
               <SortableTh label="Last run" col="last_run" sort={sort} onSort={setSort} />
             </tr>
           </thead>
@@ -202,7 +211,7 @@ export function AddTasks() {
                   </td>
                   <td data-label="Recipe" className="title">{r.title}</td>
                   <td data-label="Source">{r.source}</td>
-                  <td data-label="Map status">
+                  <td data-label="Status">
                     <StatusBadge status={r.status} detail={r.status_detail} />
                   </td>
                   <td data-label="Last run">{r.last_run_label ?? '—'}</td>

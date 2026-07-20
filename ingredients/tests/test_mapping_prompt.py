@@ -5,8 +5,8 @@ from ingredients.mapping.prompt import (
 
 def test_user_prompt_includes_name_unit_and_candidates():
     candidates = [
-        {"node_id": 1, "display_name": "Lemon",       "similarity": 0.91, "parents": ["citrus"]},
-        {"node_id": 2, "display_name": "Lemon Juice", "similarity": 0.88, "parents": ["lemon"]},
+        {"slug": "lemon",       "display_name": "Lemon",       "similarity": 0.91, "parents": ["citrus"]},
+        {"slug": "lemon-juice", "display_name": "Lemon Juice", "similarity": 0.88, "parents": ["lemon"]},
     ]
     prompt = build_user_prompt(
         normalized_name="lemon",
@@ -18,35 +18,13 @@ def test_user_prompt_includes_name_unit_and_candidates():
     assert "oz" in prompt
     assert "punch" in prompt
     assert "Lemon Juice" in prompt
-    assert '"node_id": 1' in prompt or '"node_id":1' in prompt or "node_id=1" in prompt
+    assert '"slug": "lemon-juice"' in prompt or '"slug":"lemon-juice"' in prompt
 
 
-def test_parse_response_chosen_node():
-    raw = '{"action": "chose", "node_id": 17}'
+def test_parse_response_chose_slug():
+    raw = '{"action": "chose_slug", "slug": "gin"}'
     out = parse_response(raw)
-    assert out == {"action": "chose", "node_id": 17}
-
-
-def test_parse_response_brand_proposal():
-    raw = (
-        '{"action": "propose_brand", "slug": "tanqueray", '
-        '"display_name": "Tanqueray", "parent_slug": "london-dry-gin", '
-        '"node_kind": "brand"}'
-    )
-    out = parse_response(raw)
-    assert out["action"] == "propose_brand"
-    assert out["slug"] == "tanqueray"
-    assert out["node_kind"] == "brand"
-
-
-def test_parse_response_form_proposal():
-    raw = (
-        '{"action": "propose_form", "slug": "lemon-zest", '
-        '"display_name": "Lemon Zest", "parent_slug": "lemon"}'
-    )
-    out = parse_response(raw)
-    assert out["action"] == "propose_form"
-    assert out["slug"] == "lemon-zest"
+    assert out == {"action": "chose_slug", "slug": "gin"}
 
 
 def test_parse_response_abstain():
@@ -59,14 +37,23 @@ def test_parse_response_rejects_unknown_action():
         parse_response('{"action": "explode"}')
 
 
+def test_parse_response_rejects_removed_propose_actions():
+    """propose_brand / propose_form are no longer part of the contract."""
+    import pytest
+    with pytest.raises(ValueError):
+        parse_response('{"action": "propose_brand", "slug": "x"}')
+    with pytest.raises(ValueError):
+        parse_response('{"action": "propose_form", "slug": "x"}')
+
+
 def test_parse_response_handles_code_fence_wrapping():
-    raw = '```json\n{"action": "chose", "node_id": 5}\n```'
-    assert parse_response(raw) == {"action": "chose", "node_id": 5}
+    raw = '```json\n{"action": "chose_slug", "slug": "gin"}\n```'
+    assert parse_response(raw) == {"action": "chose_slug", "slug": "gin"}
 
 
 def test_prompt_hash_is_stable_for_identical_inputs():
-    h1 = prompt_hash("lemon", "oz", "punch", [{"node_id": 1, "display_name": "L"}])
-    h2 = prompt_hash("lemon", "oz", "punch", [{"node_id": 1, "display_name": "L"}])
+    h1 = prompt_hash("lemon", "oz", "punch", [{"slug": "lemon", "display_name": "L"}])
+    h2 = prompt_hash("lemon", "oz", "punch", [{"slug": "lemon", "display_name": "L"}])
     assert h1 == h2
-    h3 = prompt_hash("lime", "oz", "punch", [{"node_id": 1, "display_name": "L"}])
+    h3 = prompt_hash("lime", "oz", "punch", [{"slug": "lemon", "display_name": "L"}])
     assert h1 != h3

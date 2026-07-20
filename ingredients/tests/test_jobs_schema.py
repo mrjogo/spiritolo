@@ -56,12 +56,14 @@ def test_jobs_shape(db_conn):
         "last_heartbeat", "created_by", "created_at", "started_at",
         "finished_at",
         # explicit-runs additions
-        "llm_provider", "llm_model", "apply_mode",
+        "llm_provider", "llm_model",
     ]
     for c in expected:
         assert c in cols, f"jobs missing column {c!r}"
     # batch_id folded away with job_batches.
     assert "batch_id" not in cols
+    # apply_mode dropped with the apply/hold teardown.
+    assert "apply_mode" not in cols
 
     # state is the job_state enum.
     assert cols["state"][0] == "USER-DEFINED"
@@ -111,12 +113,6 @@ def test_jobs_shape(db_conn):
     assert "created_at" in d
     assert "state = 'queued'" in d
     assert "requires_approval" in d and "approved" in d
-
-    # apply_mode CHECK(auto,hold).
-    am_checks = [c for c in _checks(db_conn, "jobs") if "apply_mode" in c]
-    assert any(
-        "'auto'" in c and "'hold'" in c for c in am_checks
-    ), f"no apply_mode CHECK found in {am_checks}"
 
 
 def test_jobs_rls_and_realtime(db_conn):

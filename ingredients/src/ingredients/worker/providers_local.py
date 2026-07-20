@@ -53,14 +53,21 @@ def hosted_client_kwargs(env: Env | None = None) -> dict[str, Any]:  # noqa: ARG
 
 
 def build_local_ollama_provider(
-    *, client_factory: ClientFactory | None = None, env: Env | None = None
+    *,
+    client_factory: ClientFactory | None = None,
+    env: Env | None = None,
+    model_id: str | None = None,
 ) -> OllamaProvider:
     """Build the local Ollama provider whose client tunnels through the tailnet
-    proxy (``TS_LOCAL_PROXY``); base URL from ``OLLAMA_BASE_URL``."""
+    proxy (``TS_LOCAL_PROXY``); base URL from ``OLLAMA_BASE_URL``.
+
+    ``model_id`` (the run's ``jobs.llm_model``) selects the model; a falsy value
+    falls back to ``OllamaProvider``'s DEFAULT model."""
     factory = httpx.Client if client_factory is None else client_factory
     base_url = _env(env).get("OLLAMA_BASE_URL", DEFAULT_BASE_URL)
     client = factory(**local_client_kwargs(env))
-    return OllamaProvider(client=client, base_url=base_url)
+    model_kwargs = {"model_id": model_id} if model_id else {}
+    return OllamaProvider(client=client, base_url=base_url, **model_kwargs)
 
 
 def build_openai_http_client(
@@ -87,38 +94,52 @@ def build_scraperapi_http_client(
     return factory(**hosted_client_kwargs(env))
 
 
-def build_provider_impls(
-    *, env: Env | None = None, client_factory: ClientFactory | None = None
-) -> dict[str, Any]:
-    """The worker's ``{provider_id -> impl}`` registry, built from the env.
+def build_provider_for_run(
+    provider_id: str | None,
+    model_id: str | None = None,
+    *,
+    env: Env | None = None,
+    client_factory: ClientFactory | None = None,
+) -> Any | None:
+    """Build the single LLM provider a run selected, or ``None``.
 
-    The local Ollama tier (free) is always registered under ``ollama`` — the one
-    id for the local LLM, no ``local`` / ``barbot`` synonyms. Each hosted
-    provider — ``openai`` / ``claude`` / ``deepseek`` — is registered only when
-    its API key is present in ``env``; an absent key means an absent id, so a
-    ``PROVIDER_CHAIN_CONFIG`` that names an unconfigured provider fails loudly
-    (``KeyError`` in the chain) rather than silently skipping the tier. Hosted
-    clients take the direct route; only the local Ollama client tunnels the
-    tailnet proxy (see module docstring).
+    A run carries its LLM tier on the job row: ``jobs.llm_provider`` (chosen at
+    run assembly, read here as ``provider_id``) and ``jobs.llm_model`` (read as
+    ``model_id``). This constructs exactly that one provider impl, threading
+    ``model_id`` into its construction; a falsy ``model_id`` falls back to the
+    provider's DEFAULT model.
+
+    ``ollama`` (local, free) is always available — the one id for the local LLM,
+    no ``local`` / ``barbot`` synonyms — and its client tunnels the tailnet proxy
+    (see module docstring). Each hosted provider — ``openai`` / ``claude`` /
+    ``deepseek`` — is returned only when its API key is present in ``env``; an
+    absent key (or an unknown / ``None`` ``provider_id``) yields ``None``, and the
+    run then runs deterministic-only (no LLM tier). Hosted clients take the direct
+    route.
     """
     e = _env(env)
-    impls: dict[str, Any] = {
-        "ollama": build_local_ollama_provider(client_factory=client_factory, env=env),
-    }
-    if e.get("OPENAI_API_KEY"):
-        impls["openai"] = OpenAIProvider.from_env(
+    if provider_id == "ollama":
+        return build_local_ollama_provider(
+            client_factory=client_factory, env=env, model_id=model_id
+        )
+    model_kwargs = {"model_id": model_id} if model_id else {}
+    if provider_id == "openai" and e.get("OPENAI_API_KEY"):
+        return OpenAIProvider.from_env(
             api_key=e["OPENAI_API_KEY"],
             http_client=build_openai_http_client(client_factory=client_factory, env=env),
+            **model_kwargs,
         )
-    if e.get("ANTHROPIC_API_KEY"):
-        impls["claude"] = ClaudeProvider.from_env(
+    if provider_id == "claude" and e.get("ANTHROPIC_API_KEY"):
+        return ClaudeProvider.from_env(
             api_key=e["ANTHROPIC_API_KEY"],
             http_client=build_claude_http_client(client_factory=client_factory, env=env),
+            **model_kwargs,
         )
-    if e.get("DEEPSEEK_API_KEY"):
+    if provider_id == "deepseek" and e.get("DEEPSEEK_API_KEY"):
         # DeepSeek is OpenAI-compatible, so it takes the same direct-route client.
-        impls["deepseek"] = build_deepseek_provider(
+        return build_deepseek_provider(
             api_key=e["DEEPSEEK_API_KEY"],
             http_client=build_openai_http_client(client_factory=client_factory, env=env),
+            **model_kwargs,
         )
-    return impls
+    return None

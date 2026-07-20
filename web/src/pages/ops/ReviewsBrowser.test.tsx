@@ -32,7 +32,7 @@ function renderBrowser() {
 
 function review(over: Record<string, unknown>) {
   return {
-    id: 1, entity_kind: 'x', entity_id: 'e', stage: 'map',
+    id: 1, entity_kind: 'x', entity_id: 'e', stage: 'map-ingredient',
     state: 'open', origin: 'human_flag', payload: null, note: null, ...over,
   };
 }
@@ -48,14 +48,14 @@ describe('<ReviewsBrowser>', () => {
       status: 'loaded',
       total: 2,
       rows: [
-        review({ id: 1, entity_id: 'gin', stage: 'map' }),
-        review({ id: 2, entity_id: '5:0', stage: 'parse' }),
+        review({ id: 1, entity_id: 'gin', stage: 'map-ingredient' }),
+        review({ id: 2, entity_id: '5:0', stage: 'parse-ingredients' }),
       ],
     });
     renderBrowser();
     expect(screen.getAllByTestId('review-card')).toHaveLength(2);
-    expect(within(screen.getByRole('region', { name: 'map reviews' })).getByText('gin')).toBeInTheDocument();
-    expect(within(screen.getByRole('region', { name: 'parse reviews' })).getByText('5:0')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'map-ingredient reviews' })).getByText('gin')).toBeInTheDocument();
+    expect(within(screen.getByRole('region', { name: 'parse-ingredients reviews' })).getByText('5:0')).toBeInTheDocument();
   });
 
   it('lists stuck needs_review rows (abstains) separately, excluding open-review reasons', () => {
@@ -63,8 +63,8 @@ describe('<ReviewsBrowser>', () => {
     useNeedsReviewMock.mockReturnValue({
       status: 'loaded',
       rows: [
-        { entity_kind: 'recipe', entity_id: '10', stage: 'parse', reason: 'abstain' },
-        { entity_kind: 'ingredient', entity_id: 'suze', stage: 'map', reason: 'human_flag' },
+        { entity_kind: 'recipe', entity_id: '10', stage: 'parse-ingredients', reason: 'abstain' },
+        { entity_kind: 'ingredient', entity_id: 'suze', stage: 'map-ingredient', reason: 'human_flag' },
       ],
     });
     renderBrowser();

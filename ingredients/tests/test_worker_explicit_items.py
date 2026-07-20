@@ -1,10 +1,10 @@
-"""The worker processes a run's explicit `job_items`, honoring apply_mode.
+"""The worker processes a run's explicit `job_items`.
 
 When a job carries an id (a real run), a stage_fn resolves its work queue from
 that job's *pending* members — not the version NOT-EXISTS predicate — and moves
-each member to a terminal state per the run's apply_mode:
-  auto  + resolved -> applied
-  hold  + resolved -> pending_apply
+each member to a terminal state (application is always immediate):
+  resolved -> applied
+  failed   -> failed
   parked (pending/abstain/proposes_new) -> flagged
 Non-member entities are never touched. The CLI cold-build path (job id None)
 still uses the predicate queue + the append-versioned ledger upsert.
@@ -100,14 +100,14 @@ def _states(conn, jid):
 # ---------------------------------------------------------------------------
 def test_run_item_ids_returns_pending_members(conn):
     r1, r2 = _recipe(conn, ["bourbon"]), _recipe(conn, ["bourbon"])
-    jid = conn.execute("select create_run('map','auto')").fetchone()[0]
+    jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]
     _start(conn, jid, [r1, r2])
-    assert sorted(base.run_item_ids(conn, job_id=jid, stage="map")) == sorted([r1, r2])
+    assert sorted(base.run_item_ids(conn, job_id=jid, stage="map-ingredient")) == sorted([r1, r2])
 
 
 def test_auto_run_applies_only_its_members(conn):
     r1, r2, r3 = (_recipe(conn, ["bourbon"]) for _ in range(3))
-    jid = conn.execute("select create_run('map','auto')").fetchone()[0]
+    jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]
     _start(conn, jid, [r1, r2])  # r3 not a member
     map_stage_fn(_job(conn, jid), conn, _FakeChain())
     assert _states(conn, jid) == {r1: "applied", r2: "applied"}
@@ -117,17 +117,12 @@ def test_auto_run_applies_only_its_members(conn):
     ).fetchone()[0] == 0
 
 
-def test_hold_run_parks_resolved_as_pending_apply(conn):
-    r1 = _recipe(conn, ["bourbon"])
-    jid = conn.execute("select create_run('map','hold')").fetchone()[0]
-    _start(conn, jid, [r1])
-    map_stage_fn(_job(conn, jid), conn, _FakeChain())
-    assert _states(conn, jid) == {r1: "pending_apply"}
-
-
 def test_unresolved_member_is_flagged(conn):
-    r1 = _recipe(conn, ["mystery cordial"])  # no alias, no LLM -> parked
-    jid = conn.execute("select create_run('map','auto')").fetchone()[0]
+    # An un-slugifiable name can't mint a node, so it abstains -> the recipe stays
+    # pending -> the member is flagged. (A slugifiable miss would instead mint a
+    # provisional node and resolve.)
+    r1 = _recipe(conn, ["!!!"])  # no alias, no LLM, no valid slug -> parked
+    jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]
     _start(conn, jid, [r1])
     map_stage_fn(_job(conn, jid), conn, None)  # providers None -> LLM tier skipped
     assert _states(conn, jid) == {r1: "flagged"}
@@ -135,7 +130,7 @@ def test_unresolved_member_is_flagged(conn):
 
 def test_member_row_updated_not_duplicated(conn):
     r1 = _recipe(conn, ["bourbon"])
-    jid = conn.execute("select create_run('map','auto')").fetchone()[0]
+    jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]
     _start(conn, jid, [r1])
     map_stage_fn(_job(conn, jid), conn, _FakeChain())
     # Exactly one job_item for the member (the pending row was updated in place),
@@ -150,9 +145,8 @@ def test_member_row_updated_not_duplicated(conn):
 
 
 def test_item_state_mapping():
-    assert base.item_state("resolved", "auto") == "applied"
-    assert base.item_state("resolved", "hold") == "pending_apply"
-    assert base.item_state("failed", "auto") == "failed"
-    assert base.item_state("pending", "auto") == "flagged"
-    assert base.item_state("abstain", "hold") == "flagged"
-    assert base.item_state("proposes_new", "auto") == "flagged"
+    assert base.item_state("resolved") == "applied"
+    assert base.item_state("failed") == "failed"
+    assert base.item_state("pending") == "flagged"
+    assert base.item_state("abstain") == "flagged"
+    assert base.item_state("proposes_new") == "flagged"

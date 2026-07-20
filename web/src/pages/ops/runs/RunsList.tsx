@@ -3,7 +3,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { usePagedQuery } from '../../../ui/hooks/usePagedQuery';
 import { Pager } from '../../../ui/Pager';
 import { PIPELINE_STAGES } from '../../../ui/pipelineStages';
-import { useCreateRun, type RunState, type ApplyMode } from '../../../ui/runs/useRun';
+import { useCreateRun, type RunState } from '../../../ui/runs/useRun';
 import './runs.css';
 
 const PAGE_SIZE = 25;
@@ -26,8 +26,7 @@ export function RunsList() {
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const [creating, setCreating] = useState(false);
-  const [newStage, setNewStage] = useState<string>(PIPELINE_STAGES[5]); // map
-  const [applyMode, setApplyMode] = useState<ApplyMode>('hold');
+  const [newStage, setNewStage] = useState<string>(PIPELINE_STAGES[5]); // map-ingredient
 
   const { rows, total, status } = usePagedQuery<RunListRow>({
     table: 'runs',
@@ -40,7 +39,7 @@ export function RunsList() {
   const createRun = useCreateRun();
 
   async function handleCreate() {
-    const jobId = await createRun.mutateAsync({ stage: newStage, apply_mode: applyMode });
+    const jobId = await createRun.mutateAsync({ stage: newStage });
     navigate(`/ops/runs/${jobId}`);
   }
 
@@ -60,10 +59,6 @@ export function RunsList() {
               {PIPELINE_STAGES.map((s) => (
                 <option key={s} value={s}>{s}</option>
               ))}
-            </select>
-            <select aria-label="apply mode" value={applyMode} onChange={(e) => setApplyMode(e.target.value as ApplyMode)}>
-              <option value="hold">hold — review before apply</option>
-              <option value="auto">auto — apply on success</option>
             </select>
             <button
               type="button"

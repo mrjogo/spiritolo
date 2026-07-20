@@ -3,11 +3,10 @@ import { Pager } from '../Pager';
 import { WhyAddedBadge, TaskStateChip } from './badges';
 import { RUN_STATUS_CHIPS, batchMode } from './tasksTableModel';
 import type { RunItem } from './useRunItems';
-import type { RunState, ApplyMode } from './useRun';
+import type { RunState } from './useRun';
 
 interface Props {
   runState: RunState;
-  applyMode: ApplyMode;
   items: RunItem[];
   total: number;
   /** status → count from run_items_facets, for the chip counts. */
@@ -22,7 +21,6 @@ interface Props {
   selectedIds: Set<string>;
   onSelectionChange: (ids: string[]) => void;
   onRemove: (ids: string[]) => void;
-  onApply: (ids: string[]) => void;
 }
 
 const COLUMNS: DataTableColumn<RunItem>[] = [
@@ -33,11 +31,11 @@ const COLUMNS: DataTableColumn<RunItem>[] = [
 ];
 
 export function TasksTable({
-  runState, applyMode, items, total, statusFacets, activeStatus, onStatus,
+  runState, items, total, statusFacets, activeStatus, onStatus,
   search, onSearch, page, pageSize, onPage, selectedIds, onSelectionChange,
-  onRemove, onApply,
+  onRemove,
 }: Props) {
-  const mode = batchMode(runState, applyMode);
+  const mode = batchMode(runState);
   const selectedList = [...selectedIds];
   const hasSelection = selectedList.length > 0;
 
@@ -88,11 +86,6 @@ export function TasksTable({
           {mode === 'remove' && (
             <button type="button" className="runs-btn--danger" onClick={() => onRemove(selectedList)}>
               Remove from run
-            </button>
-          )}
-          {mode === 'apply' && (
-            <button type="button" className="runs-btn--primary" onClick={() => onApply(selectedList)}>
-              Apply {selectedList.length.toLocaleString()}
             </button>
           )}
           <button type="button" onClick={() => onSelectionChange([])}>

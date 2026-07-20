@@ -13,7 +13,6 @@ const ITEMS: RunItem[] = [
 function baseProps(overrides: Partial<React.ComponentProps<typeof TasksTable>> = {}): React.ComponentProps<typeof TasksTable> {
   return {
     runState: 'draft',
-    applyMode: 'hold',
     items: ITEMS,
     total: 2,
     statusFacets: { flagged: 1, never_run: 1, failed: 0 },
@@ -27,19 +26,16 @@ function baseProps(overrides: Partial<React.ComponentProps<typeof TasksTable>> =
     selectedIds: new Set<string>(),
     onSelectionChange: vi.fn(),
     onRemove: vi.fn(),
-    onApply: vi.fn(),
     ...overrides,
   };
 }
 
 describe('batchMode', () => {
-  it('draft → remove, done+hold → apply, running → inspect', () => {
-    expect(batchMode('draft', 'hold')).toBe('remove');
-    expect(batchMode('draft', 'auto')).toBe('remove');
-    expect(batchMode('done', 'hold')).toBe('apply');
-    expect(batchMode('done', 'auto')).toBe('inspect');
-    expect(batchMode('running', 'hold')).toBe('inspect');
-    expect(batchMode('queued', 'hold')).toBe('inspect');
+  it('draft → remove, anything else → inspect', () => {
+    expect(batchMode('draft')).toBe('remove');
+    expect(batchMode('done')).toBe('inspect');
+    expect(batchMode('running')).toBe('inspect');
+    expect(batchMode('queued')).toBe('inspect');
   });
 });
 
@@ -59,19 +55,15 @@ describe('<TasksTable> batch bar', () => {
     expect(onRemove).toHaveBeenCalledWith(['1', '2']);
   });
 
-  it('a running run is inspect-only — no Remove, no Apply', () => {
+  it('a running run is inspect-only — no Remove', () => {
     render(<TasksTable {...baseProps({ runState: 'running', selectedIds: new Set(['1']) })} />);
     expect(screen.getByText(/inspecting/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Remove from run' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^Apply/ })).not.toBeInTheDocument();
   });
 
-  it('a done + hold run offers a bulk Apply', async () => {
-    const onApply = vi.fn();
-    render(<TasksTable {...baseProps({ runState: 'done', applyMode: 'hold', selectedIds: new Set(['1', '2']), onApply })} />);
-    const apply = screen.getByRole('button', { name: /^Apply 2/ });
-    await userEvent.click(apply);
-    expect(onApply).toHaveBeenCalledWith(['1', '2']);
+  it('a done run is inspect-only — no Remove', () => {
+    render(<TasksTable {...baseProps({ runState: 'done', selectedIds: new Set(['1', '2']) })} />);
+    expect(screen.getByText(/inspecting/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Remove from run' })).not.toBeInTheDocument();
   });
 

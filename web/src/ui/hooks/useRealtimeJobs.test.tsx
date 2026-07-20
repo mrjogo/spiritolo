@@ -61,12 +61,12 @@ beforeEach(() => {
   vi.clearAllMocks();
   capturedOnChange = null;
   capturedSubscribe = null;
-  fromSelectMock.mockResolvedValue({ data: [{ id: 1, stage: 'extract', state: 'queued' }], error: null });
+  fromSelectMock.mockResolvedValue({ data: [{ id: 1, stage: 'extract-recipe', state: 'queued' }], error: null });
 });
 
 describe('useRealtimeJobs', () => {
   it('merges a postgres_changes payload into the cache without a refetch', async () => {
-    const { result } = renderHook(() => useRealtimeJobs({ stage: 'extract' }), {
+    const { result } = renderHook(() => useRealtimeJobs({ stage: 'extract-recipe' }), {
       wrapper: wrapperWith(makeClient()),
     });
 
@@ -78,12 +78,12 @@ describe('useRealtimeJobs', () => {
 
     capturedOnChange?.({
       eventType: 'UPDATE',
-      new: { id: 1, stage: 'extract', state: 'running' },
-      old: { id: 1, stage: 'extract', state: 'queued' },
+      new: { id: 1, stage: 'extract-recipe', state: 'running' },
+      old: { id: 1, stage: 'extract-recipe', state: 'queued' },
     });
 
     await waitFor(() =>
-      expect(result.current.jobs).toEqual([{ id: 1, stage: 'extract', state: 'running' }]),
+      expect(result.current.jobs).toEqual([{ id: 1, stage: 'extract-recipe', state: 'running' }]),
     );
     // No additional fetch was triggered — the realtime payload updated the
     // cache directly.
@@ -92,7 +92,7 @@ describe('useRealtimeJobs', () => {
 
   it('falls back to polling and reports connected=false when the channel never subscribes', async () => {
     vi.useFakeTimers();
-    const { result } = renderHook(() => useRealtimeJobs({ stage: 'extract' }), {
+    const { result } = renderHook(() => useRealtimeJobs({ stage: 'extract-recipe' }), {
       wrapper: wrapperWith(makeClient()),
     });
 
@@ -100,7 +100,7 @@ describe('useRealtimeJobs', () => {
     expect(result.current.connected).toBe(false);
 
     fromSelectMock.mockResolvedValue({
-      data: [{ id: 1, stage: 'extract', state: 'succeeded' }],
+      data: [{ id: 1, stage: 'extract-recipe', state: 'succeeded' }],
       error: null,
     });
 

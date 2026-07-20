@@ -22,11 +22,13 @@ def conn(test_db_url: str):
         c.execute("truncate ingredient_resolutions restart identity cascade")
         c.execute("truncate job_items restart identity cascade")
         c.execute("truncate recipe_exports restart identity cascade")
+        c.execute("truncate taxonomy_nodes restart identity cascade")
         yield c
         c.execute("truncate recipes restart identity cascade")
         c.execute("truncate ingredient_resolutions restart identity cascade")
         c.execute("truncate job_items restart identity cascade")
         c.execute("truncate recipe_exports restart identity cascade")
+        c.execute("truncate taxonomy_nodes restart identity cascade")
 
 
 def _resolve(conn, name, slug):
@@ -98,7 +100,7 @@ def test_export_freezes_bundle_and_records_resolved(conn):
     assert conn.execute("select recipe_slug from recipes where id=%s", (rid,)).fetchone()[0] == "old-fashioned"
 
     outcome = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='export'", (rid,)
+        "select outcome from job_items where entity_id=%s and stage='export-recipegf'", (rid,)
     ).fetchone()[0]
     assert outcome == "resolved"
 
@@ -111,9 +113,41 @@ def test_export_pending_when_ingredient_unresolved(conn):
     assert counts["pending"] == 1
     assert conn.execute("select count(*) from recipe_exports").fetchone()[0] == 0
     outcome = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='export'", (rid,)
+        "select outcome from job_items where entity_id=%s and stage='export-recipegf'", (rid,)
     ).fetchone()[0]
     assert outcome == "pending"
+
+
+def test_export_skips_recipe_with_provisional_ingredient(conn):
+    # bourbon resolves to a slug, but that node is provisional -> the gate parks
+    # the recipe as pending and freezes NO bundle.
+    rid = _seed_ready_recipe(conn)
+    conn.execute(
+        "insert into taxonomy_nodes (slug, display_name, status) "
+        "values ('bourbon', 'bourbon', 'provisional')"
+    )
+
+    counts = export_stage_fn(_job(), conn, None)
+    assert counts["pending"] == 1
+    assert counts["exported"] == 0
+    assert conn.execute("select count(*) from recipe_exports").fetchone()[0] == 0
+    outcome = conn.execute(
+        "select outcome from job_items where entity_id=%s and stage='export-recipegf'", (rid,)
+    ).fetchone()[0]
+    assert outcome == "pending"
+
+    # Promote + requeue -> freezes normally.
+    conn.execute("update taxonomy_nodes set status='live' where slug='bourbon'")
+    conn.execute("delete from job_items where entity_id=%s and stage='export-recipegf'", (rid,))
+    counts2 = export_stage_fn(_job(), conn, None)
+    assert counts2["exported"] == 1
+    assert conn.execute(
+        "select count(*) from recipe_exports where recipe_id=%s", (rid,)
+    ).fetchone()[0] == 1
+    outcome2 = conn.execute(
+        "select outcome from job_items where entity_id=%s and stage='export-recipegf'", (rid,)
+    ).fetchone()[0]
+    assert outcome2 == "resolved"
 
 
 def test_export_is_idempotent_via_ledger(conn):
@@ -147,6 +181,6 @@ def test_export_batches_across_chunk_boundary(conn):
             == "old-fashioned"
         )
         outcome = conn.execute(
-            "select outcome from job_items where entity_id=%s and stage='export'", (rid,)
+            "select outcome from job_items where entity_id=%s and stage='export-recipegf'", (rid,)
         ).fetchone()[0]
         assert outcome == "resolved"

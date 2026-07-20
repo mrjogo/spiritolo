@@ -108,7 +108,7 @@ def test_chunk_boundary_matches_single_chunk(conn):
         for i, site in enumerate(sites)
     ]
     counts = cluster_stage_fn(_job(), conn, None, chunk_size=2)
-    assert counts == {"clustered": 5, "skipped": 0}
+    assert counts == {"clustered": 5, "skipped": 0, "pending": 0}
 
     # All five collapse to one cluster + variant.
     rows = conn.execute(
@@ -124,10 +124,44 @@ def test_chunk_boundary_matches_single_chunk(conn):
 
     # One resolved stage_run per recipe at the current version.
     runs = conn.execute(
-        "select entity_id, outcome, code_version from job_items where stage='cluster' order by entity_id"
+        "select entity_id, outcome, code_version from job_items where stage='cluster-recipes' order by entity_id"
     ).fetchall()
     assert [r[0] for r in runs] == sorted(rids)
     assert all(r[1] == "resolved" and r[2] == DEDUP_VERSION for r in runs)
+
+
+def test_cluster_skips_recipe_with_provisional_ingredient(conn):
+    # A recipe whose 'gin' ingredient resolves to a provisional node is gated:
+    # pending outcome, no cluster row / cluster_id written. Promoting the node to
+    # 'live' makes the recipe eligible on the next run.
+    rid = _negroni(conn, "https://ex.test/prov", "punch", _BASE)
+    conn.execute("update taxonomy_nodes set status='provisional' where slug='gin'")
+
+    counts = cluster_stage_fn(_job(), conn, None)
+    assert counts["pending"] == 1
+    assert counts["clustered"] == 0
+    assert conn.execute("select count(*) from recipe_clusters").fetchone()[0] == 0
+    assert conn.execute(
+        "select cluster_id from recipes where id=%s", (rid,)
+    ).fetchone()[0] is None
+    outcome = conn.execute(
+        "select outcome from job_items where entity_id=%s and stage='cluster-recipes'", (rid,)
+    ).fetchone()[0]
+    assert outcome == "pending"
+
+    # Promote to live + requeue (clear the pending ledger row, as connect-nodes'
+    # promotion + a re-run would) -> now clusters normally.
+    conn.execute("update taxonomy_nodes set status='live' where slug='gin'")
+    conn.execute("delete from job_items where entity_id=%s and stage='cluster-recipes'", (rid,))
+    counts2 = cluster_stage_fn(_job(), conn, None)
+    assert counts2["clustered"] == 1
+    assert conn.execute(
+        "select cluster_id from recipes where id=%s", (rid,)
+    ).fetchone()[0] is not None
+    outcome2 = conn.execute(
+        "select outcome from job_items where entity_id=%s and stage='cluster-recipes'", (rid,)
+    ).fetchone()[0]
+    assert outcome2 == "resolved"
 
 
 def test_cluster_is_idempotent_via_ledger(conn):
@@ -136,6 +170,6 @@ def test_cluster_is_idempotent_via_ledger(conn):
     assert cluster_stage_fn(_job(), conn, None) == {"clustered": 0}
     # The stage_run is at the current DEDUP_VERSION.
     v = conn.execute(
-        "select code_version from job_items where stage='cluster' limit 1"
+        "select code_version from job_items where stage='cluster-recipes' limit 1"
     ).fetchone()[0]
     assert v == DEDUP_VERSION

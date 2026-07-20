@@ -8,13 +8,12 @@ export type TaskStatus =
   | 'pending'
   | 'running'
   | 'applied'
-  | 'pending_apply'
   | 'flagged'
   | 'failed';
 
 // Why an entity was pulled into the run — the "why added" column. Mirrors the
 // eligible-pool status that qualified it.
-export type WhyAdded = 'flagged' | 'never_run' | 'retry_failed' | 'applied' | 'pending_apply';
+export type WhyAdded = 'flagged' | 'never_run' | 'retry_failed' | 'applied';
 
 // One row of the run's task list (run_items RPC).
 export interface RunItem {
@@ -104,19 +103,10 @@ export function useRunItems(
 // --- Item-level mutations -------------------------------------------------
 
 type RemoveArgs = { job_id: number; item_ids: string[] };
-type ApplyArgs = { job_id: number; item_ids: string[] | null };
 
 /** remove_run_items(job_id, item_ids[]) — draft-run only. */
 export function useRemoveRunItems(jobId: number) {
   return useRpc<RemoveArgs, void>('remove_run_items', {
-    invalidate: [['runItems'], ['runItemsFacets'], ['run', jobId]],
-  });
-}
-
-/** apply_run_items(job_id, item_ids[]|null) — bulk-apply held results;
- *  item_ids null means "apply everything eligible". */
-export function useApplyRunItems(jobId: number) {
-  return useRpc<ApplyArgs, void>('apply_run_items', {
     invalidate: [['runItems'], ['runItemsFacets'], ['run', jobId]],
   });
 }

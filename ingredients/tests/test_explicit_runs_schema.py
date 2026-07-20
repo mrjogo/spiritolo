@@ -69,9 +69,10 @@ def test_jobs_has_run_columns(conn):
             "where table_name = 'jobs'"
         ).fetchall()
     }
-    assert {"llm_provider", "llm_model", "apply_mode"} <= cols
-    # batch_id folded away with job_batches.
+    assert {"llm_provider", "llm_model"} <= cols
+    # batch_id folded away with job_batches; apply_mode dropped with apply/hold.
     assert "batch_id" not in cols
+    assert "apply_mode" not in cols
 
     labels = {
         r[0]

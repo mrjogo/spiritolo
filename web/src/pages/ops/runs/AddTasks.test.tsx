@@ -18,9 +18,8 @@ import { AddTasks } from './AddTasks';
 
 const RUN = {
   id: 142,
-  stage: 'map',
+  stage: 'map-ingredient',
   state: 'draft',
-  apply_mode: 'hold',
   llm_provider: 'deepseek',
   llm_model: 'deepseek-chat',
   task_count: 1102,
@@ -95,7 +94,7 @@ describe('<AddTasks>', () => {
   it('shows facet counts in the Status filter popover', async () => {
     renderAt();
     await screen.findByText('Oaxaca Old Fashioned');
-    await userEvent.click(screen.getByRole('button', { name: /Status/ }));
+    await userEvent.click(screen.getByRole('button', { name: 'Status' }));
     const popover = await screen.findByRole('dialog', { name: /Filter: status/i });
     // Every option listed with its count (OR-within-a-dimension multiselect).
     // Scoped to the popover: 1,102 also appears as the "in run" metric.
@@ -123,6 +122,35 @@ describe('<AddTasks>', () => {
     );
     // Navigates back to the run detail landing.
     expect(await screen.findByText('run detail landing')).toBeInTheDocument();
+  });
+
+  it('adds taxonomy_node items for a combine-nodes run', async () => {
+    // A node-harmonization run points its items at taxonomy nodes, not recipes.
+    fromMock.mockImplementation((table: string) => {
+      if (table === 'runs') {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () =>
+                Promise.resolve({ data: { ...RUN, stage: 'combine-nodes' }, error: null }),
+            }),
+          }),
+        };
+      }
+      throw new Error(`unexpected table ${table}`);
+    });
+    renderAt();
+    await screen.findByText('Oaxaca Old Fashioned');
+
+    await userEvent.click(screen.getByRole('checkbox', { name: 'select Oaxaca Old Fashioned' }));
+    await userEvent.click(await screen.findByRole('button', { name: /Add 1 to run/ }));
+
+    await waitFor(() =>
+      expect(rpcMock).toHaveBeenCalledWith(
+        'add_run_items',
+        expect.objectContaining({ job_id: 142, entity_type: 'taxonomy_node', entity_ids: ['1'] }),
+      ),
+    );
   });
 
   it('"Select all N matching" flips the count to the full matching total', async () => {

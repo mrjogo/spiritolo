@@ -45,16 +45,16 @@ def _review(conn, **kw):
 # --- schema: one-open constraint -------------------------------------------
 
 def test_one_open_review_per_entity_stage(clean):
-    _review(clean, entity_kind="ingredient_name", entity_id="lime", stage="map")
+    _review(clean, entity_kind="ingredient_name", entity_id="lime", stage="map-ingredient")
     with pytest.raises(psycopg.errors.UniqueViolation):
-        _review(clean, entity_kind="ingredient_name", entity_id="lime", stage="map",
+        _review(clean, entity_kind="ingredient_name", entity_id="lime", stage="map-ingredient",
                 origin="machine_proposal")
 
 
 def test_resolved_row_does_not_block_new_open(clean):
-    _review(clean, entity_kind="ingredient_name", entity_id="gin", stage="map",
+    _review(clean, entity_kind="ingredient_name", entity_id="gin", stage="map-ingredient",
             state="resolved")
-    _review(clean, entity_kind="ingredient_name", entity_id="gin", stage="map")  # ok
+    _review(clean, entity_kind="ingredient_name", entity_id="gin", stage="map-ingredient")  # ok
 
 
 # --- append-versioned ledger + live pointer --------------------------------
@@ -62,12 +62,12 @@ def test_resolved_row_does_not_block_new_open(clean):
 def test_ledger_appends_versions(clean):
     from ingredients.pipeline import ledger
     rid = _recipe(clean)
-    ledger.record_run(clean, entity_type="recipe", entity_id=rid, stage="map",
+    ledger.record_run(clean, entity_type="recipe", entity_id=rid, stage="map-ingredient",
                       version="v1", outcome="resolved", method="deterministic")
-    ledger.record_run(clean, entity_type="recipe", entity_id=rid, stage="map",
+    ledger.record_run(clean, entity_type="recipe", entity_id=rid, stage="map-ingredient",
                       version="v2", outcome="resolved", method="deterministic")
     n = clean.execute(
-        "select count(*) from job_items where entity_id=%s and stage='map'", (rid,)
+        "select count(*) from job_items where entity_id=%s and stage='map-ingredient'", (rid,)
     ).fetchone()[0]
     assert n == 2
 
@@ -75,12 +75,12 @@ def test_ledger_appends_versions(clean):
 def test_same_version_rerun_overwrites(clean):
     from ingredients.pipeline import ledger
     rid = _recipe(clean)
-    ledger.record_run(clean, entity_type="recipe", entity_id=rid, stage="map",
+    ledger.record_run(clean, entity_type="recipe", entity_id=rid, stage="map-ingredient",
                       version="v1", outcome="pending", method="deterministic")
-    ledger.record_run(clean, entity_type="recipe", entity_id=rid, stage="map",
+    ledger.record_run(clean, entity_type="recipe", entity_id=rid, stage="map-ingredient",
                       version="v1", outcome="resolved", method="deterministic")
     rows = clean.execute(
-        "select outcome from job_items where entity_id=%s and stage='map'", (rid,)
+        "select outcome from job_items where entity_id=%s and stage='map-ingredient'", (rid,)
     ).fetchall()
     assert rows == [("resolved",)]
 
@@ -89,7 +89,7 @@ def test_same_version_rerun_overwrites(clean):
 
 def test_apply_review_map(clean):
     rid = _review(clean, entity_kind="ingredient_name", entity_id="fresh lime juice",
-                  stage="map", state="resolved", payload=Json({"slug": "lime-juice"}))
+                  stage="map-ingredient", state="resolved", payload=Json({"slug": "lime-juice"}))
     clean.execute("select apply_review(%s)", (rid,))
     row = clean.execute(
         "select taxonomy_slug, method from ingredient_resolutions "
@@ -105,7 +105,7 @@ def test_apply_review_parse_by_position(clean):
         "values (%s,0,'1 oz gin','gin','oz')", (r,)
     )
     rid = _review(clean, entity_kind="recipe_ingredient", entity_id=f"{r}:0",
-                  stage="parse", state="resolved",
+                  stage="parse-ingredients", state="resolved",
                   payload=Json({"name": "London gin", "unit": "ml"}))
     clean.execute("select apply_review(%s)", (rid,))
     row = clean.execute(
@@ -125,7 +125,7 @@ def test_apply_review_convert_replaces_steps(clean):
          "modifiers": ["gently"]},
         {"verb": "strain", "result": "drink"},
     ]}
-    rid = _review(clean, entity_kind="recipe", entity_id=str(r), stage="convert",
+    rid = _review(clean, entity_kind="recipe", entity_id=str(r), stage="convert-steps",
                   state="resolved", payload=Json(payload))
     clean.execute("select apply_review(%s)", (rid,))
     rows = clean.execute(
@@ -138,7 +138,7 @@ def test_apply_review_convert_replaces_steps(clean):
 
 def test_apply_review_extract_updates_header(clean):
     r = _recipe(clean)
-    rid = _review(clean, entity_kind="recipe", entity_id=str(r), stage="extract",
+    rid = _review(clean, entity_kind="recipe", entity_id=str(r), stage="extract-recipe",
                   state="resolved", payload=Json({"title": "Real Negroni"}))
     clean.execute("select apply_review(%s)", (rid,))
     title = clean.execute("select title from recipes where id=%s", (r,)).fetchone()[0]
@@ -147,7 +147,7 @@ def test_apply_review_extract_updates_header(clean):
 
 def test_apply_review_ignores_unresolved(clean):
     # an OPEN review must not materialize
-    rid = _review(clean, entity_kind="ingredient_name", entity_id="x", stage="map",
+    rid = _review(clean, entity_kind="ingredient_name", entity_id="x", stage="map-ingredient",
                   payload=Json({"slug": "should-not-apply"}))
     clean.execute("select apply_review(%s)", (rid,))
     n = clean.execute("select count(*) from ingredient_resolutions").fetchone()[0]
@@ -161,9 +161,9 @@ def test_needs_review_surfaces_open_reviews_only(clean):
     # queue (a flagged item raises a review row; machine residue surfacing moved
     # to the add-page status facets). An open review shows with reason=origin; a
     # resolved one does not.
-    _review(clean, entity_kind="ingredient_name", entity_id="amaro", stage="map",
+    _review(clean, entity_kind="ingredient_name", entity_id="amaro", stage="map-ingredient",
             origin="distance_gate")
-    _review(clean, entity_kind="ingredient_name", entity_id="gin", stage="map",
+    _review(clean, entity_kind="ingredient_name", entity_id="gin", stage="map-ingredient",
             origin="human_flag", state="resolved")
     rows = {
         (x[0], x[1])
@@ -178,9 +178,9 @@ def test_needs_review_surfaces_open_reviews_only(clean):
 def test_insert_review_idempotent_open(clean):
     from ingredients.reviews import model
     a = model.insert_review(clean, entity_kind="ingredient_name", entity_id="gin",
-                            stage="map", origin="human_flag")
+                            stage="map-ingredient", origin="human_flag")
     b = model.insert_review(clean, entity_kind="ingredient_name", entity_id="gin",
-                            stage="map", origin="machine_proposal")
+                            stage="map-ingredient", origin="machine_proposal")
     assert a == b
     n = clean.execute("select count(*) from human_reviews where entity_id='gin'").fetchone()[0]
     assert n == 1
@@ -188,11 +188,11 @@ def test_insert_review_idempotent_open(clean):
 
 def test_resolved_override_ids_exact_and_prefix(clean):
     from ingredients.reviews import model
-    _review(clean, entity_kind="recipe", entity_id="5", stage="convert", state="resolved")
-    _review(clean, entity_kind="recipe_ingredient", entity_id="5:2", stage="parse",
+    _review(clean, entity_kind="recipe", entity_id="5", stage="convert-steps", state="resolved")
+    _review(clean, entity_kind="recipe_ingredient", entity_id="5:2", stage="parse-ingredients",
             state="resolved")
-    assert len(model.resolved_override_ids(clean, stage="convert", ids=["5"])) == 1
-    assert len(model.resolved_override_ids(clean, stage="parse", ids=["5"])) == 1  # prefix
+    assert len(model.resolved_override_ids(clean, stage="convert-steps", ids=["5"])) == 1
+    assert len(model.resolved_override_ids(clean, stage="parse-ingredients", ids=["5"])) == 1  # prefix
 
 
 # --- re-apply + supersede ---------------------------------------------------
@@ -200,12 +200,12 @@ def test_resolved_override_ids_exact_and_prefix(clean):
 def test_reapply_restamps_override(clean):
     from ingredients.reviews.reapply import reapply_overrides
     _review(clean, entity_kind="ingredient_name", entity_id="fresh lime juice",
-            stage="map", state="resolved", payload=Json({"slug": "lime-juice"}))
+            stage="map-ingredient", state="resolved", payload=Json({"slug": "lime-juice"}))
     clean.execute(
         "insert into ingredient_resolutions(normalized_name,taxonomy_slug,method,version) "
         "values ('fresh lime juice','WRONG','lexical','v2')"
     )
-    reapply_overrides(clean, stage="map", ids=["fresh lime juice"])
+    reapply_overrides(clean, stage="map-ingredient", ids=["fresh lime juice"])
     slug = clean.execute(
         "select taxonomy_slug from ingredient_resolutions where normalized_name='fresh lime juice'"
     ).fetchone()[0]
@@ -222,7 +222,7 @@ def test_map_stage_reapplies_override_on_run(clean):
         "insert into recipe_ingredients(recipe_id,position,raw_text,name) "
         "values (%s,0,'x','x')", (r,)
     )
-    _review(clean, entity_kind="ingredient_name", entity_id="x", stage="map",
+    _review(clean, entity_kind="ingredient_name", entity_id="x", stage="map-ingredient",
             state="resolved", payload=Json({"slug": "correct"}))
     clean.execute(
         "insert into ingredient_resolutions(normalized_name,taxonomy_slug,method,version) "
@@ -247,7 +247,7 @@ def test_parse_stage_reapplies_override_on_run(clean):
         "('u2','t','{\"recipeIngredient\":[\"1 oz gin\"]}'::jsonb) returning id"
     ).fetchone()[0]
     _review(clean, entity_kind="recipe_ingredient", entity_id=f"{r}:0",
-            stage="parse", state="resolved", payload=Json({"unit": "ml"}))
+            stage="parse-ingredients", state="resolved", payload=Json({"unit": "ml"}))
 
     parse_stage_fn({}, clean, None)
 
@@ -259,11 +259,11 @@ def test_parse_stage_reapplies_override_on_run(clean):
 
 def test_supersede_dismisses_machine_not_human(clean):
     from ingredients.reviews.reapply import supersede_stale
-    _review(clean, entity_kind="ingredient_name", entity_id="amaro", stage="map",
+    _review(clean, entity_kind="ingredient_name", entity_id="amaro", stage="map-ingredient",
             origin="machine_proposal")
-    _review(clean, entity_kind="ingredient_name", entity_id="suze", stage="map",
+    _review(clean, entity_kind="ingredient_name", entity_id="suze", stage="map-ingredient",
             origin="human_flag")
-    n = supersede_stale(clean, stage="map", ids=["amaro", "suze"])
+    n = supersede_stale(clean, stage="map-ingredient", ids=["amaro", "suze"])
     assert n == 1
     m = clean.execute("select state from human_reviews where entity_id='amaro'").fetchone()[0]
     h = clean.execute("select state from human_reviews where entity_id='suze'").fetchone()[0]

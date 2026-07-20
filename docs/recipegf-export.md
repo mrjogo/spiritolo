@@ -39,12 +39,12 @@ emitted):
 - `meta` carries the full `slug` / `source` / `imported_at` triple a consumer's
   import needs.
 
-## Pipeline shape — convert, then export
+## Pipeline shape — convert-steps, then export-recipegf
 
 The verb-frame projection is produced by two deterministic pipeline stages, both
 versioned at `CONVERTER_VERSION` and run over the shared `stage_runs` work queue:
 
-1. **`convert`** — the pure technique→template converter
+1. **`convert-steps`** — the pure technique→template converter
    ([`converter.py`](../ingredients/src/ingredients/recipegf/converter.py)) turns
    each mapped recipe (its `recipe_ingredients` joined to the shared
    `ingredient_resolutions`, plus the JSON-LD instructions) into RecipeGF
@@ -55,10 +55,10 @@ versioned at `CONVERTER_VERSION` and run over the shared `stage_runs` work queue
    ice/garnish/body) are classified inline from the taxonomy default role —
    ephemeral, not stored. A recipe the converter can't yet emit writes no steps
    and records a non-terminal `stage_runs` outcome: `pending` (an ingredient
-   isn't resolved yet — it returns after the `map` stage) or `proposes_new`
+   isn't resolved yet — it returns after the `map-ingredient` stage) or `proposes_new`
    (needs a rules/technique review, e.g. a muddle the templates can't place).
 
-2. **`export`** —
+2. **`export-recipegf`** —
    [`generate.py`](../ingredients/src/ingredients/recipegf/generate.py)'s
    `generate_bundle` assembles the pin-2 bundle from the current rows + shared
    resolution + in-repo verb-defs and validates it against `core ∪ spiritolo/`;
@@ -119,7 +119,7 @@ relational content model
 **The pin-2 bundle is a projection, generated on demand** by `generate_bundle`
 from those rows every time it's asked for, so the live representation stays
 current with the taxonomy. A **published** bundle is frozen separately by the
-`export` stage into `recipe_exports` — one row per `(recipe_id,
+`export-recipegf` stage into `recipe_exports` — one row per `(recipe_id,
 converter_version)` carrying the frozen `bundle` jsonb, its `recipe_slug` /
 `recipe_ref` (`com.spiritolo/<slug>:v1`), and `exported_at`. The export work
 queue is "recipes with no `recipe_exports` row at the current
@@ -138,15 +138,15 @@ bundle by its **slug** — the Spiritolo-owned, stable join/sync key written to
 
 ```bash
 # Convert mapped recipes into verb-frame steps (writes recipe_steps + slug).
-cd ingredients && uv run python -m ingredients.cli convert
+cd ingredients && uv run python -m ingredients.cli convert-steps
 
 # Freeze the pin-2 bundle for every recipe lacking one at the current version.
-cd ingredients && uv run python -m ingredients.cli export
+cd ingredients && uv run python -m ingredients.cli export-recipegf
 
 # Scope either stage to one site, capped.
-cd ingredients && uv run python -m ingredients.cli export --site punch --limit 50
+cd ingredients && uv run python -m ingredients.cli export-recipegf --site punch --limit 50
 
-# Run the whole pipeline in order ( … -> convert -> cluster -> export ).
+# Run the whole pipeline in order ( … -> convert-steps -> cluster-recipes -> export-recipegf ).
 cd ingredients && uv run python -m ingredients.cli cold-build
 ```
 
@@ -160,7 +160,7 @@ Every subcommand takes only `--site` / `--limit`. To re-run a stage, delete its
 [`recipegf/version.py`](../ingredients/src/ingredients/recipegf/version.py). Bump
 when conversion output would change for the same input (technique keywords, step
 templates, slug rules, unit handling, the spiritolo verb set, the id encoding
-version), then re-run `convert` + `export`; recipes left at the old version
+version), then re-run `convert-steps` + `export-recipegf`; recipes left at the old version
 re-queue as their `stage_runs` rows fall behind the current version.
 
 ## Eval set

@@ -14,8 +14,11 @@ from __future__ import annotations
 import psycopg
 from psycopg.types.json import Json
 
-from common.providers import DeterministicProvider, FakeProvider, Item
-from common.providers.config import StageChainConfig
+from dataclasses import dataclass
+from typing import Any
+from collections.abc import Callable
+
+from common.providers import FakeProvider, Item
 
 from ingredients.pipeline.ledger import record_run
 from ingredients.worker.cost import CostMeter
@@ -23,18 +26,24 @@ from ingredients.worker.loop import tick
 from ingredients.worker.providers import ProviderChain
 
 
+@dataclass
+class _Deterministic:
+    """A pure resolver as a chain tier (exposes ``resolve_items``)."""
+
+    resolve_fn: Callable[[list[Item]], dict[str, Any]]
+
+    def resolve_items(self, items: list[Item]) -> dict[str, Any]:
+        return self.resolve_fn(items)
+
+
 def test_free_stage_no_cap_check():
     # A deterministic chain under a ZERO budget still resolves everything — free
     # work never inspects the cap.
-    det = DeterministicProvider(
+    det = _Deterministic(
         resolve_fn=lambda items: {it.id: f"ok:{it.id}" for it in items}
     )
     meter = CostMeter(cap_cents=0)
-    chain = ProviderChain(
-        config=StageChainConfig(stage="map", provider_ids=("det",), pack_size=1),
-        providers={"det": det},
-        meter=meter,
-    )
+    chain = ProviderChain(tiers=[("det", det)], pack_size=1, meter=meter)
 
     r = chain.resolve([Item("1"), Item("2"), Item("3")])
 
@@ -50,13 +59,10 @@ def test_aborts_past_max_cost(test_db_url, db_conn):
 
     # Metered fake: 2c per call, pack_size 1 -> 2c per item. Budget is 5c, so
     # item #3 (which would reach 6c) must abort.
-    provider_impls = {
-        "llm": FakeProvider(
-            canned_map={"401": "A", "402": "B", "403": "C", "404": "D"},
-            cost_per_call=2,
-        )
-    }
-    configs = {"metered": StageChainConfig("metered", ("llm",), 1)}
+    fake = FakeProvider(
+        canned_map={"401": "A", "402": "B", "403": "C", "404": "D"},
+        cost_per_call=2,
+    )
     payload = {
         "entity_ids": [401, 402, 403, 404],
         "entity_type": "recipe",
@@ -90,11 +96,20 @@ def test_aborts_past_max_cost(test_db_url, db_conn):
             conn.commit()  # persist each paid-for item so an abort keeps it
         return {"processed": len(job["payload"]["entity_ids"])}
 
+    def build_metered_chain(job):
+        # Stand in for _build_providers: a single metered LLM tier at pack_size 1,
+        # bound to the job's own cost cap.
+        return ProviderChain(
+            tiers=[("llm", fake)],
+            pack_size=1,
+            meter=CostMeter(job.get("max_cost_cents")),
+        )
+
     conn = psycopg.connect(test_db_url)
     try:
         ran = tick(
             conn, stage_fns={"metered": metered_fn},
-            configs=configs, provider_impls=provider_impls,
+            providers_builder=build_metered_chain,
         )
     finally:
         conn.close()
