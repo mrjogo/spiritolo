@@ -163,6 +163,16 @@ def test_build_providers_uses_the_runs_provider_and_model():
     assert impl.model_id == "claude-sonnet-4-5"
 
 
+def test_available_providers_reflects_present_keys():
+    from ingredients.worker.providers_local import available_providers
+
+    # ollama (local) is always available; hosted providers only with their key.
+    assert available_providers({}) == ["ollama"]
+    got = available_providers({"DEEPSEEK_API_KEY": "x", "OPENAI_API_KEY": "y"})
+    assert got[0] == "ollama"
+    assert "deepseek" in got and "openai" in got and "claude" not in got
+
+
 def test_build_providers_no_provider_is_none():
     # A run that names no LLM tier -> no chain (deterministic-only run).
     job = {"stage": "map-ingredient", "llm_provider": None, "llm_model": None}

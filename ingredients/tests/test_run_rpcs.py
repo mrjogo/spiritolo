@@ -98,6 +98,69 @@ def test_cancel_run_missing_raises(conn):
         conn.execute("select cancel_run(999999)")
 
 
+def test_retry_run_requeues_residue(conn):
+    # A failed run with applied + failed + pending items: retry resets failed ->
+    # pending, re-queues the job, and clears the error.
+    r_ok, r_bad, r_todo = _recipe(conn), _recipe(conn), _recipe(conn)
+    jid = conn.execute(
+        "insert into jobs (stage, state, error_code, error_detail, cost_actual_cents) "
+        "values ('map-ingredient', 'failed', 'provider_unavailable', 'boom', 5) returning id"
+    ).fetchone()[0]
+    for rid, st in [(r_ok, "applied"), (r_bad, "failed"), (r_todo, "pending")]:
+        conn.execute(
+            "insert into job_items (entity_type, entity_id, stage, code_version, "
+            "outcome, method, state, job_id) "
+            "values ('recipe', %s, 'map-ingredient', 'v1', 'resolved', 'deterministic', %s, %s)",
+            (rid, st, jid),
+        )
+
+    conn.execute("select retry_run(%s)", (jid,))
+
+    state, ec, ed = conn.execute(
+        "select state, error_code, error_detail from jobs where id=%s", (jid,)
+    ).fetchone()
+    assert state == "queued"
+    assert ec is None and ed is None
+    counts = dict(
+        conn.execute(
+            "select state, count(*) from job_items where job_id=%s group by state", (jid,)
+        ).fetchall()
+    )
+    assert counts.get("pending") == 2  # r_todo + the reset r_bad
+    assert counts.get("applied") == 1
+    assert counts.get("failed", 0) == 0
+
+
+def test_retry_run_rejects_a_running_run(conn):
+    jid = conn.execute(
+        "insert into jobs (stage, state) values ('map-ingredient', 'running') returning id"
+    ).fetchone()[0]
+    with pytest.raises(psycopg.errors.InvalidParameterValue):  # 22023 not finished
+        conn.execute("select retry_run(%s)", (jid,))
+
+
+def test_runs_view_exposes_cockpit_fields(conn):
+    jid = conn.execute(
+        "insert into jobs (stage, state, worker_id, cost_actual_cents, error_detail) "
+        "values ('map-ingredient', 'failed', 'w1', 7, 'boom') returning id"
+    ).fetchone()[0]
+    r = _recipe(conn)
+    conn.execute(
+        "insert into job_items (entity_type, entity_id, stage, code_version, "
+        "outcome, method, state, job_id) "
+        "values ('recipe', %s, 'map-ingredient', 'v1', 'resolved', 'deterministic', 'applied', %s)",
+        (r, jid),
+    )
+    state, cost_actual, detail, worker_id, applied = conn.execute(
+        "select state, cost_actual_cents, error_detail, worker_id, items_applied "
+        "from runs where id=%s",
+        (jid,),
+    ).fetchone()
+    assert state == "failed"
+    assert cost_actual == 7 and detail == "boom" and worker_id == "w1"
+    assert applied == 1
+
+
 def test_run_lifecycle(conn):
     r1, r2 = _recipe(conn), _recipe(conn)
     jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]

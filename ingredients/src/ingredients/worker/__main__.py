@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import os
 import signal
+import socket
 import threading
 
 import psycopg
@@ -26,6 +27,7 @@ import ingredients.pipeline.stages  # noqa: F401 -- registers stage_fns into STA
 
 from ingredients.worker.dispatch import STAGE_FNS
 from ingredients.worker.loop import serve
+from ingredients.worker.providers_local import available_providers
 
 log = logging.getLogger("ingredients.worker")
 
@@ -51,15 +53,21 @@ def main() -> None:
     signal.signal(signal.SIGINT, _handle)
     signal.signal(signal.SIGTERM, _handle)
 
-    log.info("worker starting; serving stages: %s", ", ".join(sorted(STAGE_FNS)) or "(none)")
+    # A stable id keys this worker's worker_status row (health + capabilities).
+    worker_id = os.environ.get("WORKER_ID") or socket.gethostname()
+    providers = available_providers(os.environ)
+    stages = sorted(STAGE_FNS)
+    log.info("worker %s starting; providers=%s; stages=%s", worker_id, providers, stages)
     conn = psycopg.connect(db_url)
     try:
         serve(
             conn,
             stage_fns=STAGE_FNS,
             env=os.environ,  # API keys for the run's chosen hosted provider
-            worker_id=os.environ.get("WORKER_ID"),
+            worker_id=worker_id,
             conn_factory=lambda: psycopg.connect(db_url, autocommit=True),
+            status_providers=providers,
+            status_stages=stages,
             stop_event=stop_event,
         )
     finally:

@@ -349,6 +349,34 @@ def _finalize_failed(
     conn.commit()
 
 
+def _touch_worker_status(
+    conn: psycopg.Connection,
+    worker_id: str,
+    providers: list[str] | None,
+    stages: list[str] | None,
+) -> None:
+    """Upsert this worker's liveness + capabilities so /ops has a health signal.
+    Best-effort: a failure (e.g. table absent on an older DB) is logged and the
+    transaction rolled back so it can't poison the next claim."""
+    try:
+        conn.execute(
+            """
+            insert into worker_status (worker_id, last_seen, providers, stages)
+            values (%s, now(), %s, %s)
+            on conflict (worker_id) do update set
+                last_seen = now(),
+                providers = excluded.providers,
+                stages    = excluded.stages
+            """,
+            (worker_id, list(providers or []), list(stages or [])),
+        )
+        if not conn.autocommit:
+            conn.commit()
+    except Exception:
+        log.warning("worker_status update failed", exc_info=True)
+        conn.rollback()
+
+
 def serve(
     conn: psycopg.Connection,
     *,
@@ -364,12 +392,17 @@ def serve(
     reaper_older_than_seconds: float = DEFAULT_REAPER_SECONDS,
     reconcile_hook: Callable[[psycopg.Connection], Any] | None = None,
     poll_interval: float = DEFAULT_POLL_SECONDS,
+    status_providers: list[str] | None = None,
+    status_stages: list[str] | None = None,
     stop_event: threading.Event | None = None,
 ) -> None:
     """Always-on loop: boot once, then tick forever (sleep when the queue drains).
 
     Stops when ``stop_event`` is set — otherwise runs until the process is
     killed (Railway restarts it; ``boot``'s reaper recovers any in-flight job).
+
+    Each pass refreshes ``worker_status`` (when ``worker_id`` is set) so /ops can
+    tell the worker is alive and which providers it can service.
     """
     boot(
         conn,
@@ -377,6 +410,8 @@ def serve(
         reconcile_hook=reconcile_hook,
     )
     while stop_event is None or not stop_event.is_set():
+        if worker_id is not None:
+            _touch_worker_status(conn, worker_id, status_providers, status_stages)
         ran = tick(
             conn,
             stage_fns=stage_fns,
