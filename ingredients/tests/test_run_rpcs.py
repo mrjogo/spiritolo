@@ -276,6 +276,25 @@ def test_eligible_pool_filter_and_facets(conn):
     assert facets["source"]["diffordsguide"] == 3
 
 
+def test_eligible_pool_multi_key_sort(conn):
+    # Ordered multi-key sort: source asc, then title asc within each source.
+    _recipe(conn, site="punch", title="Zeta")
+    _recipe(conn, site="punch", title="Alpha")
+    _recipe(conn, site="diffordsguide", title="Mu")
+
+    rows = conn.execute(
+        "select * from eligible_pool('map-ingredient', '{}', %s, 50, 0)",
+        ("source:asc,title:asc",),
+    ).fetchall()
+    # columns: entity_id, title, source, status, status_detail, last_run_label, total
+    ordered = [(r[2], r[1]) for r in rows]
+    assert ordered == [
+        ("diffordsguide", "Mu"),
+        ("punch", "Alpha"),
+        ("punch", "Zeta"),
+    ]
+
+
 def test_add_run_items_by_filter(conn):
     r1 = _recipe(conn, site="diffordsguide")
     r2 = _recipe(conn, site="punch")

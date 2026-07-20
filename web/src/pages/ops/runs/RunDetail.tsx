@@ -24,7 +24,7 @@ import { useEstimatedRunCents } from '../../../ui/runs/useEstimate';
 import './runs.css';
 
 const PAGE_SIZE = 50;
-const DEFAULT_SORT: Sort = { col: 'title', asc: true };
+const DEFAULT_SORT: Sort[] = [{ col: 'title', asc: true }];
 
 // The run detail: header + state badge, the LLM-tier picker + cost estimate,
 // the Start-run affordance (metered → confirm modal), and the task list with

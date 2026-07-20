@@ -682,3 +682,35 @@
   color: var(--runs-slate);
   font-size: 14px;
 }
+
+/* --- Multidimensional sort control (FilterBar) -------------------------- */
+.runs-sortctl {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.runs-sortkey {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--ops-border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  background: var(--ops-surface);
+}
+.runs-sortkey__lead { color: var(--ops-muted); font-size: 11px; }
+.runs-sortkey__label { font-weight: 500; }
+.ops .runs-sortkey__dir,
+.ops .runs-sortkey__rm {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0 3px;
+  color: var(--runs-slate);
+  font-size: 12px;
+  line-height: 1;
+}
+.ops .runs-sortkey__rm:hover { color: var(--runs-red); }
+.runs-sortadd { height: 30px; }
