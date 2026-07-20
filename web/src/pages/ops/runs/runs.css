@@ -560,3 +560,80 @@
   .runs-batchbar { flex-wrap: wrap; }
   .runs-popover { left: 8px; right: 8px; width: auto; }
 }
+
+/* --- Run states added with the cockpit (cancel lifecycle) --------------- */
+.runs-state--cancelling { background: var(--runs-amber-bg); color: var(--runs-amber); }
+.runs-state--cancelled  { background: var(--runs-slate-bg); color: var(--runs-slate); }
+
+/* --- Global worker-health banner (Runs list) --------------------------- */
+.runs-worker-banner {
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 14px;
+}
+.runs-worker-banner--ok   { background: var(--runs-green-bg); color: var(--runs-green); }
+.runs-worker-banner--warn { background: var(--runs-red-bg);   color: var(--runs-red); }
+
+/* --- Run cockpit (non-draft run detail) -------------------------------- */
+.runs-cockpit {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 14px 0 18px;
+}
+.runs-health {
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.runs-health--ok   { background: var(--runs-green-bg); color: var(--runs-green); }
+.runs-health--warn { background: var(--runs-red-bg);   color: var(--runs-red); }
+.runs-health__sub  { font-weight: 400; opacity: 0.8; }
+
+.runs-cockcard {
+  border: 1px solid var(--runs-slate-bg);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fff;
+}
+.runs-cockcard--error { border-color: var(--runs-red); background: var(--runs-red-bg); }
+.runs-cockcard__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 600;
+  color: var(--runs-slate);
+  margin-bottom: 8px;
+}
+.runs-errmsg {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: var(--runs-red);
+  word-break: break-word;
+}
+
+.runs-progress, .runs-meter {
+  height: 10px;
+  border-radius: 6px;
+  background: var(--runs-slate-bg);
+  overflow: hidden;
+}
+.runs-progress__bar { height: 100%; background: var(--ops-accent); transition: width 0.4s ease; }
+.runs-meter__fill   { height: 100%; background: var(--runs-amber); transition: width 0.4s ease; }
+.runs-progress__meta { font-size: 12px; color: var(--runs-slate); margin-top: 6px; }
+.runs-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+.runs-cockactions { display: flex; gap: 10px; }
+
+.runs-preflight {
+  background: var(--runs-amber-bg);
+  color: var(--runs-amber);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  margin: 8px 0;
+}
