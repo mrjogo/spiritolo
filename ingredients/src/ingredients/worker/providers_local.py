@@ -86,14 +86,6 @@ def build_claude_http_client(
     return factory(**hosted_client_kwargs(env))
 
 
-def build_scraperapi_http_client(
-    *, client_factory: ClientFactory | None = None, env: Env | None = None
-) -> Any:
-    """Direct-route httpx client for ScraperAPI fetch calls."""
-    factory = httpx.Client if client_factory is None else client_factory
-    return factory(**hosted_client_kwargs(env))
-
-
 def available_providers(env: Env | None = None) -> list[str]:
     """Which LLM providers this worker can actually service, given the API keys
     in ``env``. ``ollama`` (local, free) is always available; each hosted
