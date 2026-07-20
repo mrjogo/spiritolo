@@ -296,6 +296,33 @@ def test_add_run_items_by_filter(conn):
     assert members == [r1]
 
 
+def _page(conn, *, content_type=None, corpus_key=None, site="diffordsguide") -> int:
+    return conn.execute(
+        "insert into pages (url, site, content_type, corpus_key) "
+        "values (%s, %s, %s, %s) returning id",
+        (f"https://x/{uuid.uuid4()}", site, content_type, corpus_key),
+    ).fetchone()[0]
+
+
+def test_extract_universe_only_fetched_recipe_pages(conn):
+    """The extract-recipe run universe is exactly what the stage can process —
+    recipe-classified pages with cached HTML (a corpus key). Non-recipe or
+    unfetched pages must not inflate the 'never run' facet (the ~484k artifact)."""
+    good = _page(conn, content_type="likely_drink_recipe", corpus_key="k1")
+    confirmed = _page(conn, content_type="confirmed_drink", corpus_key="k2")
+    _page(conn, content_type="likely_drink_recipe", corpus_key=None)  # not fetched
+    _page(conn, content_type="article", corpus_key="k3")              # not a recipe
+    _page(conn, content_type=None, corpus_key="k4")                   # unclassified
+
+    rows = conn.execute(
+        "select entity_id from _eligible_base('extract-recipe', '{}'::jsonb)"
+    ).fetchall()
+    assert {r[0] for r in rows} == {good, confirmed}
+
+    facets = conn.execute("select eligible_pool_facets('extract-recipe','{}')").fetchone()[0]
+    assert facets["status"]["never_run"] == 2  # only the two eligible pages
+
+
 # ---------------------------------------------------------------------------
 # node run universe (combine-nodes / connect-nodes)
 # ---------------------------------------------------------------------------
