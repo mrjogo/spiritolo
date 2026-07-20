@@ -17,11 +17,20 @@ from dataclasses import dataclass
 from typing import Any
 from collections.abc import Callable
 
-from common.providers import FakeProvider, Item
+import pytest
+
+from common.llm.provider import ProviderResult
+from common.providers import FakeProvider, Item, packing
 
 from ingredients.worker.cost import CostMeter
 from ingredients.worker.loop import _build_providers
-from ingredients.worker.providers import DEFAULT_PACK_SIZE, ProviderChain
+from ingredients.worker.providers import (
+    DEFAULT_PACK_SIZE,
+    ProviderChain,
+    ProviderUnavailable,
+    _CONSECUTIVE_FAIL_ABORT,
+    _MAX_LLM_ATTEMPTS,
+)
 
 
 @dataclass
@@ -164,3 +173,103 @@ def test_build_providers_missing_key_is_none():
     # Named a hosted provider but no key in env -> no chain, no crash.
     job = {"stage": "map-ingredient", "llm_provider": "openai", "llm_model": "gpt-5-mini"}
     assert _build_providers(job, env={}) is None
+
+
+# --- LLM error isolation, retry + circuit breaker ---------------------------
+
+
+class _FatalStatusError(Exception):
+    """A non-retryable provider error (auth/billing/bad request), like the
+    DeepSeek `402 Insufficient Balance` that killed run #7."""
+
+    status_code = 402
+
+    def __str__(self) -> str:
+        return "Insufficient Balance"
+
+
+class _TransientStatusError(Exception):
+    """A retryable provider error (5xx / rate limit)."""
+
+    status_code = 503
+
+
+@dataclass
+class _RaisingProvider:
+    """Raises ``exc`` on the first ``fail_calls`` resolve()s, then answers from
+    ``canned`` — lets a test drive the retry/park/abort paths deterministically."""
+
+    exc: Exception
+    fail_calls: int
+    canned: dict[str, Any] | None = None
+    cost_per_call: int = 0
+    calls: int = 0
+
+    def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+        self.calls += 1
+        if self.calls <= self.fail_calls:
+            raise self.exc
+        canned = self.canned or {}
+        ids = packing.decode_request(user_prompt)
+        rows = [{"id": i, "answer": canned.get(i, f"a:{i}")} for i in ids]
+        return ProviderResult(raw_text=packing.encode_response(rows), model_id="x")
+
+
+@pytest.fixture
+def _no_backoff(monkeypatch):
+    monkeypatch.setattr("ingredients.worker.providers.time.sleep", lambda *_: None)
+
+
+def test_llm_transient_error_retries_then_succeeds(_no_backoff):
+    # Two transient failures then a success on the same pack -> resolved, no park.
+    prov = _RaisingProvider(exc=_TransientStatusError(), fail_calls=2, canned={"1": "A"})
+    chain = ProviderChain(tiers=[("ollama", prov)], pack_size=1)
+
+    res = chain.resolve([Item("1")])
+
+    assert res.resolved == {"1": "A"}
+    assert res.parked == []
+    assert prov.calls == 3  # 2 retries + the success
+
+
+def test_llm_transient_exhausts_retries_parks_pack_and_continues(_no_backoff):
+    # The first pack fails all its attempts and parks; later packs still resolve.
+    # One 503 blip must not lose the other 7,000 items.
+    prov = _RaisingProvider(
+        exc=_TransientStatusError(),
+        fail_calls=_MAX_LLM_ATTEMPTS,  # exactly kills pack #1's attempts
+        canned={"2": "B", "3": "C"},
+    )
+    chain = ProviderChain(tiers=[("ollama", prov)], pack_size=1)
+
+    res = chain.resolve([Item("1"), Item("2"), Item("3")])
+
+    assert res.resolved == {"2": "B", "3": "C"}
+    assert res.parked == ["1"]
+
+
+def test_llm_fatal_error_aborts_run_fast():
+    # A fatal (402) error is not retried and aborts the whole run immediately
+    # with the provider's message surfaced (this is exactly run #7).
+    prov = _RaisingProvider(exc=_FatalStatusError(), fail_calls=99)
+    chain = ProviderChain(tiers=[("deepseek", prov)], pack_size=1, meter=CostMeter(1000))
+
+    with pytest.raises(ProviderUnavailable) as excinfo:
+        chain.resolve([Item("1"), Item("2")])
+
+    assert "402" in str(excinfo.value)
+    assert "Insufficient Balance" in str(excinfo.value)
+    assert prov.calls == 1  # fatal -> no retry, abort on the first pack
+
+
+def test_llm_circuit_breaker_aborts_after_consecutive_pack_failures(_no_backoff):
+    # Persistent transient errors: each pack retries then parks; after
+    # _CONSECUTIVE_FAIL_ABORT parked packs the breaker fails the run fast
+    # instead of grinding every remaining pack into the same wall.
+    prov = _RaisingProvider(exc=_TransientStatusError(), fail_calls=999)
+    chain = ProviderChain(tiers=[("ollama", prov)], pack_size=1)
+
+    with pytest.raises(ProviderUnavailable):
+        chain.resolve([Item(str(i)) for i in range(10)])
+
+    assert prov.calls == _CONSECUTIVE_FAIL_ABORT * _MAX_LLM_ATTEMPTS
