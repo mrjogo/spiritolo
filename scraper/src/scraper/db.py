@@ -102,22 +102,10 @@ CREATE TABLE IF NOT EXISTS classify_drink_runs (
 );
 """
 
-CREATE_EXTRACT_RUNS_TABLE = """
-CREATE TABLE IF NOT EXISTS extract_runs (
-    page_id            INTEGER PRIMARY KEY REFERENCES pages(id) ON DELETE CASCADE,
-    run_id             INTEGER REFERENCES pipeline_runs(id) ON DELETE SET NULL,
-    outcome            TEXT NOT NULL,
-    error              TEXT,
-    extractor_version  TEXT NOT NULL,
-    evaluated_at       TEXT NOT NULL
-);
-"""
-
 CREATE_EVAL_RUN_INDEXES = [
     "CREATE INDEX IF NOT EXISTS idx_classify_url_runs_run_id ON classify_url_runs(run_id);",
     "CREATE INDEX IF NOT EXISTS idx_validate_html_runs_run_id ON validate_html_runs(run_id);",
     "CREATE INDEX IF NOT EXISTS idx_classify_drink_runs_run_id ON classify_drink_runs(run_id);",
-    "CREATE INDEX IF NOT EXISTS idx_extract_runs_run_id ON extract_runs(run_id);",
     "CREATE INDEX IF NOT EXISTS idx_pipeline_runs_stage ON pipeline_runs(stage);",
 ]
 
@@ -139,7 +127,6 @@ def _create_schema(conn: sqlite3.Connection) -> None:
     conn.execute(CREATE_CLASSIFY_URL_RUNS_TABLE)
     conn.execute(CREATE_VALIDATE_HTML_RUNS_TABLE)
     conn.execute(CREATE_CLASSIFY_DRINK_RUNS_TABLE)
-    conn.execute(CREATE_EXTRACT_RUNS_TABLE)
     for idx in CREATE_EVAL_RUN_INDEXES:
         conn.execute(idx)
     conn.commit()
@@ -279,48 +266,10 @@ def _apply_legacy_migrations(conn: sqlite3.Connection) -> None:
         conn.commit()
     # Legacy `classifications` table was superseded by `classify_url_runs`.
     conn.execute("DROP TABLE IF EXISTS classifications")
-    conn.commit()
-    _migrate_extract_columns(conn, cols)
-
-
-def _migrate_extract_columns(conn: sqlite3.Connection, cols: set[str]) -> None:
-    """One-shot: backfill extract_runs from pages.extracted_at /
-    extract_error, then drop those columns. Preserves "we already
-    extracted this" signal so re-running extract after migration
-    doesn't redo every Supabase UPSERT."""
-    if "extracted_at" not in cols and "extract_error" not in cols:
-        return
-    if "extracted_at" in cols:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO extract_runs
-                (page_id, run_id, outcome, error, extractor_version, evaluated_at)
-            SELECT id, NULL, 'extracted', NULL, 'legacy', extracted_at
-            FROM pages WHERE extracted_at IS NOT NULL
-            """
-        )
-    if "extract_error" in cols:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO extract_runs
-                (page_id, run_id, outcome, error, extractor_version, evaluated_at)
-            SELECT id, NULL,
-                   CASE extract_error
-                       WHEN 'no_recipe' THEN 'no_recipe'
-                       WHEN 'html_file_missing' THEN 'html_missing'
-                       ELSE 'legacy_error'
-                   END,
-                   CASE WHEN extract_error IN ('no_recipe', 'html_file_missing')
-                        THEN NULL ELSE extract_error END,
-                   'legacy',
-                   ''
-            FROM pages WHERE extract_error IS NOT NULL
-            """
-        )
-    if "extracted_at" in cols:
-        conn.execute("ALTER TABLE pages DROP COLUMN extracted_at")
-    if "extract_error" in cols:
-        conn.execute("ALTER TABLE pages DROP COLUMN extract_error")
+    # `extract_runs` bookkeeping moved to the Zone-2 extract-recipe stage; drop
+    # the table so an existing DB re-migrates to the current schema instead of
+    # tripping the drift check with a table migrate() no longer creates.
+    conn.execute("DROP TABLE IF EXISTS extract_runs")
     conn.commit()
 
 
@@ -456,18 +405,6 @@ class Database:
                 "UPDATE pages SET content_type = ? WHERE url = ?",
                 (content_type, url),
             )
-            if content_type in self.EXTRACT_CONTENT_TYPES:
-                # A page flipping TO a drink type must shed any stale
-                # extract_runs failure row from a prior classification, or
-                # it'd stay excluded from the extract work queue forever.
-                # Keeping `outcome='extracted'` rows is still correct — Supabase
-                # is the source of truth for successes.
-                self.conn.execute(
-                    "DELETE FROM extract_runs "
-                    "WHERE outcome != 'extracted' "
-                    "AND page_id = (SELECT id FROM pages WHERE url = ?)",
-                    (url,),
-                )
             self.conn.commit()
 
     def set_content_type_batch(self, ids: list[int], content_type: str):
@@ -479,12 +416,6 @@ class Database:
                 f"UPDATE pages SET content_type = ? WHERE id IN ({placeholders})",
                 [content_type] + ids,
             )
-            if content_type in self.EXTRACT_CONTENT_TYPES:
-                self.conn.execute(
-                    f"DELETE FROM extract_runs "
-                    f"WHERE outcome != 'extracted' AND page_id IN ({placeholders})",
-                    ids,
-                )
             self.conn.commit()
 
     def record_classify_url(
@@ -528,13 +459,6 @@ class Database:
                 "UPDATE pages SET content_type = ? WHERE id = ?",
                 (label, page_id),
             )
-            if label in self.EXTRACT_CONTENT_TYPES:
-                # See set_content_type — stale failure rows would keep the
-                # page out of the extract queue on reclassification.
-                self.conn.execute(
-                    "DELETE FROM extract_runs WHERE outcome != 'extracted' AND page_id = ?",
-                    (page_id,),
-                )
             self.conn.commit()
 
     def get_unclassified(self, site: str | None = None, limit: int | None = None) -> list[dict]:
@@ -557,91 +481,6 @@ class Database:
         with self._lock:
             rows = self.conn.execute(query, params).fetchall()
         return [dict(row) for row in rows]
-
-    EXTRACT_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink")
-
-    def get_unextracted(self, site: str | None = None, limit: int | None = None) -> list[dict]:
-        """Candidate rows for the extractor: drink-recipe pages with cached
-        HTML, excluding those with a known failure (`extract_runs.outcome !=
-        'extracted'`).
-
-        NOTE: this does NOT exclude pages that already succeeded — that check
-        requires asking Supabase (the source of truth for "extracted"), and
-        the DB layer deliberately stays Supabase-agnostic. `extract.py`
-        layers the Supabase filter on top of these candidates.
-
-        Covers both `likely_drink_recipe` (LLM-classified) and
-        `confirmed_drink` (validate confirmed Schema.org Recipe + drink
-        terms).
-        """
-        placeholders = ",".join("?" for _ in self.EXTRACT_CONTENT_TYPES)
-        query = (
-            "SELECT p.id, p.site, p.url, p.html_path, p.fetched_at FROM pages p "
-            "LEFT JOIN extract_runs e ON e.page_id = p.id AND e.outcome != 'extracted' "
-            f"WHERE p.content_type IN ({placeholders}) "
-            "AND p.html_path IS NOT NULL "
-            "AND e.page_id IS NULL"
-        )
-        params: list = list(self.EXTRACT_CONTENT_TYPES)
-        if site:
-            query += " AND p.site = ?"
-            params.append(site)
-        query += " ORDER BY p.id"
-        if limit:
-            query += " LIMIT ?"
-            params.append(limit)
-        with self._lock:
-            rows = self.conn.execute(query, params).fetchall()
-        return [dict(r) for r in rows]
-
-    def record_extract(
-        self,
-        *,
-        page_id: int,
-        run_id: int | None,
-        outcome: str,
-        error: str | None,
-        extractor_version: str,
-    ) -> None:
-        """UPSERT the extract_runs row for this page. Latest-only; re-runs
-        overwrite. `outcome` is 'extracted' | 'no_recipe' | 'html_missing'."""
-        now = datetime.now(timezone.utc).isoformat()
-        with self._lock:
-            self.conn.execute(
-                """
-                INSERT INTO extract_runs
-                    (page_id, run_id, outcome, error, extractor_version, evaluated_at)
-                VALUES (?, ?, ?, ?, ?, ?)
-                ON CONFLICT(page_id) DO UPDATE SET
-                    run_id = excluded.run_id,
-                    outcome = excluded.outcome,
-                    error = excluded.error,
-                    extractor_version = excluded.extractor_version,
-                    evaluated_at = excluded.evaluated_at
-                """,
-                (page_id, run_id, outcome, error, extractor_version, now),
-            )
-            self.conn.commit()
-
-    def clear_extract_runs(self, site: str | None = None) -> int:
-        """Delete rows from extract_runs (scoped by drink-recipe content types
-        — matching the extractor's work queue — and optionally by site).
-        Returns deleted row count. Intended as the --reset equivalent for the
-        extract CLI."""
-        placeholders = ",".join("?" for _ in self.EXTRACT_CONTENT_TYPES)
-        query = (
-            f"DELETE FROM extract_runs WHERE page_id IN ("
-            f"  SELECT id FROM pages WHERE content_type IN ({placeholders})"
-        )
-        params: list = list(self.EXTRACT_CONTENT_TYPES)
-        if site:
-            query += " AND site = ?"
-            params.append(site)
-        query += ")"
-        with self._lock:
-            cursor = self.conn.execute(query, params)
-            self.conn.commit()
-            return cursor.rowcount
 
     def count_unclassified(self, site: str | None = None) -> int:
         """Count of rows with `content_type IS NULL`, optionally scoped to a site."""
@@ -868,7 +707,6 @@ class Database:
         "classify_url_runs":   {"version_col": "prompt_version"},
         "validate_html_runs":  {"version_col": "validator_version"},
         "classify_drink_runs": {"version_col": "scorer_version"},
-        "extract_runs":        {"version_col": "extractor_version"},
     }
 
     def clear_eval_rows(
