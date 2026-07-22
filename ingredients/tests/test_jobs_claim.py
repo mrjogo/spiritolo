@@ -68,6 +68,23 @@ def test_claim_respects_max_cost_gate(db_conn):
     assert claimed is not None and claimed["id"] == jid
 
 
+def test_claim_unlimited_budget_claims_estimated_job(db_conn):
+    """A worker with no budget (``max_cost_cents=None``) claims any job, however
+    it's estimated — the per-job ``CostMeter`` cap is the real ceiling. Before
+    the fix ``cost_estimate_cents <= NULL`` evaluated to NULL and silently
+    blocked every estimated run (i.e. every ``/ops``-assembled run)."""
+    from ingredients.queue.claim import claim_one
+
+    db_conn.execute("truncate table jobs restart identity cascade")
+    jid = db_conn.execute(
+        "insert into jobs (stage, state, cost_estimate_cents) "
+        "values ('map', 'queued', 500) returning id"
+    ).fetchone()[0]
+
+    claimed = claim_one(db_conn, worker_id="w1")  # no budget -> unlimited
+    assert claimed is not None and claimed["id"] == jid
+
+
 def test_claim_ignores_awaiting_approval(db_conn):
     from ingredients.queue.claim import claim_one
 

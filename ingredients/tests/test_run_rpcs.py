@@ -70,6 +70,97 @@ def _terminal_item(conn, *, recipe_id, stage="map-ingredient", state="flagged", 
 # ---------------------------------------------------------------------------
 # Lifecycle
 # ---------------------------------------------------------------------------
+def test_cancel_run_draft_and_queued_go_cancelled(conn):
+    # A run no worker has claimed is cancelled outright.
+    jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]  # draft
+    conn.execute("select cancel_run(%s)", (jid,))
+    assert conn.execute("select state from jobs where id=%s", (jid,)).fetchone()[0] == "cancelled"
+
+    qid = conn.execute(
+        "insert into jobs (stage, state) values ('map-ingredient', 'queued') returning id"
+    ).fetchone()[0]
+    conn.execute("select cancel_run(%s)", (qid,))
+    assert conn.execute("select state from jobs where id=%s", (qid,)).fetchone()[0] == "cancelled"
+
+
+def test_cancel_run_running_requests_cooperative_stop(conn):
+    # An in-flight run is asked to stop ('cancelling'); the worker turns that into
+    # terminal 'cancelled' once the stage bails.
+    rid = conn.execute(
+        "insert into jobs (stage, state) values ('map-ingredient', 'running') returning id"
+    ).fetchone()[0]
+    conn.execute("select cancel_run(%s)", (rid,))
+    assert conn.execute("select state from jobs where id=%s", (rid,)).fetchone()[0] == "cancelling"
+
+
+def test_cancel_run_missing_raises(conn):
+    with pytest.raises(psycopg.errors.ForeignKeyViolation):  # 23503, per start_run
+        conn.execute("select cancel_run(999999)")
+
+
+def test_retry_run_requeues_residue(conn):
+    # A failed run with applied + failed + pending items: retry resets failed ->
+    # pending, re-queues the job, and clears the error.
+    r_ok, r_bad, r_todo = _recipe(conn), _recipe(conn), _recipe(conn)
+    jid = conn.execute(
+        "insert into jobs (stage, state, error_code, error_detail, cost_actual_cents) "
+        "values ('map-ingredient', 'failed', 'provider_unavailable', 'boom', 5) returning id"
+    ).fetchone()[0]
+    for rid, st in [(r_ok, "applied"), (r_bad, "failed"), (r_todo, "pending")]:
+        conn.execute(
+            "insert into job_items (entity_type, entity_id, stage, code_version, "
+            "outcome, method, state, job_id) "
+            "values ('recipe', %s, 'map-ingredient', 'v1', 'resolved', 'deterministic', %s, %s)",
+            (rid, st, jid),
+        )
+
+    conn.execute("select retry_run(%s)", (jid,))
+
+    state, ec, ed = conn.execute(
+        "select state, error_code, error_detail from jobs where id=%s", (jid,)
+    ).fetchone()
+    assert state == "queued"
+    assert ec is None and ed is None
+    counts = dict(
+        conn.execute(
+            "select state, count(*) from job_items where job_id=%s group by state", (jid,)
+        ).fetchall()
+    )
+    assert counts.get("pending") == 2  # r_todo + the reset r_bad
+    assert counts.get("applied") == 1
+    assert counts.get("failed", 0) == 0
+
+
+def test_retry_run_rejects_a_running_run(conn):
+    jid = conn.execute(
+        "insert into jobs (stage, state) values ('map-ingredient', 'running') returning id"
+    ).fetchone()[0]
+    with pytest.raises(psycopg.errors.InvalidParameterValue):  # 22023 not finished
+        conn.execute("select retry_run(%s)", (jid,))
+
+
+def test_runs_view_exposes_cockpit_fields(conn):
+    jid = conn.execute(
+        "insert into jobs (stage, state, worker_id, cost_actual_cents, error_detail) "
+        "values ('map-ingredient', 'failed', 'w1', 7, 'boom') returning id"
+    ).fetchone()[0]
+    r = _recipe(conn)
+    conn.execute(
+        "insert into job_items (entity_type, entity_id, stage, code_version, "
+        "outcome, method, state, job_id) "
+        "values ('recipe', %s, 'map-ingredient', 'v1', 'resolved', 'deterministic', 'applied', %s)",
+        (r, jid),
+    )
+    state, cost_actual, detail, worker_id, applied = conn.execute(
+        "select state, cost_actual_cents, error_detail, worker_id, items_applied "
+        "from runs where id=%s",
+        (jid,),
+    ).fetchone()
+    assert state == "failed"
+    assert cost_actual == 7 and detail == "boom" and worker_id == "w1"
+    assert applied == 1
+
+
 def test_run_lifecycle(conn):
     r1, r2 = _recipe(conn), _recipe(conn)
     jid = conn.execute("select create_run('map-ingredient')").fetchone()[0]
@@ -185,6 +276,25 @@ def test_eligible_pool_filter_and_facets(conn):
     assert facets["source"]["diffordsguide"] == 3
 
 
+def test_eligible_pool_multi_key_sort(conn):
+    # Ordered multi-key sort: source asc, then title asc within each source.
+    _recipe(conn, site="punch", title="Zeta")
+    _recipe(conn, site="punch", title="Alpha")
+    _recipe(conn, site="diffordsguide", title="Mu")
+
+    rows = conn.execute(
+        "select * from eligible_pool('map-ingredient', '{}', %s, 50, 0)",
+        ("source:asc,title:asc",),
+    ).fetchall()
+    # columns: entity_id, title, source, status, status_detail, last_run_label, total
+    ordered = [(r[2], r[1]) for r in rows]
+    assert ordered == [
+        ("diffordsguide", "Mu"),
+        ("punch", "Alpha"),
+        ("punch", "Zeta"),
+    ]
+
+
 def test_add_run_items_by_filter(conn):
     r1 = _recipe(conn, site="diffordsguide")
     r2 = _recipe(conn, site="punch")
@@ -203,6 +313,33 @@ def test_add_run_items_by_filter(conn):
         ).fetchall()
     ]
     assert members == [r1]
+
+
+def _page(conn, *, content_type=None, corpus_key=None, site="diffordsguide") -> int:
+    return conn.execute(
+        "insert into pages (url, site, content_type, corpus_key) "
+        "values (%s, %s, %s, %s) returning id",
+        (f"https://x/{uuid.uuid4()}", site, content_type, corpus_key),
+    ).fetchone()[0]
+
+
+def test_extract_universe_only_fetched_recipe_pages(conn):
+    """The extract-recipe run universe is exactly what the stage can process —
+    recipe-classified pages with cached HTML (a corpus key). Non-recipe or
+    unfetched pages must not inflate the 'never run' facet (the ~484k artifact)."""
+    good = _page(conn, content_type="likely_drink_recipe", corpus_key="k1")
+    confirmed = _page(conn, content_type="confirmed_drink", corpus_key="k2")
+    _page(conn, content_type="likely_drink_recipe", corpus_key=None)  # not fetched
+    _page(conn, content_type="article", corpus_key="k3")              # not a recipe
+    _page(conn, content_type=None, corpus_key="k4")                   # unclassified
+
+    rows = conn.execute(
+        "select entity_id from _eligible_base('extract-recipe', '{}'::jsonb)"
+    ).fetchall()
+    assert {r[0] for r in rows} == {good, confirmed}
+
+    facets = conn.execute("select eligible_pool_facets('extract-recipe','{}')").fetchone()[0]
+    assert facets["status"]["never_run"] == 2  # only the two eligible pages
 
 
 # ---------------------------------------------------------------------------

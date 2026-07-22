@@ -169,58 +169,6 @@ def test_set_content_type(tmp_db):
     db.close()
 
 
-def test_set_content_type_drops_stale_extract_failure(tmp_db):
-    """Reclassifying a page TO a drink type clears prior extract failure rows
-    (no_recipe / html_missing) so the page re-enters the extract queue.
-    An 'extracted' row, in contrast, stays — Supabase is the success dedupe."""
-    db = Database(tmp_db)
-    db.add_url("testsite", "https://example.com/recipe/1")
-    db.add_url("testsite", "https://example.com/recipe/2")
-    page1 = db.conn.execute(
-        "SELECT id FROM pages WHERE url = ?", ("https://example.com/recipe/1",),
-    ).fetchone()["id"]
-    page2 = db.conn.execute(
-        "SELECT id FROM pages WHERE url = ?", ("https://example.com/recipe/2",),
-    ).fetchone()["id"]
-    run_id = db.start_run(stage="extract")
-    db.record_extract(
-        page_id=page1, run_id=run_id, outcome="no_recipe",
-        error=None, extractor_version="v1",
-    )
-    db.record_extract(
-        page_id=page2, run_id=run_id, outcome="extracted",
-        error=None, extractor_version="v1",
-    )
-
-    db.set_content_type("https://example.com/recipe/1", "likely_drink_recipe")
-    db.set_content_type("https://example.com/recipe/2", "likely_drink_recipe")
-
-    surviving = db.conn.execute(
-        "SELECT page_id, outcome FROM extract_runs ORDER BY page_id"
-    ).fetchall()
-    # page1's no_recipe row is gone; page2's extracted row stays.
-    assert [(r["page_id"], r["outcome"]) for r in surviving] == [(page2, "extracted")]
-    db.close()
-
-
-def test_set_content_type_non_drink_leaves_extract_runs(tmp_db):
-    """Flipping to a non-drink type must not touch extract_runs."""
-    db = Database(tmp_db)
-    db.add_url("testsite", "https://example.com/recipe/1")
-    page1 = db.conn.execute(
-        "SELECT id FROM pages WHERE url = ?", ("https://example.com/recipe/1",),
-    ).fetchone()["id"]
-    run_id = db.start_run(stage="extract")
-    db.record_extract(
-        page_id=page1, run_id=run_id, outcome="no_recipe",
-        error=None, extractor_version="v1",
-    )
-    db.set_content_type("https://example.com/recipe/1", "other")
-    row = db.conn.execute("SELECT outcome FROM extract_runs").fetchone()
-    assert row["outcome"] == "no_recipe"
-    db.close()
-
-
 def test_set_content_type_batch(tmp_db):
     db = Database(tmp_db)
     db.add_url("testsite", "https://example.com/recipe/1")
@@ -456,161 +404,6 @@ def test_get_classify_url_for_urls_returns_label_or_none(tmp_db):
     db.close()
 
 
-def _record_extract(db, url, outcome="extracted", error=None):
-    page_id = db.conn.execute("SELECT id FROM pages WHERE url = ?", (url,)).fetchone()["id"]
-    db.record_extract(
-        page_id=page_id, run_id=None, outcome=outcome,
-        error=error, extractor_version="v1",
-    )
-
-
-def test_get_unextracted_returns_drink_recipe_buckets_with_html(tmp_db):
-    """Extractor candidates cover both `likely_drink_recipe` (LLM-classified)
-    and `confirmed_drink` (validate-confirmed Schema.org Recipe + drink
-    terms), and exclude:
-      - rows without html_path
-      - rows with a known failure (extract_runs.outcome != 'extracted')
-      - food/other content types
-
-    Crucially this does NOT exclude rows with `outcome='extracted'` — the
-    "already extracted" check is against Supabase (the source of truth),
-    not the local audit table, because Supabase can be wiped independently.
-    """
-    from scraper.db import Database
-    db = Database(tmp_db)
-    db.add_urls_batch(
-        "difs",
-        [
-            "https://x/a", "https://x/b", "https://x/c", "https://x/d",
-            "https://x/e", "https://x/f", "https://x/g",
-        ],
-    )
-    # a: likely_drink_recipe + fetched → queued
-    db.set_content_type("https://x/a", "likely_drink_recipe")
-    db.mark_content("https://x/a", "valid", html_path="difs/a.html")
-    # b: likely_drink_recipe but no html_path
-    db.set_content_type("https://x/b", "likely_drink_recipe")
-    # c: fetched but not a drink recipe
-    db.set_content_type("https://x/c", "likely_food_recipe")
-    db.mark_content("https://x/c", "valid", html_path="difs/c.html")
-    # d: likely_drink_recipe, extract_runs says 'extracted' → STILL a
-    # candidate (Supabase check happens in extract.py).
-    db.set_content_type("https://x/d", "likely_drink_recipe")
-    db.mark_content("https://x/d", "valid", html_path="difs/d.html")
-    _record_extract(db, "https://x/d", outcome="extracted")
-    # e: confirmed_drink + fetched → queued
-    db.set_content_type("https://x/e", "confirmed_drink")
-    db.mark_content("https://x/e", "Recipe", html_path="difs/e.html")
-    # f: confirmed_drink, known failure → excluded (no_recipe is cached)
-    db.set_content_type("https://x/f", "confirmed_drink")
-    db.mark_content("https://x/f", "Recipe", html_path="difs/f.html")
-    _record_extract(db, "https://x/f", outcome="no_recipe")
-    # g: confirmed_food → excluded regardless of extract_runs state
-    db.set_content_type("https://x/g", "confirmed_food")
-    db.mark_content("https://x/g", "Recipe", html_path="difs/g.html")
-
-    rows = db.get_unextracted()
-    urls = sorted(r["url"] for r in rows)
-    assert urls == ["https://x/a", "https://x/d", "https://x/e"]
-    db.close()
-
-
-def test_record_extract_upsert_latest_only(tmp_db):
-    """Re-recording overwrites the prior extract_runs row for the same page
-    (latest-only)."""
-    from scraper.db import Database
-    db = Database(tmp_db)
-    db.add_url("difs", "https://x/a")
-    page_id = db.conn.execute("SELECT id FROM pages").fetchone()["id"]
-
-    db.record_extract(
-        page_id=page_id, run_id=None, outcome="no_recipe",
-        error=None, extractor_version="v1",
-    )
-    db.record_extract(
-        page_id=page_id, run_id=None, outcome="extracted",
-        error=None, extractor_version="v2",
-    )
-
-    rows = db.conn.execute("SELECT * FROM extract_runs").fetchall()
-    assert len(rows) == 1
-    assert rows[0]["outcome"] == "extracted"
-    assert rows[0]["extractor_version"] == "v2"
-    db.close()
-
-
-def test_clear_extract_runs_covers_drink_buckets(tmp_db):
-    """clear_extract_runs deletes extract_runs rows on both likely_drink_recipe
-    and confirmed_drink pages — same scope as the extractor queue. Must NOT
-    touch food/other buckets."""
-    from scraper.db import Database
-    db = Database(tmp_db)
-    db.add_urls_batch("difs", ["https://x/a", "https://x/b", "https://x/c"])
-    db.set_content_type("https://x/a", "likely_drink_recipe")
-    db.set_content_type("https://x/b", "confirmed_drink")
-    db.set_content_type("https://x/c", "confirmed_food")
-    db.mark_content("https://x/a", "valid", html_path="difs/a.html")
-    db.mark_content("https://x/b", "Recipe", html_path="difs/b.html")
-    db.mark_content("https://x/c", "Recipe", html_path="difs/c.html")
-    _record_extract(db, "https://x/a")
-    _record_extract(db, "https://x/b", outcome="no_recipe")
-    _record_extract(db, "https://x/c")
-
-    n = db.clear_extract_runs()
-    assert n == 2  # only the two drink-bucket rows
-
-    rows = {
-        r["url"]: r["page_id"] for r in db.conn.execute(
-            "SELECT p.url, e.page_id FROM pages p "
-            "LEFT JOIN extract_runs e ON e.page_id = p.id"
-        )
-    }
-    assert rows["https://x/a"] is None
-    assert rows["https://x/b"] is None
-    assert rows["https://x/c"] is not None  # confirmed_food row untouched
-    db.close()
-
-
-def test_clear_extract_runs_scoped_by_site(tmp_db):
-    from scraper.db import Database
-    db = Database(tmp_db)
-    db.add_url("site_a", "https://a/1")
-    db.add_url("site_b", "https://b/1")
-    db.set_content_type("https://a/1", "confirmed_drink")
-    db.set_content_type("https://b/1", "confirmed_drink")
-    db.mark_content("https://a/1", "Recipe", html_path="a/1.html")
-    db.mark_content("https://b/1", "Recipe", html_path="b/1.html")
-    _record_extract(db, "https://a/1")
-    _record_extract(db, "https://b/1")
-
-    n = db.clear_extract_runs(site="site_a")
-    assert n == 1
-    rows = {r["url"]: r["page_id"] for r in db.conn.execute(
-        "SELECT p.url, e.page_id FROM pages p LEFT JOIN extract_runs e ON e.page_id = p.id"
-    )}
-    assert rows["https://a/1"] is None
-    assert rows["https://b/1"] is not None
-    db.close()
-
-
-def test_record_extract_no_recipe_removes_from_candidates(tmp_db):
-    """A known-failure extract_runs row (outcome != 'extracted') takes the
-    page out of the candidate list until the row is deleted — no point
-    re-testing HTML that the extractor already determined has no Recipe.
-    Successful-extraction rows do NOT gate the candidate list; that's what
-    Supabase is for."""
-    from scraper.db import Database
-    db = Database(tmp_db)
-    db.add_urls_batch("difs", ["https://x/a"])
-    db.set_content_type("https://x/a", "likely_drink_recipe")
-    db.mark_content("https://x/a", "valid", html_path="difs/a.html")
-
-    assert len(db.get_unextracted()) == 1
-    _record_extract(db, "https://x/a", outcome="no_recipe")
-    assert db.get_unextracted() == []
-    db.close()
-
-
 def test_schema_has_disabled_reason_column(tmp_db):
     db = Database(tmp_db)
     columns = [r[1] for r in db.conn.execute("PRAGMA table_info(pages)").fetchall()]
@@ -730,18 +523,6 @@ def test_classify_drink_runs_table_exists(tmp_db):
     db.close()
 
 
-def test_extract_runs_table_exists(tmp_db):
-    db = Database(tmp_db)
-    cols = {row[1] for row in db.conn.execute("PRAGMA table_info(extract_runs)")}
-    assert cols == {
-        "page_id", "run_id", "outcome", "error",
-        "extractor_version", "evaluated_at",
-    }
-    pk_cols = [r[1] for r in db.conn.execute("PRAGMA table_info(extract_runs)") if r[5]]
-    assert pk_cols == ["page_id"]
-    db.close()
-
-
 def test_legacy_pages_columns_are_migrated_by_migrate(tmp_path):
     """Running migrate() on an older DB with legacy `error` + `validated_at`
     columns: drops validated_at, renames error to fetch_error, and narrows
@@ -822,6 +603,32 @@ def test_legacy_classifications_table_is_dropped_by_migrate(tmp_path):
     db = Database(db_path)
     exists = db.conn.execute(
         "SELECT name FROM sqlite_master WHERE type='table' AND name='classifications'"
+    ).fetchone()
+    assert exists is None
+    db.close()
+
+
+def test_legacy_extract_runs_table_is_dropped_by_migrate(tmp_path):
+    """extract_runs bookkeeping moved to the Zone-2 extract-recipe stage, so
+    migrate() drops a pre-existing table — otherwise an existing DB would trip
+    the schema-drift check (migrate() no longer creates extract_runs) and refuse
+    to open."""
+    import sqlite3
+
+    db_path = tmp_path / "legacy_extract.db"
+    migrate(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        "CREATE TABLE extract_runs (page_id INTEGER PRIMARY KEY, run_id INTEGER, "
+        "outcome TEXT, error TEXT, extractor_version TEXT, evaluated_at TEXT)"
+    )
+    conn.commit()
+    conn.close()
+
+    migrate(db_path)
+    db = Database(db_path)  # would raise DatabaseNotMigratedError if still drifted
+    exists = db.conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='extract_runs'"
     ).fetchone()
     assert exists is None
     db.close()

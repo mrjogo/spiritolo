@@ -22,8 +22,8 @@ from .batch_provider import BatchRequest, BatchResult, BatchStatus, BatchSubmiss
 DEFAULT_MODEL = "gpt-5.4-mini"
 # gpt-5-family charges reasoning tokens against max_completion_tokens; see
 # common.llm.openai.OpenAIProvider for the full rationale. 2048 leaves
-# headroom; reasoning_effort='minimal' (set below for gpt-5*) keeps the
-# model from burning the budget on a structured-retrieval prompt.
+# headroom; reasoning_effort='none' (set below for gpt-5*) disables reasoning
+# entirely for these structured-retrieval prompts.
 DEFAULT_MAX_TOKENS = 2048
 DEFAULT_COMPLETION_WINDOW = "24h"
 
@@ -60,7 +60,7 @@ class OpenAIBatchProvider:
             "response_format": {"type": "json_object"},
         }
         if _is_gpt5_family(self.model_id):
-            body_kwargs["reasoning_effort"] = "minimal"
+            body_kwargs["reasoning_effort"] = "none"  # reasoning off for structured retrieval
         for r in requests:
             lines.append(json.dumps({
                 "custom_id": r.custom_id,

@@ -5,7 +5,27 @@ import { findTier, DEFAULT_LLM_TIER, type LlmTier } from './llmTiers';
 
 // The lifecycle states a run (a `jobs` row) moves through, from the queue
 // selection UI's point of view.
-export type RunState = 'draft' | 'queued' | 'claimed' | 'running' | 'done' | 'failed';
+export type RunState =
+  | 'draft'
+  | 'queued'
+  | 'claimed'
+  | 'running'
+  | 'cancelling'
+  | 'done'
+  | 'failed'
+  | 'cancelled';
+
+// Active = a worker is (or should be) working this run, so the cockpit polls
+// for live progress and offers Cancel.
+const ACTIVE_STATES: readonly RunState[] = ['queued', 'claimed', 'running', 'cancelling'];
+export function isActiveRun(state: RunState): boolean {
+  return ACTIVE_STATES.includes(state);
+}
+// Finished = eligible for retry-residue.
+const FINISHED_STATES: readonly RunState[] = ['done', 'failed', 'cancelled'];
+export function isFinishedRun(state: RunState): boolean {
+  return FINISHED_STATES.includes(state);
+}
 
 // One row from the `runs` read view (a projection over `jobs` + item roll-ups).
 // The write path is the RPC set below; this is the read side only.
@@ -24,12 +44,31 @@ export interface RunHeader {
   max_cost_cents: number | null;
   created_at: string | null;
   created_by: string | null;
+  // --- cockpit fields (live/terminal) ---
+  cost_actual_cents: number | null;
+  error_code: string | null;
+  error_detail: string | null;
+  worker_id: string | null;
+  last_heartbeat: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  /** Per-item-state progress counts (sum to task_count). */
+  items_pending: number;
+  items_applied: number;
+  items_flagged: number;
+  items_failed: number;
 }
 
 const RUN_SELECT =
   'id, stage, state, llm_provider, llm_model, task_count, ' +
   'flagged_count, never_run_count, failed_count, cost_estimate_cents, ' +
-  'max_cost_cents, created_at, created_by';
+  'max_cost_cents, created_at, created_by, cost_actual_cents, error_code, ' +
+  'error_detail, worker_id, last_heartbeat, started_at, finished_at, ' +
+  'items_pending, items_applied, items_flagged, items_failed';
+
+// While a run is active the cockpit polls the header so progress / cost /
+// heartbeat update without a manual refresh.
+const ACTIVE_POLL_MS = 2500;
 
 export interface UseRunResult {
   run: RunHeader | null;
@@ -53,6 +92,11 @@ export function useRun(jobId: number | null): UseRunResult {
       return (data as RunHeader | null) ?? null;
     },
     enabled: jobId != null,
+    // Live-poll while the run is in flight; stop once it's terminal or draft.
+    refetchInterval: (q) => {
+      const s = (q.state.data as RunHeader | null)?.state;
+      return s && isActiveRun(s) ? ACTIVE_POLL_MS : false;
+    },
   });
 
   const run = query.data ?? null;
@@ -84,4 +128,18 @@ export function useSetRunLlm(jobId: number) {
 /** start_run(job_id, max_cost_cents). */
 export function useStartRun(jobId: number) {
   return useRpc<StartRunArgs, void>('start_run', { invalidate: [['run', jobId], ['runs']] });
+}
+
+/** cancel_run(job_id): stop a draft/queued run outright, or ask a running one to stop. */
+export function useCancelRun(jobId: number) {
+  return useRpc<{ job_id: number }, void>('cancel_run', {
+    invalidate: [['run', jobId], ['runs']],
+  });
+}
+
+/** retry_run(job_id): re-drive a finished run's residue (failed + unprocessed). */
+export function useRetryRun(jobId: number) {
+  return useRpc<{ job_id: number }, void>('retry_run', {
+    invalidate: [['run', jobId], ['runs']],
+  });
 }

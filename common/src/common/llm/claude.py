@@ -41,6 +41,10 @@ class ClaudeProvider:
         return cls(client=anthropic.Anthropic(**client_kwargs), model_id=model_id)
 
     def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+        # No `thinking` and no `output_config.effort` on purpose: on Haiku 4.5
+        # extended thinking is opt-in (omitting `thinking` = no thinking, which
+        # is what we want for structured retrieval), and the `effort` parameter
+        # is rejected by Haiku 4.5 — setting either would be wrong here.
         msg = self.client.messages.create(
             model=self.model_id,
             max_tokens=self.max_tokens,

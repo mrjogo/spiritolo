@@ -4,7 +4,15 @@ import { formatCents } from '../../../ui/formatCents';
 import { LlmTierSelect } from '../../../ui/runs/LlmTierSelect';
 import { StartConfirmModal } from '../../../ui/runs/StartConfirmModal';
 import { TasksTable } from '../../../ui/runs/TasksTable';
-import { useRun, useSetRunLlm, useStartRun } from '../../../ui/runs/useRun';
+import { RunCockpit } from '../../../ui/runs/RunCockpit';
+import {
+  useRun,
+  useSetRunLlm,
+  useStartRun,
+  useCancelRun,
+  useRetryRun,
+} from '../../../ui/runs/useRun';
+import { useWorkerHealth } from '../../../ui/runs/useWorkerHealth';
 import {
   useRunItems,
   useRemoveRunItems,
@@ -16,7 +24,7 @@ import { useEstimatedRunCents } from '../../../ui/runs/useEstimate';
 import './runs.css';
 
 const PAGE_SIZE = 50;
-const DEFAULT_SORT: Sort = { col: 'title', asc: true };
+const DEFAULT_SORT: Sort[] = [{ col: 'title', asc: true }];
 
 // The run detail: header + state badge, the LLM-tier picker + cost estimate,
 // the Start-run affordance (metered → confirm modal), and the task list with
@@ -48,7 +56,10 @@ export function RunDetail() {
 
   const setLlm = useSetRunLlm(jobId ?? 0);
   const startRun = useStartRun(jobId ?? 0);
+  const cancelRun = useCancelRun(jobId ?? 0);
+  const retryRun = useRetryRun(jobId ?? 0);
   const removeItems = useRemoveRunItems(jobId ?? 0);
+  const workerHealth = useWorkerHealth();
 
   // Live draft estimate from the server (single source of truth); must be called
   // before the early returns to respect the rules of hooks.
@@ -102,40 +113,59 @@ export function RunDetail() {
             {run.state === 'draft' ? ' · not started' : ` · ${run.state}`}
           </div>
         </div>
-        <Link to={`/ops/runs/${run.id}/add`} className="ops-xlink">
-          <button type="button" className="runs-btn--primary">＋ Add tasks</button>
-        </Link>
+        {isDraft && (
+          <Link to={`/ops/runs/${run.id}/add`} className="ops-xlink">
+            <button type="button" className="runs-btn--primary">＋ Add tasks</button>
+          </Link>
+        )}
       </div>
 
-      <div className="runs-ctl">
-        <div className="runs-ctlcard">
-          <span className="runs-ctlcard__label">LLM tier for this run</span>
-          <LlmTierSelect value={activeTier} onChange={handleTierChange} disabled={!isDraft} />
-        </div>
-        <div className="runs-ctlcard">
-          <span className="runs-ctlcard__label">Estimated cost</span>
-          <div className="runs-esti">
-            <span className="runs-esti__amt">≈ {formatCents(estimateCents)}</span>
-            {activeTier.metered && <span className="runs-tag">metered</span>}
+      {isDraft ? (
+        <div className="runs-ctl">
+          <div className="runs-ctlcard">
+            <span className="runs-ctlcard__label">LLM tier for this run</span>
+            <LlmTierSelect value={activeTier} onChange={handleTierChange} disabled={!isDraft} />
           </div>
-          <div className="runs-meta">
-            {run.task_count.toLocaleString()} tasks · deterministic tier first, LLM on residue
+          <div className="runs-ctlcard">
+            <span className="runs-ctlcard__label">Estimated cost</span>
+            <div className="runs-esti">
+              <span className="runs-esti__amt">≈ {formatCents(estimateCents)}</span>
+              {activeTier.metered && <span className="runs-tag">metered</span>}
+            </div>
+            <div className="runs-meta">
+              {run.task_count.toLocaleString()} tasks · deterministic tier first, LLM on residue
+            </div>
+          </div>
+          <div className="runs-ctlcard runs-startcard">
+            <button
+              type="button"
+              className="runs-btn--primary"
+              disabled={run.task_count === 0}
+              onClick={() => setModalOpen(true)}
+            >
+              Start run →
+            </button>
+            <div className="runs-startcard__fine">
+              {activeTier.metered ? 'metered — needs approval to start' : 'free — starts immediately'}
+            </div>
           </div>
         </div>
-        <div className="runs-ctlcard runs-startcard">
-          <button
-            type="button"
-            className="runs-btn--primary"
-            disabled={!isDraft || run.task_count === 0}
-            onClick={() => setModalOpen(true)}
-          >
-            Start run →
-          </button>
-          <div className="runs-startcard__fine">
-            {activeTier.metered ? 'metered — needs approval to start' : 'free — starts immediately'}
-          </div>
-        </div>
-      </div>
+      ) : (
+        <RunCockpit
+          run={run}
+          onCancel={() => cancelRun.mutate({ job_id: run.id })}
+          onRetry={() => retryRun.mutate({ job_id: run.id })}
+          cancelling={cancelRun.isPending}
+          retrying={retryRun.isPending}
+          actionError={
+            cancelRun.isError
+              ? cancelRun.error.message
+              : retryRun.isError
+                ? retryRun.error.message
+                : null
+          }
+        />
+      )}
 
       <TasksTable
         runState={run.state}
@@ -162,6 +192,8 @@ export function RunDetail() {
           tier={activeTier}
           submitting={startRun.isPending}
           error={startRun.isError ? startRun.error.message : null}
+          workerProviders={workerHealth.liveProviders}
+          workerStale={workerHealth.stale}
           onCancel={() => setModalOpen(false)}
           onStart={handleStart}
         />

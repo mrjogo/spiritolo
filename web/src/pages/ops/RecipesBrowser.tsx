@@ -78,7 +78,7 @@ export function RecipesBrowser() {
   const [filters, setFilters] = useState<PostgrestFilter[]>([]);
   const [page, setPage] = useState(1);
 
-  const { rows, total } = usePagedQuery<RecipeListRow>({
+  const { rows, total, status } = usePagedQuery<RecipeListRow>({
     table: 'recipes_public',
     select: LIST_SELECT,
     filters,
@@ -96,6 +96,7 @@ export function RecipesBrowser() {
           <DataTable
             columns={COLUMNS}
             rows={rows}
+            loading={status === 'loading'}
             rowKey={(r) => r.id}
             onRowClick={(r) => select(String(r.id))}
           />

@@ -28,6 +28,9 @@ old external chain config carried that survives.
 
 from __future__ import annotations
 
+import logging
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -35,6 +38,38 @@ from common.providers import ChainResult, TierResult, cost as _cost, packing as 
 from common.providers.packing import Item
 
 from ingredients.worker.cost import CostMeter
+
+log = logging.getLogger("ingredients.worker.providers")
+
+# LLM call resilience. A hosted provider call fails either transiently (rate
+# limit / 5xx / timeout) or fatally (auth / billing / bad request). A transient
+# failure is retried a few times with exponential backoff; if it still fails,
+# that one pack's items are PARKED and the run continues — one blip must not
+# lose the other thousands of items. A *fatal* error, or too many consecutive
+# pack failures (the circuit breaker), aborts the whole run fast with a surfaced
+# message rather than grinding every remaining pack into the same wall — this is
+# what run #7's DeepSeek `402 Insufficient Balance` should have done.
+_MAX_LLM_ATTEMPTS = 3
+_BACKOFF_BASE_SECONDS = 2.0  # sleeps of 1s, 2s between attempts
+_CONSECUTIVE_FAIL_ABORT = 3
+_FATAL_STATUS_CODES = frozenset({400, 401, 402, 403, 404, 422})
+
+
+class ProviderUnavailable(Exception):
+    """The run's LLM provider is systemically unusable — a fatal auth/billing/
+    config error, or a persistent failure that tripped the circuit breaker. The
+    worker fails the run with this message rather than parking every pack."""
+
+
+def _is_fatal(exc: Exception) -> bool:
+    """A provider error not worth retrying — an explicit non-retryable status."""
+    return getattr(exc, "status_code", None) in _FATAL_STATUS_CODES
+
+
+def _provider_unavailable(provider_id: str, exc: Exception) -> "ProviderUnavailable":
+    code = getattr(exc, "status_code", None)
+    where = f"{provider_id} error" + (f" {code}" if code else "")
+    return ProviderUnavailable(f"{where}: {exc}"[:500])
 
 # How many items an LLM tier packs per call, per stage. LLM stages default to
 # DEFAULT_PACK_SIZE; a stage not listed here uses the default. (This is the one
@@ -73,6 +108,11 @@ class ProviderChain:
     tiers: list[tuple[str, Any]]
     pack_size: int = DEFAULT_PACK_SIZE
     meter: CostMeter = field(default_factory=CostMeter)
+    # Cooperative-cancel hook: when it returns True the LLM tier stops between
+    # packs, parking the remaining items. The worker wires this to the run's
+    # cancel signal so a cancelled run stops promptly instead of draining every
+    # pack. None (the default) means never stop.
+    should_stop: Callable[[], bool] | None = None
 
     def resolve(self, items: list[Item], *, system_prompt: str = "") -> ChainResult:
         """Resolve ``items`` through the tiers in order.
@@ -163,19 +203,38 @@ class ProviderChain:
         parked: list[str] = []
         calls = 0
         tier_cost = 0
+        consecutive_failures = 0
 
         for group in _packing.chunk(pending, self.pack_size):
+            if self.should_stop is not None and self.should_stop():
+                # Cancel requested: park the rest of the residue and stop. What's
+                # already resolved this tier stands; the parked items stay
+                # pending for a later re-run.
+                parked.extend(it.id for it in group)
+                break
             if metered:
                 # Cost cap is enforced BEFORE the call, so a breaching chunk is
                 # never spent and its items stay unprocessed (raises out).
                 self.meter.charge(unit)
-            result = provider.resolve(
-                system_prompt=system_prompt,
-                user_prompt=_packing.encode_request(group),
-            )
+            try:
+                raw = self._resolve_group(provider, group, system_prompt)
+            except Exception as exc:  # noqa: BLE001 - the provider transport surface
+                # Fatal (auth/billing/config) -> abort the run fast, message and
+                # all. Otherwise park this pack and keep going, but trip the
+                # breaker if failures pile up back-to-back (systemic outage).
+                if _is_fatal(exc):
+                    raise _provider_unavailable(provider_id, exc) from exc
+                consecutive_failures += 1
+                parked.extend(it.id for it in group)
+                log.warning("LLM pack of %d items failed after retries: %s", len(group), exc)
+                if consecutive_failures >= _CONSECUTIVE_FAIL_ABORT:
+                    raise _provider_unavailable(provider_id, exc) from exc
+                continue
+
+            consecutive_failures = 0
             calls += 1
             tier_cost += unit
-            answers = _packing.decode_response(result.raw_text)
+            answers = _packing.decode_response(raw)
             for it in group:
                 if it.id in answers:
                     resolved[it.id] = answers[it.id]
@@ -184,3 +243,21 @@ class ProviderChain:
                     parked.append(it.id)  # dropped/errored -> park this item
 
         return newly, parked, calls, tier_cost, metered
+
+    @staticmethod
+    def _resolve_group(provider: Any, group: list[Item], system_prompt: str) -> str:
+        """One packed provider call, with bounded exponential backoff on
+        transient errors. A fatal error (see ``_is_fatal``) is re-raised
+        immediately without retrying; a transient error is retried up to
+        ``_MAX_LLM_ATTEMPTS`` and then re-raised for the caller to park."""
+        user_prompt = _packing.encode_request(group)
+        for attempt in range(_MAX_LLM_ATTEMPTS):
+            try:
+                return provider.resolve(
+                    system_prompt=system_prompt, user_prompt=user_prompt
+                ).raw_text
+            except Exception as exc:  # noqa: BLE001 - the provider transport surface
+                if _is_fatal(exc) or attempt + 1 == _MAX_LLM_ATTEMPTS:
+                    raise
+                time.sleep(_BACKOFF_BASE_SECONDS**attempt)
+        raise AssertionError("unreachable")  # pragma: no cover

@@ -12,6 +12,10 @@ interface Props {
   defaultCapDollars?: number;
   submitting?: boolean;
   error?: string | null;
+  /** Providers a live worker can currently service (Start pre-flight). */
+  workerProviders?: string[];
+  /** True when no worker has reported recently. */
+  workerStale?: boolean;
   onCancel: () => void;
   /** Fires with the hard cap in CENTS (start_run takes max_cost_cents). */
   onStart: (maxCostCents: number) => void;
@@ -24,9 +28,19 @@ const DEFAULT_CAP_DOLLARS = 1.5;
 // NO acknowledge checkbox (per the approved mockup) — Start is enabled as soon
 // as a valid positive cap is entered.
 export function StartConfirmModal({
-  run, tier, defaultCapDollars = DEFAULT_CAP_DOLLARS, submitting, error, onCancel, onStart,
+  run, tier, defaultCapDollars = DEFAULT_CAP_DOLLARS, submitting, error,
+  workerProviders, workerStale, onCancel, onStart,
 }: Props) {
   const [capInput, setCapInput] = useState(defaultCapDollars.toFixed(2));
+
+  // Pre-flight: warn (don't block) if no worker is alive, or if none of the
+  // live workers can service this run's provider — the run-#7 footgun where a
+  // run was assembled for a provider the worker had no key for.
+  const preflight = workerStale
+    ? 'No worker is currently reporting — this run may sit queued until one starts.'
+    : workerProviders && !workerProviders.includes(tier.provider)
+      ? `No live worker can service "${tier.provider}" (available: ${workerProviders.join(', ') || 'none'}). The run will park until one can.`
+      : null;
 
   const draftEstimate = useEstimatedRunCents(
     tier.provider, tier.model, run.task_count, run.cost_estimate_cents == null,
@@ -89,6 +103,8 @@ export function StartConfirmModal({
         />
         <span className="runs-modal__sub" style={{ margin: 0 }}>stop the run if it exceeds this</span>
       </div>
+
+      {preflight && <div className="runs-preflight">⚠ {preflight}</div>}
 
       {error && <div className="tx-field__error">{error}</div>}
 

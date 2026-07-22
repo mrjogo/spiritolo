@@ -13,6 +13,10 @@ export interface DataTableProps<T> {
   selectedIds?: Set<string | number>;
   onSelectionChange?: (ids: (string | number)[]) => void;
   onRowClick?: (row: T) => void;
+  /** Show a loading row instead of (an empty) body while the query runs. */
+  loading?: boolean;
+  /** Message for the empty (loaded, zero-row) state. */
+  emptyMessage?: string;
 }
 
 // The one table every /ops browser composes over usePagedQuery: columns with
@@ -25,8 +29,10 @@ export interface DataTableProps<T> {
 // the label) — see the max-width:640px block in pages/ops/ops.css.
 export function DataTable<T>({
   columns, rows, rowKey, selectable, selectedIds, onSelectionChange, onRowClick,
+  loading, emptyMessage = 'Nothing to show.',
 }: DataTableProps<T>) {
   const selected = selectedIds ?? new Set<string | number>();
+  const colCount = columns.length + (selectable ? 1 : 0);
 
   function toggle(id: string | number) {
     const next = new Set(selected);
@@ -48,7 +54,18 @@ export function DataTable<T>({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => {
+          {loading ? (
+            <tr>
+              <td colSpan={colCount} className="data-table__state" aria-busy="true">
+                <span className="ops-spinner" aria-hidden="true" /> Loading…
+              </td>
+            </tr>
+          ) : rows.length === 0 ? (
+            <tr>
+              <td colSpan={colCount} className="data-table__state">{emptyMessage}</td>
+            </tr>
+          ) : (
+            rows.map((row) => {
             const id = rowKey(row);
             return (
               <tr
@@ -85,7 +102,8 @@ export function DataTable<T>({
                 ))}
               </tr>
             );
-          })}
+          })
+          )}
         </tbody>
       </table>
     </div>

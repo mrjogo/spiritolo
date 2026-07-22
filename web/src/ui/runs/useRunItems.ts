@@ -32,9 +32,16 @@ export interface RunItem {
 // run_items_facets shape: { status: { flagged: N, ... }, source: { ... } }).
 export type Facets = Record<string, Record<string, number>>;
 
+// One sort key. An ordered list of these is a multidimensional sort: the first
+// key is primary, each subsequent key breaks ties within the previous.
 export interface Sort {
   col: string;
   asc: boolean;
+}
+
+/** Serialize an ordered sort to the RPCs' comma-separated "col:dir" form. */
+export function serializeSort(keys: Sort[]): string {
+  return keys.map((k) => `${k.col}:${k.asc ? 'asc' : 'desc'}`).join(',');
 }
 
 export interface UseRunItemsResult {
@@ -56,7 +63,7 @@ function readTotal(rows: RunItem[]): number {
 export function useRunItems(
   jobId: number | null,
   pFilter: PFilter,
-  sort: Sort,
+  sort: Sort[],
   page: number,
   pageSize: number,
 ): UseRunItemsResult {
@@ -69,7 +76,7 @@ export function useRunItems(
       const { data, error } = await supabase.rpc('run_items', {
         job_id: jobId,
         p_filter: pFilter,
-        sort: `${sort.col}:${sort.asc ? 'asc' : 'desc'}`,
+        sort: serializeSort(sort),
         limit: pageSize,
         offset,
       });

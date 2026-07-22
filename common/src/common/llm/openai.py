@@ -2,13 +2,13 @@
 
 For batch (50% off, ~24h SLA), see openai_batch.py.
 
-gpt-5-family models charge reasoning tokens against `max_completion_tokens`,
-so the budget must cover both the (invisible) reasoning trace and the
-(visible) output. We default to 2048 to leave headroom; for our pure
-structured-retrieval prompts we also pin `reasoning_effort='minimal'`
-so the model doesn't burn the budget thinking about a question that
-doesn't need thinking. Without these two together, gpt-5.4-mini routinely
-returns empty content with finish_reason='length'.
+gpt-5-family models reason by default, charging reasoning tokens against
+`max_completion_tokens`. Our prompts are pure structured retrieval and need no
+reasoning, so we pin `reasoning_effort='none'` — which disables the reasoning
+trace entirely (GPT-5.1+, including the default gpt-5.4-mini) rather than merely
+minimizing it. That also frees the whole 2048-token budget for the JSON output;
+without disabling it, gpt-5.4-mini routinely returned empty content with
+finish_reason='length'.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ class OpenAIProvider:
             "response_format": {"type": "json_object"},
         }
         if _is_gpt5_family(self.model_id):
-            kwargs["reasoning_effort"] = "minimal"
+            kwargs["reasoning_effort"] = "none"  # reasoning off for structured retrieval
         resp = self.client.chat.completions.create(**kwargs)
         text = resp.choices[0].message.content or ""
         # See common.llm.openai_batch._strip_nul_from_json_text for why.

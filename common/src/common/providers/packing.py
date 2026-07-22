@@ -64,34 +64,3 @@ def decode_response(raw_text: str) -> dict[str, Any]:
     """
     results = json.loads(raw_text).get("results", [])
     return {row["id"]: row["answer"] for row in results if "answer" in row}
-
-
-def run_packed(
-    provider: Any,
-    items: list[Item],
-    pack_size: int,
-    *,
-    system_prompt: str = "",
-) -> tuple[dict[str, Any], list[str], int]:
-    """Resolve `items` through an LLM `provider` in packed chunks.
-
-    Returns (resolved, parked, calls):
-      - resolved: {id: structured output} for items the provider answered,
-      - parked:   ids the provider dropped or errored on (order preserved),
-      - calls:    number of provider.resolve invocations (== ceil(N/pack_size)).
-    """
-    resolved: dict[str, Any] = {}
-    parked: list[str] = []
-    calls = 0
-    for group in chunk(items, pack_size):
-        result = provider.resolve(
-            system_prompt=system_prompt, user_prompt=encode_request(group)
-        )
-        calls += 1
-        answers = decode_response(result.raw_text)
-        for it in group:
-            if it.id in answers:
-                resolved[it.id] = answers[it.id]
-            else:
-                parked.append(it.id)
-    return resolved, parked, calls

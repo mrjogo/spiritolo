@@ -16,10 +16,9 @@ from ingredients.worker.providers_local import (
     build_claude_http_client,
     build_local_ollama_provider,
     build_openai_http_client,
-    build_scraperapi_http_client,
 )
 
-_HOSTED = (build_openai_http_client, build_claude_http_client, build_scraperapi_http_client)
+_HOSTED = (build_openai_http_client, build_claude_http_client)
 
 
 class RecordingFactory:

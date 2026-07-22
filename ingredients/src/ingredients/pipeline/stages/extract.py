@@ -32,8 +32,8 @@ STAGE = "extract-recipe"
 EXTRACTOR_VERSION = "v1"
 
 # Page classification labels the extract queue accepts — the Zone-1 classifier's
-# recipe verdicts (mirrors scraper.db.EXTRACT_CONTENT_TYPES; ingredients doesn't
-# depend on scraper, so the values are duplicated rather than imported).
+# recipe verdicts. Duplicated here rather than imported: ingredients doesn't
+# depend on scraper.
 RECIPE_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink")
 
 # Corpus GETs are the extract bottleneck (one network round-trip per page), so
@@ -175,10 +175,15 @@ def extract_stage_fn(
     if not pages:
         return counts
 
+    should_stop = job.get("should_stop")
     fetch = functools.partial(_read_html, _reader())
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for chunk in _windows(pages, window):
+            if should_stop is not None and should_stop():
+                break  # cancel requested: leave the rest pending for a re-run
             for page, html in pool.map(fetch, chunk):
+                if should_stop is not None and should_stop():
+                    break
                 if html is None:
                     counts["html_missing"] += 1
                     _record(conn, page["id"], outcome="failed", method="deterministic",

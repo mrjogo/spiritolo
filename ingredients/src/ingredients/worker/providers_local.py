@@ -86,12 +86,21 @@ def build_claude_http_client(
     return factory(**hosted_client_kwargs(env))
 
 
-def build_scraperapi_http_client(
-    *, client_factory: ClientFactory | None = None, env: Env | None = None
-) -> Any:
-    """Direct-route httpx client for ScraperAPI fetch calls."""
-    factory = httpx.Client if client_factory is None else client_factory
-    return factory(**hosted_client_kwargs(env))
+def available_providers(env: Env | None = None) -> list[str]:
+    """Which LLM providers this worker can actually service, given the API keys
+    in ``env``. ``ollama`` (local, free) is always available; each hosted
+    provider appears only when its key is present. The worker publishes this to
+    ``worker_status`` so /ops can warn before a run is assembled for a provider
+    the worker has no key for (the run-#7 DeepSeek footgun)."""
+    e = _env(env)
+    out = ["ollama"]
+    if e.get("OPENAI_API_KEY"):
+        out.append("openai")
+    if e.get("ANTHROPIC_API_KEY"):
+        out.append("claude")
+    if e.get("DEEPSEEK_API_KEY"):
+        out.append("deepseek")
+    return out
 
 
 def build_provider_for_run(

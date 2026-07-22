@@ -489,3 +489,23 @@
     overflow-y: auto;
   }
 }
+
+/* --- Shared loading / empty states (DataTable + browsers) --------------- */
+.data-table__state {
+  text-align: center;
+  padding: 28px 12px;
+  color: #5b6673;
+  font-size: 14px;
+}
+.ops-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+  margin-right: 6px;
+  border: 2px solid rgba(91, 102, 115, 0.25);
+  border-top-color: #5b6673;
+  border-radius: 50%;
+  animation: ops-spin 0.7s linear infinite;
+}
+@keyframes ops-spin { to { transform: rotate(360deg); } }

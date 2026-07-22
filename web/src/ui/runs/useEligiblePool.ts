@@ -2,7 +2,7 @@ import { useQuery, keepPreviousData } from '@tanstack/react-query';
 import { supabase } from '../../supabase';
 import { useRpc } from '../hooks/useRpc';
 import type { PFilter } from './filter';
-import type { Facets, Sort } from './useRunItems';
+import { serializeSort, type Facets, type Sort } from './useRunItems';
 
 // One row of the eligible pool an operator browses on the Add-tasks page —
 // every entity that qualifies for the stage, with its current map/parse/etc.
@@ -39,7 +39,7 @@ function readTotal(rows: EligibleRow[]): number {
 export function useEligiblePool(
   stage: string,
   pFilter: PFilter,
-  sort: Sort,
+  sort: Sort[],
   page: number,
   pageSize: number,
 ): UseEligiblePoolResult {
@@ -52,7 +52,7 @@ export function useEligiblePool(
       const { data, error } = await supabase.rpc('eligible_pool', {
         stage,
         p_filter: pFilter,
-        sort: `${sort.col}:${sort.asc ? 'asc' : 'desc'}`,
+        sort: serializeSort(sort),
         limit: pageSize,
         offset,
       });

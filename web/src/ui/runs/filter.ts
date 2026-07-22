@@ -11,7 +11,6 @@
 //      the table (a new p_filter) never touches what's already selected. This
 //      is the "kept as you change filters" banner in the Add-tasks mockup.
 
-import type { PostgrestFilter } from '../hooks/usePagedQuery';
 
 // ---------------------------------------------------------------------------
 // Filter state → p_filter
@@ -51,19 +50,6 @@ export function buildPFilter(state: RunFilterState): PFilter {
   return f;
 }
 
-/** Toggle one option within a multi-select dimension (OR-within-a-key). */
-export function toggleFilterValue(
-  state: RunFilterState,
-  dimension: MultiDimension,
-  value: string,
-): RunFilterState {
-  const current = state[dimension];
-  const next = current.includes(value)
-    ? current.filter((v) => v !== value)
-    : [...current, value];
-  return { ...state, [dimension]: next };
-}
-
 /** Replace a whole dimension at once (a popover "Apply"). */
 export function setFilterValues(
   state: RunFilterState,
@@ -86,18 +72,6 @@ export function activeFilterCount(state: RunFilterState): number {
   if (state.code_version_before) n += 1;
   if (state.search?.trim()) n += 1;
   return n;
-}
-
-/** A p_filter also renders as a PostgREST filter array for any view-backed
- *  read that isn't going through the RPC (kept for parity with FilterBar's
- *  scope.where invariant). OR-within-a-key becomes an `in` op. */
-export function pFilterToPostgrest(f: PFilter): PostgrestFilter[] {
-  const out: PostgrestFilter[] = [];
-  if (f.status?.length) out.push({ col: 'status', op: 'in', value: f.status });
-  if (f.source?.length) out.push({ col: 'source', op: 'in', value: f.source });
-  if (f.code_version_before) out.push({ col: 'code_version', op: 'lt', value: f.code_version_before });
-  if (f.search) out.push({ col: 'title', op: 'ilike', value: `%${f.search}%` });
-  return out;
 }
 
 // ---------------------------------------------------------------------------

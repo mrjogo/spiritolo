@@ -21,6 +21,7 @@ job's ``job_items.cost_cents`` — so a rerun overwrites rather than accumulates
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -33,12 +34,15 @@ from ingredients.queue import claim_one, heartbeat as _heartbeat, requeue_stale
 from ingredients.worker import dispatch
 from ingredients.worker.cost import CostCapExceeded, CostMeter
 from ingredients.worker.dispatch import UnknownStage
-from ingredients.worker.providers import ProviderChain, pack_size_for
+from ingredients.worker.providers import ProviderChain, ProviderUnavailable, pack_size_for
 from ingredients.worker.providers_local import build_provider_for_run
+
+log = logging.getLogger("ingredients.worker.loop")
 
 DEFAULT_REAPER_SECONDS = 120.0
 DEFAULT_HEARTBEAT_SECONDS = 15.0
 DEFAULT_POLL_SECONDS = 2.0
+DEFAULT_CANCEL_POLL_SECONDS = 3.0
 
 
 class Heartbeat:
@@ -86,6 +90,57 @@ class Heartbeat:
         self._thread.join(timeout=self._interval + 5)
 
 
+class CancelWatcher:
+    """Background thread that watches a running job for a cancel request and
+    trips ``stop_event`` so the stage can bail out cooperatively.
+
+    Like ``Heartbeat`` it owns its own connection. It polls ``jobs.state`` every
+    ``interval`` seconds; the moment it reads ``'cancelling'`` it sets the event
+    and exits. A read error is swallowed and retried — worst case the cancel just
+    isn't observed and the run completes normally (the operator can retry).
+    """
+
+    def __init__(
+        self,
+        conn_factory: Callable[[], psycopg.Connection],
+        job_id: int,
+        stop_event: threading.Event,
+        interval: float,
+    ) -> None:
+        self._conn_factory = conn_factory
+        self._job_id = job_id
+        self._stop_event = stop_event
+        self._interval = interval
+        self._done = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> "CancelWatcher":
+        self._thread.start()
+        return self
+
+    def _run(self) -> None:
+        conn = self._conn_factory()
+        try:
+            while not self._done.wait(self._interval):
+                try:
+                    row = conn.execute(
+                        "select state from jobs where id = %s", (self._job_id,)
+                    ).fetchone()
+                    if not conn.autocommit:
+                        conn.commit()
+                except Exception:
+                    continue  # transient read error: try again next tick
+                if row and str(row[0]) == "cancelling":
+                    self._stop_event.set()
+                    return
+        finally:
+            conn.close()
+
+    def stop(self) -> None:
+        self._done.set()
+        self._thread.join(timeout=self._interval + 5)
+
+
 def boot(
     conn: psycopg.Connection,
     *,
@@ -118,47 +173,88 @@ def tick(
     max_cost_cents: int | None = None,
     conn_factory: Callable[[], psycopg.Connection] | None = None,
     heartbeat_interval: float = DEFAULT_HEARTBEAT_SECONDS,
+    cancel_poll_interval: float = DEFAULT_CANCEL_POLL_SECONDS,
 ) -> bool:
     """Run one loop pass. Return ``True`` if a job was processed, else ``False``.
 
     Claims the oldest runnable job (respecting the approval + max-cost gates),
-    commits the claim, dispatches it under a heartbeat thread, then finalizes the
-    job to ``succeeded`` / ``failed``. An empty queue is a no-op.
+    commits the claim, dispatches it under a heartbeat thread + a cancel-watcher,
+    then finalizes the job to ``succeeded`` / ``failed`` / ``cancelled``. An empty
+    queue is a no-op.
 
     The claimed job's LLM tier is built from its own ``llm_provider`` /
     ``llm_model`` (see ``_build_providers``); ``env`` supplies the API keys and
     ``client_factory`` the httpx transport. ``providers_builder`` overrides that
     wiring wholesale (tests inject a fake-provider chain through it).
+
+    Cancellation is cooperative: a ``CancelWatcher`` flips a stop ``Event`` when
+    the run goes ``cancelling``; the stage sees it via ``job['should_stop']`` (and
+    the LLM tier via ``ProviderChain.should_stop``) and bails at the next item
+    boundary, after which the run finalizes ``cancelled`` with partial work kept.
     """
     job = claim_one(conn, worker_id=worker_id, max_cost_cents=max_cost_cents)
     if job is None:
         conn.rollback()  # release the (empty) claim transaction
         return False
     conn.commit()  # release the row lock; the job is now 'running'
+    log.info(
+        "claimed job %s (stage %s, provider %s)",
+        job["id"], job["stage"], job.get("llm_provider") or "deterministic",
+    )
+
+    # Cooperative-cancel signal: the watcher trips it, the stage + LLM tier read it.
+    stop_event = threading.Event()
+    job["should_stop"] = stop_event.is_set
 
     if providers_builder is not None:
         providers = providers_builder(job)
     else:
         providers = _build_providers(job, env=env, client_factory=client_factory)
+    if providers is not None and hasattr(providers, "should_stop"):
+        providers.should_stop = stop_event.is_set
 
     hb: Heartbeat | None = None
+    cancel_watch: CancelWatcher | None = None
     if conn_factory is not None:
         hb = Heartbeat(conn_factory, job["id"], heartbeat_interval).start()
+        cancel_watch = CancelWatcher(
+            conn_factory, job["id"], stop_event, cancel_poll_interval
+        ).start()
 
     try:
         result = dispatch.run(job, conn, providers, stage_fns=stage_fns)
         conn.commit()  # flush any stage_fn writes not yet committed
-        _finalize_success(conn, job, result)
-    except UnknownStage:
-        _finalize_failed(conn, job, "unknown_stage")
-    except CostCapExceeded:
-        _finalize_failed(conn, job, "cost_cap_exceeded")
-    except Exception:
-        _finalize_failed(conn, job, "stage_error")
+        if stop_event.is_set():
+            _finalize_cancelled(conn, job)
+            log.info("job %s cancelled (partial results kept)", job["id"])
+        else:
+            _finalize_success(conn, job, result)
+            log.info("job %s (%s) done: %s", job["id"], job["stage"], result)
+    except UnknownStage as exc:
+        log.error("job %s: %s", job["id"], exc)
+        _finalize_failed(conn, job, "unknown_stage", detail=str(exc))
+    except CostCapExceeded as exc:
+        log.warning("job %s stopped at cost cap: %s", job["id"], exc)
+        _finalize_failed(conn, job, "cost_cap_exceeded", detail=str(exc))
+    except ProviderUnavailable as exc:
+        log.error("job %s provider unavailable: %s", job["id"], exc)
+        _finalize_failed(conn, job, "provider_unavailable", detail=str(exc))
+    except Exception as exc:  # noqa: BLE001 - a stage error must fail the job, never crash the loop
+        log.exception("job %s (%s) failed", job["id"], job["stage"])
+        _finalize_failed(conn, job, "stage_error", detail=_error_detail(exc))
     finally:
         if hb is not None:
             hb.stop()
+        if cancel_watch is not None:
+            cancel_watch.stop()
     return True
+
+
+def _error_detail(exc: BaseException) -> str:
+    """A short, single-line reason for ``jobs.error_detail`` — the full
+    traceback goes to the log. Truncated so a giant provider body can't bloat
+    the row."""
+    return f"{type(exc).__name__}: {exc}".splitlines()[0][:500]
 
 
 def _build_providers(
@@ -208,7 +304,31 @@ def _finalize_success(conn: psycopg.Connection, job: dict[str, Any], result: Any
     conn.commit()
 
 
-def _finalize_failed(conn: psycopg.Connection, job: dict[str, Any], error_code: str) -> None:
+def _finalize_cancelled(conn: psycopg.Connection, job: dict[str, Any]) -> None:
+    """Finalize a cooperatively-stopped run. Items already processed stay
+    terminal (their content is live); the rest stay ``pending`` for a re-run.
+    Cost rolls up from what was actually spent before the stop."""
+    conn.execute(
+        """
+        update jobs set
+            state             = 'cancelled',
+            finished_at       = now(),
+            cost_actual_cents = coalesce(
+                (select sum(cost_cents) from job_items where job_id = %s), 0
+            )::int
+        where id = %s
+        """,
+        (job["id"], job["id"]),
+    )
+    conn.commit()
+
+
+def _finalize_failed(
+    conn: psycopg.Connection,
+    job: dict[str, Any],
+    error_code: str,
+    detail: str | None = None,
+) -> None:
     # Clear any aborted-transaction state first; already-committed job_items
     # (e.g. items paid for before a cost abort) survive the rollback.
     conn.rollback()
@@ -218,14 +338,43 @@ def _finalize_failed(conn: psycopg.Connection, job: dict[str, Any], error_code: 
             state             = 'failed',
             finished_at       = now(),
             error_code        = %s,
+            error_detail      = %s,
             cost_actual_cents = coalesce(
                 (select sum(cost_cents) from job_items where job_id = %s), 0
             )::int
         where id = %s
         """,
-        (error_code, job["id"], job["id"]),
+        (error_code, detail, job["id"], job["id"]),
     )
     conn.commit()
+
+
+def _touch_worker_status(
+    conn: psycopg.Connection,
+    worker_id: str,
+    providers: list[str] | None,
+    stages: list[str] | None,
+) -> None:
+    """Upsert this worker's liveness + capabilities so /ops has a health signal.
+    Best-effort: a failure (e.g. table absent on an older DB) is logged and the
+    transaction rolled back so it can't poison the next claim."""
+    try:
+        conn.execute(
+            """
+            insert into worker_status (worker_id, last_seen, providers, stages)
+            values (%s, now(), %s, %s)
+            on conflict (worker_id) do update set
+                last_seen = now(),
+                providers = excluded.providers,
+                stages    = excluded.stages
+            """,
+            (worker_id, list(providers or []), list(stages or [])),
+        )
+        if not conn.autocommit:
+            conn.commit()
+    except Exception:
+        log.warning("worker_status update failed", exc_info=True)
+        conn.rollback()
 
 
 def serve(
@@ -239,15 +388,21 @@ def serve(
     max_cost_cents: int | None = None,
     conn_factory: Callable[[], psycopg.Connection] | None = None,
     heartbeat_interval: float = DEFAULT_HEARTBEAT_SECONDS,
+    cancel_poll_interval: float = DEFAULT_CANCEL_POLL_SECONDS,
     reaper_older_than_seconds: float = DEFAULT_REAPER_SECONDS,
     reconcile_hook: Callable[[psycopg.Connection], Any] | None = None,
     poll_interval: float = DEFAULT_POLL_SECONDS,
+    status_providers: list[str] | None = None,
+    status_stages: list[str] | None = None,
     stop_event: threading.Event | None = None,
 ) -> None:
     """Always-on loop: boot once, then tick forever (sleep when the queue drains).
 
     Stops when ``stop_event`` is set — otherwise runs until the process is
     killed (Railway restarts it; ``boot``'s reaper recovers any in-flight job).
+
+    Each pass refreshes ``worker_status`` (when ``worker_id`` is set) so /ops can
+    tell the worker is alive and which providers it can service.
     """
     boot(
         conn,
@@ -255,6 +410,8 @@ def serve(
         reconcile_hook=reconcile_hook,
     )
     while stop_event is None or not stop_event.is_set():
+        if worker_id is not None:
+            _touch_worker_status(conn, worker_id, status_providers, status_stages)
         ran = tick(
             conn,
             stage_fns=stage_fns,
@@ -265,6 +422,7 @@ def serve(
             max_cost_cents=max_cost_cents,
             conn_factory=conn_factory,
             heartbeat_interval=heartbeat_interval,
+            cancel_poll_interval=cancel_poll_interval,
         )
         if not ran:
             if stop_event is not None and stop_event.wait(poll_interval):

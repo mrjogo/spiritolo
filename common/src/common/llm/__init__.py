@@ -10,7 +10,6 @@ from .ollama import OllamaProvider
 from .openai import OpenAIProvider
 from .openai_batch import OpenAIBatchProvider
 from .provider import LLMProvider, ProviderResult
-from .retry import resolve_with_retry
 from .sidecar import Sidecar, SidecarMismatch, load_sidecar, mark_ingested, write_sidecar
 
 __all__ = [
@@ -18,7 +17,7 @@ __all__ = [
     "BatchSubmission", "BatchSubmitOutcome",
     "ClaudeProvider", "LLMProvider", "OllamaProvider", "OpenAIProvider",
     "OpenAIBatchProvider", "build_deepseek_provider",
-    "ProviderResult", "resolve_with_retry",
+    "ProviderResult",
     "Sidecar", "SidecarMismatch", "load_sidecar", "mark_ingested", "write_sidecar",
     "ingest_batch", "submit_batch",
 ]

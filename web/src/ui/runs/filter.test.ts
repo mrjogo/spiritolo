@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   emptyFilterState,
   buildPFilter,
-  toggleFilterValue,
   setFilterValues,
   clearFilters,
   activeFilterCount,
@@ -49,16 +48,6 @@ describe('buildPFilter', () => {
 });
 
 describe('filter state reducers', () => {
-  it('toggleFilterValue adds then removes a value within a dimension', () => {
-    let s = emptyFilterState;
-    s = toggleFilterValue(s, 'status', 'flagged');
-    expect(s.status).toEqual(['flagged']);
-    s = toggleFilterValue(s, 'status', 'failed');
-    expect(s.status).toEqual(['flagged', 'failed']);
-    s = toggleFilterValue(s, 'status', 'flagged');
-    expect(s.status).toEqual(['failed']);
-  });
-
   it('setFilterValues replaces a whole dimension (popover Apply)', () => {
     const s = setFilterValues(emptyFilterState, 'source', ['punch', 'diffordsguide']);
     expect(s.source).toEqual(['punch', 'diffordsguide']);
