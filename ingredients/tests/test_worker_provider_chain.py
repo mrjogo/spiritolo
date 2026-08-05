@@ -149,7 +149,7 @@ def test_build_providers_uses_the_runs_provider_and_model():
     # that provider id and model, at the stage's pack size, bound to the cap.
     job = {
         "stage": "map-ingredient",
-        "llm_provider": "claude",
+        "llm_provider": "anthropic",
         "llm_model": "claude-sonnet-4-5",
         "max_cost_cents": 500,
     }
@@ -159,7 +159,7 @@ def test_build_providers_uses_the_runs_provider_and_model():
     assert chain.pack_size == DEFAULT_PACK_SIZE
     assert chain.meter.cap_cents == 500
     [(provider_id, impl)] = chain.tiers
-    assert provider_id == "claude"
+    assert provider_id == "anthropic"
     assert impl.model_id == "claude-sonnet-4-5"
 
 
@@ -170,7 +170,7 @@ def test_available_providers_reflects_present_keys():
     assert available_providers({}) == ["ollama"]
     got = available_providers({"DEEPSEEK_API_KEY": "x", "OPENAI_API_KEY": "y"})
     assert got[0] == "ollama"
-    assert "deepseek" in got and "openai" in got and "claude" not in got
+    assert "deepseek" in got and "openai" in got and "anthropic" not in got
 
 
 def test_build_providers_no_provider_is_none():

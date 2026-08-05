@@ -16,7 +16,7 @@ UNIT_COST_CENTS: dict[str, int] = {
     "deterministic": 0,
     "ollama": 0,
     "openai": 1,
-    "claude": 2,
+    "anthropic": 2,
     "deepseek": 1,
 }
 

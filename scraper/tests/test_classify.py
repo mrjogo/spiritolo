@@ -67,8 +67,8 @@ def test_arg_parser_batch_size_default():
 
 def test_arg_parser_provider_choices():
     parser = build_arg_parser()
-    args = parser.parse_args(["--provider", "claude", "--model", "claude-haiku-4-5"])
-    assert args.provider == "claude"
+    args = parser.parse_args(["--provider", "anthropic", "--model", "claude-haiku-4-5"])
+    assert args.provider == "anthropic"
     assert args.model == "claude-haiku-4-5"
 
 

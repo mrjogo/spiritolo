@@ -97,7 +97,7 @@ def available_providers(env: Env | None = None) -> list[str]:
     if e.get("OPENAI_API_KEY"):
         out.append("openai")
     if e.get("ANTHROPIC_API_KEY"):
-        out.append("claude")
+        out.append("anthropic")
     if e.get("DEEPSEEK_API_KEY"):
         out.append("deepseek")
     return out
@@ -120,7 +120,7 @@ def build_provider_for_run(
 
     ``ollama`` (local, free) is always available — the one id for the local LLM,
     no ``local`` / ``barbot`` synonyms — and its client tunnels the tailnet proxy
-    (see module docstring). Each hosted provider — ``openai`` / ``claude`` /
+    (see module docstring). Each hosted provider — ``openai`` / ``anthropic`` /
     ``deepseek`` — is returned only when its API key is present in ``env``; an
     absent key (or an unknown / ``None`` ``provider_id``) yields ``None``, and the
     run then runs deterministic-only (no LLM tier). Hosted clients take the direct
@@ -138,7 +138,7 @@ def build_provider_for_run(
             http_client=build_openai_http_client(client_factory=client_factory, env=env),
             **model_kwargs,
         )
-    if provider_id == "claude" and e.get("ANTHROPIC_API_KEY"):
+    if provider_id == "anthropic" and e.get("ANTHROPIC_API_KEY"):
         return ClaudeProvider.from_env(
             api_key=e["ANTHROPIC_API_KEY"],
             http_client=build_claude_http_client(client_factory=client_factory, env=env),
