@@ -86,6 +86,12 @@ def _resolve_names(
 
     resolved_by_llm: dict[str, Any] = {}
     if llm_names and providers is not None:
+        # NB: unlike combine/connect/extract, map's LLM items are ingredient
+        # *names* while its job_item entities are *recipes* — a name is shared
+        # across every recipe that uses it. So the ChainResult's per-item
+        # tokens/cost/model are deliberately NOT attributed to job_items here:
+        # doing so would double-count a shared name across its recipes and
+        # corrupt the run's token/cost roll-up.
         result = providers.resolve([Item(id=n, payload=n) for n in llm_names])
         resolved_by_llm = result.resolved
     for name in llm_names:

@@ -162,6 +162,25 @@ def recipes_with_provisional_ingredients(
     return {r[0] for r in rows}
 
 
+def item_telemetry(result: Any, item_id: str) -> dict[str, Any]:
+    """The per-item LLM telemetry a stage persists onto ``item_id``'s job_item,
+    pulled from a ``ChainResult``'s per-item maps: prompt/completion tokens, the
+    item's share of the resolving tier's cost, and the model that resolved it.
+
+    Used only by the stages whose job_item entity IS the resolved LLM item
+    (extract / combine / connect). Absent entries — a deterministically resolved
+    or parked item, or a chain that ran no LLM — come back ``None`` (tokens) /
+    ``None`` (cost) / ``None`` (model), which ``record`` / ``record_node`` store
+    as SQL NULL and the finalize roll-up ignores."""
+    pt, ct = result.per_item_tokens.get(item_id, (None, None))
+    return {
+        "prompt_tokens": pt,
+        "completion_tokens": ct,
+        "cost_cents": result.per_item_cost.get(item_id),
+        "model_id": result.per_item_model.get(item_id),
+    }
+
+
 def record(
     conn: psycopg.Connection,
     *,

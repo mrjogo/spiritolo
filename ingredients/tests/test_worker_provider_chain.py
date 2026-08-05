@@ -189,6 +189,46 @@ def test_pack_token_usage_none_when_provider_reports_no_usage():
     assert res.per_item_tokens == {"1": (None, None), "2": (None, None)}
 
 
+def test_per_item_cost_splits_tier_cost_across_resolved_ids():
+    # A hosted tier that resolves 4 items in one 7-cent call splits the cost
+    # evenly across those ids, whole remainder on the first, summing to 7.
+    hosted = FakeProvider(
+        canned_map={str(i): {"n": i} for i in range(4)}, cost_per_call=7
+    )
+    chain = ProviderChain(tiers=[("openai", hosted)], pack_size=4)
+
+    res = chain.resolve([Item(str(i)) for i in range(4)])
+
+    cost = res.per_item_cost
+    assert set(cost) == {"0", "1", "2", "3"}
+    assert sum(cost.values()) == 7
+    assert cost["0"] == 4 and cost["1"] == cost["2"] == cost["3"] == 1
+
+
+def test_per_item_model_records_resolving_model():
+    # Each resolved id carries the model that answered it; the ChainResult's
+    # per_item_model maps id -> model_id.
+    hosted = FakeProvider(
+        canned_map={"a": {"n": 1}, "b": {"n": 2}}, model_id="gpt-5-mini"
+    )
+    chain = ProviderChain(tiers=[("openai", hosted)], pack_size=10)
+
+    res = chain.resolve([Item("a"), Item("b")])
+
+    assert res.per_item_model == {"a": "gpt-5-mini", "b": "gpt-5-mini"}
+
+
+def test_deterministic_tier_contributes_zero_cost_and_no_model():
+    # A deterministic tier resolves for free: its ids get 0 cost and no model.
+    det = _Deterministic(resolve_fn=_resolve_all(lambda it: f"det:{it.id}"))
+    chain = ProviderChain(tiers=[("det", det)], pack_size=2)
+
+    res = chain.resolve([Item("1"), Item("2")])
+
+    assert res.per_item_cost == {"1": 0, "2": 0}
+    assert res.per_item_model == {}
+
+
 def test_metered_tier_surfaces_cost():
     # A hosted (metered) LLM tier reports cost_cents per call and marks the chain
     # metered; the per-tier breakdown carries the provider id + cost.

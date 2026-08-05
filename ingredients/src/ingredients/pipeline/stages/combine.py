@@ -145,9 +145,15 @@ def _apply_answer(
     answer: Any,
     llm_attempted: bool,
     counts: dict[str, int],
+    telemetry: dict[str, Any] | None = None,
 ) -> None:
-    """Apply one LLM verdict to a node: merge / distinct / park-for-review."""
+    """Apply one LLM verdict to a node: merge / distinct / park-for-review.
+
+    ``telemetry`` carries this node's per-item LLM tokens/cost/model (from
+    ``base.item_telemetry``) so its job_item records what the LLM call cost;
+    empty for a node no LLM tier resolved."""
     job_id = job.get("id")
+    tel = telemetry or {}
     cand_slugs = {c["slug"] for c in candidates}
 
     if isinstance(answer, dict) and answer.get("action") == "merge":
@@ -173,6 +179,7 @@ def _apply_answer(
                     "survivor_slug": survivor_slug,
                     "survivor_id": survivor_id,
                 },
+                **tel,
             )
             counts["merged"] += 1
             return
@@ -183,6 +190,7 @@ def _apply_answer(
             conn, node_id=node_id, stage=STAGE, version=COMBINE_VERSION,
             outcome="resolved", method="llm", job_id=job_id,
             payload={"action": "distinct"},
+            **tel,
         )
         counts["distinct"] += 1
         return
@@ -200,7 +208,7 @@ def _apply_answer(
     base.record_node(
         conn, node_id=node_id, stage=STAGE, version=COMBINE_VERSION,
         outcome="pending", method="llm" if llm_attempted else "deterministic",
-        job_id=job_id, payload={"candidates": candidates},
+        job_id=job_id, payload={"candidates": candidates}, **tel,
     )
     counts["pending"] += 1
 
@@ -260,13 +268,19 @@ def combine_stage_fn(
             )
         )
 
-    # Pass 2 (LLM tier): resolve the candidate-bearing nodes in packed chunks.
+    # Pass 2 (LLM tier): resolve the candidate-bearing nodes in packed chunks,
+    # collecting per-node token/cost/model telemetry so each node's job_item
+    # carries the LLM usage attributed to it (the node IS the entity here). Each
+    # node lands in exactly one chunk, so a plain merge across chunks is safe.
     resolved_by_llm: dict[str, Any] = {}
+    telemetry: dict[str, dict[str, Any]] = {}
     llm_attempted = providers is not None and bool(items)
     if llm_attempted:
         for chunk in base.chunked(items, chunk_size):
             result = providers.resolve(chunk, system_prompt=COMBINE_PROMPT)
             resolved_by_llm.update(result.resolved)
+            for it in chunk:
+                telemetry[it.id] = base.item_telemetry(result, it.id)
 
     # Pass 3: apply each verdict (merge / distinct / park). A node the merge just
     # absorbed is deleted, so later nodes referencing it as a candidate simply
@@ -276,5 +290,6 @@ def combine_stage_fn(
             conn, job=job, node_id=node_id, candidates=candidates,
             answer=resolved_by_llm.get(str(node_id)),
             llm_attempted=llm_attempted, counts=counts,
+            telemetry=telemetry.get(str(node_id), {}),
         )
     return counts

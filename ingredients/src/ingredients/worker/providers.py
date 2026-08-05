@@ -30,7 +30,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -93,6 +93,14 @@ def _split_usage(
     c = _even_split(completion_tokens, len(ids))
     return {iid: (p[i], c[i]) for i, iid in enumerate(ids)}
 
+
+def _split_cost(total: int, ids: Sequence[str]) -> dict[str, int]:
+    """Split a tier's ``total`` cost_cents evenly across the ids it resolved (the
+    whole remainder on the first id), so the per-item costs sum to the tier total.
+    A free tier (``total == 0``) gives every id 0."""
+    parts = _even_split(total, len(ids))
+    return {iid: (parts[i] or 0) for i, iid in enumerate(ids)}
+
 # How many items an LLM tier packs per call, per stage. LLM stages default to
 # DEFAULT_PACK_SIZE; a stage not listed here uses the default. (This is the one
 # knob the removed external chain config carried — now a code constant.)
@@ -149,7 +157,12 @@ class ProviderChain:
         tiers: list[TierResult] = []
         total_cost = 0
         any_metered = False
+        # Per-item LLM telemetry a stage persists onto each job_item (id-keyed):
+        # token usage, the tier-cost split across a tier's resolved ids, and the
+        # model that resolved each id. See ChainResult for the split semantics.
         per_item_tokens: dict[str, tuple[int | None, int | None]] = {}
+        per_item_cost: dict[str, int] = {}
+        per_item_model: dict[str, str] = {}
 
         for provider_id, provider in self.tiers:
             if not pending:
@@ -157,34 +170,38 @@ class ProviderChain:
 
             if hasattr(provider, "resolve_items"):
                 newly = self._run_deterministic(provider, pending, resolved)
-                tiers.append(
-                    TierResult(
-                        provider_id=provider_id,
-                        kind=getattr(provider, "kind", "deterministic"),
-                        calls=0,
-                        resolved_ids=tuple(newly),
-                        cost_cents=0,
-                        metered=False,
-                    )
+                tier = TierResult(
+                    provider_id=provider_id,
+                    kind=getattr(provider, "kind", "deterministic"),
+                    calls=0,
+                    resolved_ids=tuple(newly),
+                    cost_cents=0,
+                    metered=False,
                 )
             else:
-                newly, tier_parked, calls, tier_cost, metered, tier_tokens = self._run_llm(
+                (
+                    newly, tier_parked, calls, tier_cost, metered,
+                    tier_tokens, tier_models,
+                ) = self._run_llm(
                     provider_id, provider, pending, resolved, system_prompt
                 )
                 parked.extend(tier_parked)
                 total_cost += tier_cost
                 any_metered = any_metered or metered
                 per_item_tokens.update(tier_tokens)
-                tiers.append(
-                    TierResult(
-                        provider_id=provider_id,
-                        kind="hosted" if metered else "local",
-                        calls=calls,
-                        resolved_ids=tuple(newly),
-                        cost_cents=tier_cost,
-                        metered=metered,
-                    )
+                per_item_model.update(tier_models)
+                tier = TierResult(
+                    provider_id=provider_id,
+                    kind="hosted" if metered else "local",
+                    calls=calls,
+                    resolved_ids=tuple(newly),
+                    cost_cents=tier_cost,
+                    metered=metered,
                 )
+            tiers.append(tier)
+            # Split this tier's cost evenly across the ids it resolved (0 each for
+            # a free/deterministic tier), so per-item costs sum to the tier total.
+            per_item_cost.update(_split_cost(tier.cost_cents, tier.resolved_ids))
 
             pending = [
                 it for it in pending
@@ -193,20 +210,16 @@ class ProviderChain:
 
         # Anything no tier resolved or parked falls through as unresolved.
         parked.extend(it.id for it in pending if it.id not in parked)
-        result = ChainResult(
+        return ChainResult(
             resolved=resolved,
             parked=parked,
             cost_cents=total_cost,
             metered=any_metered,
             tiers=tiers,
+            per_item_tokens=per_item_tokens,
+            per_item_cost=per_item_cost,
+            per_item_model=per_item_model,
         )
-        # Per-item LLM token usage {id: (prompt_tokens, completion_tokens)},
-        # evenly attributed from each packed call across its items. Carried as an
-        # instance attribute rather than a ChainResult field because that shape
-        # lives in `common` and this telemetry is worker-specific; a stage reads
-        # it to persist prompt_tokens/completion_tokens onto each job_item.
-        result.per_item_tokens = per_item_tokens
-        return result
 
     @staticmethod
     def _run_deterministic(
@@ -228,7 +241,8 @@ class ProviderChain:
         resolved: dict[str, Any],
         system_prompt: str,
     ) -> tuple[
-        list[str], list[str], int, int, bool, dict[str, tuple[int | None, int | None]]
+        list[str], list[str], int, int, bool,
+        dict[str, tuple[int | None, int | None]], dict[str, str],
     ]:
         unit = _cost.call_cost_cents(provider_id, provider)
         metered = _cost.is_metered(unit)
@@ -238,6 +252,7 @@ class ProviderChain:
         tier_cost = 0
         consecutive_failures = 0
         tokens: dict[str, tuple[int | None, int | None]] = {}
+        models: dict[str, str] = {}
 
         for group in _packing.chunk(pending, self.pack_size):
             if self.should_stop is not None and self.should_stop():
@@ -282,10 +297,11 @@ class ProviderChain:
                 if it.id in answers:
                     resolved[it.id] = answers[it.id]
                     newly.append(it.id)
+                    models[it.id] = call.model_id  # the model that answered this id
                 else:
                     parked.append(it.id)  # dropped/errored -> park this item
 
-        return newly, parked, calls, tier_cost, metered, tokens
+        return newly, parked, calls, tier_cost, metered, tokens, models
 
     @staticmethod
     def _resolve_group(
