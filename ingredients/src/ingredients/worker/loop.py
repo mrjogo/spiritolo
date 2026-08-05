@@ -296,10 +296,12 @@ def _finalize_success(conn: psycopg.Connection, job: dict[str, Any], result: Any
             progress          = %s,
             cost_actual_cents = coalesce(
                 (select sum(cost_cents) from job_items where job_id = %s), 0
-            )::int
+            )::int,
+            prompt_tokens     = (select sum(prompt_tokens) from job_items where job_id = %s),
+            completion_tokens = (select sum(completion_tokens) from job_items where job_id = %s)
         where id = %s
         """,
-        (Json(progress), job["id"], job["id"]),
+        (Json(progress), job["id"], job["id"], job["id"], job["id"]),
     )
     conn.commit()
 
@@ -315,10 +317,12 @@ def _finalize_cancelled(conn: psycopg.Connection, job: dict[str, Any]) -> None:
             finished_at       = now(),
             cost_actual_cents = coalesce(
                 (select sum(cost_cents) from job_items where job_id = %s), 0
-            )::int
+            )::int,
+            prompt_tokens     = (select sum(prompt_tokens) from job_items where job_id = %s),
+            completion_tokens = (select sum(completion_tokens) from job_items where job_id = %s)
         where id = %s
         """,
-        (job["id"], job["id"]),
+        (job["id"], job["id"], job["id"], job["id"]),
     )
     conn.commit()
 

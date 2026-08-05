@@ -125,6 +125,70 @@ def test_packing_maps_by_id():
     assert llm.calls == 2, "3 items at pack_size 2 -> ceil(3/2) == 2 calls"
 
 
+@dataclass
+class _TokenProvider:
+    """An LLM tier that answers every packed item and reports fixed token usage
+    per call — lets a test pin the per-item usage attribution."""
+
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    calls: int = 0
+
+    def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+        self.calls += 1
+        ids = packing.decode_request(user_prompt)
+        rows = [{"id": i, "answer": f"a:{i}"} for i in ids]
+        return ProviderResult(
+            raw_text=packing.encode_response(rows),
+            model_id="x",
+            prompt_tokens=self.prompt_tokens,
+            completion_tokens=self.completion_tokens,
+        )
+
+
+def test_pack_token_usage_split_evenly_across_items():
+    # One packed call reporting 100 prompt / 40 completion tokens over 4 items
+    # attributes 25 / 10 to each item, and the per-item totals sum back to the
+    # exact call usage.
+    prov = _TokenProvider(prompt_tokens=100, completion_tokens=40)
+    chain = ProviderChain(tiers=[("openai", prov)], pack_size=4)
+
+    res = chain.resolve([Item(str(i)) for i in range(4)])
+
+    assert prov.calls == 1
+    tokens = res.per_item_tokens
+    assert set(tokens) == {"0", "1", "2", "3"}
+    assert all(tokens[i] == (25, 10) for i in tokens)
+    assert sum(p for p, _ in tokens.values()) == 100
+    assert sum(c for _, c in tokens.values()) == 40
+
+
+def test_pack_token_usage_remainder_goes_to_first_item():
+    # An indivisible total (101 / 41 over 4 items) puts the whole remainder on
+    # the first item; the split still sums to exactly the call usage.
+    prov = _TokenProvider(prompt_tokens=101, completion_tokens=41)
+    chain = ProviderChain(tiers=[("openai", prov)], pack_size=4)
+
+    res = chain.resolve([Item(str(i)) for i in range(4)])
+
+    tokens = res.per_item_tokens
+    assert tokens["0"] == (26, 11)  # per=25/10 + remainder 1/1 on the first
+    assert tokens["1"] == tokens["2"] == tokens["3"] == (25, 10)
+    assert sum(p for p, _ in tokens.values()) == 101
+    assert sum(c for _, c in tokens.values()) == 41
+
+
+def test_pack_token_usage_none_when_provider_reports_no_usage():
+    # A provider that reports no usage yields (None, None) per item — nothing to
+    # roll up (mirrors ProviderResult's default token fields).
+    prov = _TokenProvider(prompt_tokens=None, completion_tokens=None)
+    chain = ProviderChain(tiers=[("ollama", prov)], pack_size=2)
+
+    res = chain.resolve([Item("1"), Item("2")])
+
+    assert res.per_item_tokens == {"1": (None, None), "2": (None, None)}
+
+
 def test_metered_tier_surfaces_cost():
     # A hosted (metered) LLM tier reports cost_cents per call and marks the chain
     # metered; the per-tier breakdown carries the provider id + cost.

@@ -34,6 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from common.llm.provider import ProviderResult
 from common.providers import ChainResult, TierResult, cost as _cost, packing as _packing
 from common.providers.packing import Item
 
@@ -70,6 +71,27 @@ def _provider_unavailable(provider_id: str, exc: Exception) -> "ProviderUnavaila
     code = getattr(exc, "status_code", None)
     where = f"{provider_id} error" + (f" {code}" if code else "")
     return ProviderUnavailable(f"{where}: {exc}"[:500])
+
+
+def _even_split(total: int | None, n: int) -> list[int | None]:
+    """Split ``total`` into ``n`` integer parts, giving the whole remainder to
+    the first part, so the parts sum back to exactly ``total``. A ``None`` total
+    (the provider reported no usage) yields ``None`` parts."""
+    if total is None or n <= 0:
+        return [None] * n
+    per, rem = divmod(total, n)
+    return [per + rem if i == 0 else per for i in range(n)]
+
+
+def _split_usage(
+    ids: list[str], prompt_tokens: int | None, completion_tokens: int | None
+) -> dict[str, tuple[int | None, int | None]]:
+    """Attribute one packed call's token usage evenly across its ``ids`` (the
+    remainder on the first id), so the per-item counts sum to the call totals.
+    Returns ``{id: (prompt_tokens, completion_tokens)}``."""
+    p = _even_split(prompt_tokens, len(ids))
+    c = _even_split(completion_tokens, len(ids))
+    return {iid: (p[i], c[i]) for i, iid in enumerate(ids)}
 
 # How many items an LLM tier packs per call, per stage. LLM stages default to
 # DEFAULT_PACK_SIZE; a stage not listed here uses the default. (This is the one
@@ -127,6 +149,7 @@ class ProviderChain:
         tiers: list[TierResult] = []
         total_cost = 0
         any_metered = False
+        per_item_tokens: dict[str, tuple[int | None, int | None]] = {}
 
         for provider_id, provider in self.tiers:
             if not pending:
@@ -145,12 +168,13 @@ class ProviderChain:
                     )
                 )
             else:
-                newly, tier_parked, calls, tier_cost, metered = self._run_llm(
+                newly, tier_parked, calls, tier_cost, metered, tier_tokens = self._run_llm(
                     provider_id, provider, pending, resolved, system_prompt
                 )
                 parked.extend(tier_parked)
                 total_cost += tier_cost
                 any_metered = any_metered or metered
+                per_item_tokens.update(tier_tokens)
                 tiers.append(
                     TierResult(
                         provider_id=provider_id,
@@ -169,13 +193,20 @@ class ProviderChain:
 
         # Anything no tier resolved or parked falls through as unresolved.
         parked.extend(it.id for it in pending if it.id not in parked)
-        return ChainResult(
+        result = ChainResult(
             resolved=resolved,
             parked=parked,
             cost_cents=total_cost,
             metered=any_metered,
             tiers=tiers,
         )
+        # Per-item LLM token usage {id: (prompt_tokens, completion_tokens)},
+        # evenly attributed from each packed call across its items. Carried as an
+        # instance attribute rather than a ChainResult field because that shape
+        # lives in `common` and this telemetry is worker-specific; a stage reads
+        # it to persist prompt_tokens/completion_tokens onto each job_item.
+        result.per_item_tokens = per_item_tokens
+        return result
 
     @staticmethod
     def _run_deterministic(
@@ -196,7 +227,9 @@ class ProviderChain:
         pending: list[Item],
         resolved: dict[str, Any],
         system_prompt: str,
-    ) -> tuple[list[str], list[str], int, int, bool]:
+    ) -> tuple[
+        list[str], list[str], int, int, bool, dict[str, tuple[int | None, int | None]]
+    ]:
         unit = _cost.call_cost_cents(provider_id, provider)
         metered = _cost.is_metered(unit)
         newly: list[str] = []
@@ -204,6 +237,7 @@ class ProviderChain:
         calls = 0
         tier_cost = 0
         consecutive_failures = 0
+        tokens: dict[str, tuple[int | None, int | None]] = {}
 
         for group in _packing.chunk(pending, self.pack_size):
             if self.should_stop is not None and self.should_stop():
@@ -217,7 +251,7 @@ class ProviderChain:
                 # never spent and its items stay unprocessed (raises out).
                 self.meter.charge(unit)
             try:
-                raw = self._resolve_group(provider, group, system_prompt)
+                call = self._resolve_group(provider, group, system_prompt)
             except Exception as exc:  # noqa: BLE001 - the provider transport surface
                 # Fatal (auth/billing/config) -> abort the run fast, message and
                 # all. Otherwise park this pack and keep going, but trip the
@@ -234,7 +268,16 @@ class ProviderChain:
             consecutive_failures = 0
             calls += 1
             tier_cost += unit
-            answers = _packing.decode_response(raw)
+            # Attribute this packed call's token usage evenly across its items,
+            # so the per-item counts sum to exactly the call totals.
+            tokens.update(
+                _split_usage(
+                    [it.id for it in group],
+                    call.prompt_tokens,
+                    call.completion_tokens,
+                )
+            )
+            answers = _packing.decode_response(call.raw_text)
             for it in group:
                 if it.id in answers:
                     resolved[it.id] = answers[it.id]
@@ -242,20 +285,23 @@ class ProviderChain:
                 else:
                     parked.append(it.id)  # dropped/errored -> park this item
 
-        return newly, parked, calls, tier_cost, metered
+        return newly, parked, calls, tier_cost, metered, tokens
 
     @staticmethod
-    def _resolve_group(provider: Any, group: list[Item], system_prompt: str) -> str:
+    def _resolve_group(
+        provider: Any, group: list[Item], system_prompt: str
+    ) -> ProviderResult:
         """One packed provider call, with bounded exponential backoff on
         transient errors. A fatal error (see ``_is_fatal``) is re-raised
         immediately without retrying; a transient error is retried up to
-        ``_MAX_LLM_ATTEMPTS`` and then re-raised for the caller to park."""
+        ``_MAX_LLM_ATTEMPTS`` and then re-raised for the caller to park. Returns
+        the full ``ProviderResult`` so the caller can read its token usage."""
         user_prompt = _packing.encode_request(group)
         for attempt in range(_MAX_LLM_ATTEMPTS):
             try:
                 return provider.resolve(
                     system_prompt=system_prompt, user_prompt=user_prompt
-                ).raw_text
+                )
             except Exception as exc:  # noqa: BLE001 - the provider transport surface
                 if _is_fatal(exc) or attempt + 1 == _MAX_LLM_ATTEMPTS:
                     raise

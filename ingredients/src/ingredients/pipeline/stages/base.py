@@ -173,6 +173,8 @@ def record(
     job_id: int | None = None,
     cost_cents: float | None = None,
     model_id: str | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
     error_code: str | None = None,
     payload: Any | None = None,
 ) -> None:
@@ -180,7 +182,8 @@ def record(
 
     For a run member (``job_id`` set) the pending member row is UPDATEd to its
     terminal ``state``; for the cold-build (``job_id`` None) the append-versioned
-    ledger row is UPSERTed."""
+    ledger row is UPSERTed. ``prompt_tokens`` / ``completion_tokens`` carry the
+    LLM usage attributed to this item (rolled up to the job on finalize)."""
     ledger.record_run(
         conn,
         entity_type=ENTITY_RECIPE,
@@ -193,6 +196,8 @@ def record(
         job_id=job_id,
         cost_cents=cost_cents,
         model_id=model_id,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
         error_code=error_code,
         payload=payload,
     )
@@ -209,6 +214,8 @@ def record_node(
     job_id: int | None = None,
     cost_cents: float | None = None,
     model_id: str | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
     error_code: str | None = None,
     payload: Any | None = None,
 ) -> None:
@@ -229,6 +236,8 @@ def record_node(
         job_id=job_id,
         cost_cents=cost_cents,
         model_id=model_id,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
         error_code=error_code,
         payload=payload,
     )
