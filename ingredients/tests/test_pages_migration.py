@@ -30,21 +30,6 @@ def _columns(db_conn, table):
     }
 
 
-def test_pages_columns(db_conn):
-    cols = _columns(db_conn, "pages")
-
-    assert cols["url"][:2] == ("text", "NO")
-    assert cols["site"][:2] == ("text", "NO")
-    assert cols["corpus_key"][:2] == ("text", "YES")
-    assert cols["content_type"][:2] == ("text", "YES")
-    assert cols["denylist"][:2] == ("boolean", "NO")
-    assert "false" in (cols["denylist"][2] or "").lower()
-    assert cols["denylist_reason"][:2] == ("text", "YES")
-    assert cols["fetch_status"][:2] == ("text", "YES")
-    assert cols["discovered_at"][:2] == ("timestamp with time zone", "NO")
-    assert cols["fetched_at"][:2] == ("timestamp with time zone", "YES")
-
-
 def test_pages_no_snapshot_or_attempts_columns(db_conn):
     # The legacy SQLite pages table (scraper/src/scraper/db.py) tracked
     # per-field snapshots and attempt/error bookkeeping directly on the row.

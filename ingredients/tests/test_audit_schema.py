@@ -1,10 +1,16 @@
-"""Schema-shape + RLS + trigger-attachment tests for the audit log.
+"""Constraint + RLS + trigger-attachment tests for the audit log.
 
-Asserts the ``audit.log`` migration produces the columns, CHECKs, indexes,
-and admin-read-only RLS the /ops surface depends on, that the generic
-``audit.log_change`` trigger is attached to exactly the curated tables that
-exist today, and that composite-PK reference tables are NOT row-audited
-(node-level audit is the meaningful unit).
+Each test here asserts something the DDL does not already state on its own:
+that the op / actor_kind domains are actually enforced, that the log is
+admin-read-only with no write policy (so no client role can forge history),
+that the generic ``audit.log_change`` trigger is attached to exactly the
+curated tables that exist today, and that composite-PK reference tables are
+deliberately NOT row-audited (node-level audit is the meaningful unit).
+
+Deliberately absent: column-name/type and index-presence assertions. Those
+restate the migration, so they can only fail when the schema is changed on
+purpose — at which point they are rewritten to match and have taught nothing.
+Payload behaviour lives in test_audit_payload_shape.py.
 
 Runs against ``TEST_DB_URL`` (skips-loud if unset; the migrations conftest
 auto-applies the new ``*.sql`` files before these run).
@@ -21,29 +27,6 @@ pytestmark = pytest.mark.skipif(
     os.environ.get("TEST_DB_URL") is None,
     reason="TEST_DB_URL not set; DB-integration tests skip",
 )
-
-
-def _columns(conn, schema: str, table: str) -> dict[str, tuple[str, str]]:
-    return {
-        r[0]: (r[1], r[2])
-        for r in conn.execute(
-            "select column_name, data_type, is_nullable "
-            "from information_schema.columns "
-            "where table_schema = %s and table_name = %s",
-            (schema, table),
-        ).fetchall()
-    }
-
-
-def _checks(conn, relname: str) -> list[str]:
-    return [
-        r[0]
-        for r in conn.execute(
-            "select pg_get_constraintdef(oid) from pg_constraint "
-            "where conrelid = %s::regclass and contype = 'c'",
-            (relname,),
-        ).fetchall()
-    ]
 
 
 def _audited_tables(conn) -> set[str]:
@@ -64,51 +47,21 @@ def _audited_tables(conn) -> set[str]:
 # audit.log shape
 # ---------------------------------------------------------------------------
 
-def test_audit_log_shape(db_conn):
-    cols = _columns(db_conn, "audit", "log")
-    for c in (
-        "ts", "table_name", "pk", "op", "actor_kind", "actor_id",
-        "source", "before", "after", "changed_keys",
-    ):
-        assert c in cols, f"audit.log missing column {c!r}"
-
-    assert cols["ts"] == ("timestamp with time zone", "NO")
-    assert cols["table_name"] == ("text", "NO")
-    assert cols["pk"] == ("text", "NO")
-    assert cols["op"][0] == "character"          # char(1)
-    assert cols["op"][1] == "NO"
-    assert cols["actor_kind"] == ("text", "NO")
-    assert cols["actor_id"][1] == "YES"          # nullable (system → null)
-    assert cols["source"][1] == "NO"
-    assert cols["before"][0] == "jsonb"
-    assert cols["after"][0] == "jsonb"
-    assert cols["changed_keys"][0] == "ARRAY"    # text[]
-
-    checks = _checks(db_conn, "audit.log")
-    assert any(
-        "op" in c and "'I'" in c and "'U'" in c and "'D'" in c for c in checks
-    ), f"no op CHECK(I,U,D) in {checks}"
-    assert any(
-        "actor_kind" in c and "'human'" in c and "'worker'" in c and "'system'" in c
-        for c in checks
-    ), f"no actor_kind CHECK(human,worker,system) in {checks}"
-
-
-def test_audit_log_indexes(db_conn):
-    idx = {
-        r[0]: r[1].lower()
-        for r in db_conn.execute(
-            "select indexname, indexdef from pg_indexes "
-            "where schemaname = 'audit' and tablename = 'log'"
-        ).fetchall()
-    }
-    tbl_pk = idx.get("audit_log_table_pk_idx")
-    assert tbl_pk is not None, "audit_log_table_pk_idx missing"
-    assert "table_name" in tbl_pk and "pk" in tbl_pk and "ts desc" in tbl_pk
-
-    actor = idx.get("audit_log_actor_idx")
-    assert actor is not None, "audit_log_actor_idx missing"
-    assert "actor_kind" in actor and "ts desc" in actor
+def test_audit_log_rejects_ops_and_actor_kinds_outside_their_domains(db_conn):
+    """Every consumer switches exhaustively on `op` and `actor_kind` — the
+    /ops browser's op labels and actor pills, and the reconstruction walk in
+    test_audit_payload_shape.py. The CHECKs are what stop a future writer from
+    inventing a fourth value that those consumers would silently mishandle."""
+    with pytest.raises(psycopg.errors.CheckViolation):
+        db_conn.execute(
+            "insert into audit.log (table_name, pk, op, actor_kind, source) "
+            "values ('taxonomy_nodes', '1', 'X', 'worker', 'job:map')"
+        )
+    with pytest.raises(psycopg.errors.CheckViolation):
+        db_conn.execute(
+            "insert into audit.log (table_name, pk, op, actor_kind, source) "
+            "values ('taxonomy_nodes', '1', 'U', 'robot', 'job:map')"
+        )
 
 
 # ---------------------------------------------------------------------------
