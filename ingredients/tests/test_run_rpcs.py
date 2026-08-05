@@ -474,3 +474,67 @@ def test_estimate_run_cents_rpc(conn):
     assert rpc("deepseek", 1000) == 22
     assert rpc("openai", 1000) == 180
     assert rpc("anthropic", 1000) == 220
+
+
+# ---------------------------------------------------------------------------
+# duration history view + estimate_run_seconds RPC
+# ---------------------------------------------------------------------------
+def _succeeded_run(conn, *, stage, provider, model, elapsed_seconds, item_count):
+    """A succeeded job with a known wall-clock elapsed and `item_count` members.
+
+    started_at/finished_at are set in one statement so both now() reads share the
+    transaction timestamp — the epoch diff is exactly `elapsed_seconds`.
+    """
+    jid = conn.execute(
+        "insert into jobs (stage, state, llm_provider, llm_model, started_at, finished_at) "
+        "values (%s, 'succeeded', %s, %s, now() - make_interval(secs => %s), now()) returning id",
+        (stage, provider, model, elapsed_seconds),
+    ).fetchone()[0]
+    for _ in range(item_count):
+        r = _recipe(conn)
+        conn.execute(
+            "insert into job_items (entity_type, entity_id, stage, code_version, "
+            "outcome, method, state, job_id) "
+            "values ('recipe', %s, %s, 'v1', 'resolved', 'deterministic', 'applied', %s)",
+            (r, stage, jid),
+        )
+    return jid
+
+
+def test_estimate_run_seconds_seed_fallback(conn):
+    """Empty history → seed constant × items. ollama (non-qwen3:8b) seeds 1.5/item,
+    so 100 items → 150.0; source is 'seed'."""
+    est = conn.execute(
+        "select estimate_run_seconds('map-ingredient','ollama','qwen3:14b',100)"
+    ).fetchone()[0]
+    assert est["source"] == "seed"
+    assert est["seconds"] == 150.0
+
+
+def test_estimate_run_seconds_extract_seed(conn):
+    """extract-recipe carries its own 4.0/item seed regardless of provider."""
+    est = conn.execute(
+        "select estimate_run_seconds('extract-recipe','ollama','qwen3:14b',50)"
+    ).fetchone()[0]
+    assert est["source"] == "seed"
+    assert est["seconds"] == 200.0  # 50 * 4.0
+
+
+def test_estimate_run_seconds_from_history(conn):
+    """≥3 succeeded runs for the exact (stage,provider,model) key → 'model' source,
+    seconds = items × (total elapsed ÷ total items). 3 runs × 4s over 2 items each
+    = 12s ÷ 6 items = 2.0/item, so 100 items → 200.0."""
+    for _ in range(3):
+        _succeeded_run(
+            conn,
+            stage="map-ingredient",
+            provider="ollama",
+            model="qwen3:14b",
+            elapsed_seconds=4,
+            item_count=2,
+        )
+    est = conn.execute(
+        "select estimate_run_seconds('map-ingredient','ollama','qwen3:14b',100)"
+    ).fetchone()[0]
+    assert est["source"] == "model"
+    assert est["seconds"] == 200.0
