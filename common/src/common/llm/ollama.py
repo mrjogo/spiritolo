@@ -19,6 +19,10 @@ DEFAULT_TIMEOUT = 120.0
 # Pulling a model is a one-time multi-GB download the first time a model is used
 # on a host, so it needs a far longer budget than a generate call.
 DEFAULT_PULL_TIMEOUT = 1800.0
+# Cap output tokens per generate call. Our prompts are structured retrieval with
+# small JSON answers; an unbounded local model can otherwise run away and blow
+# the per-item time budget. Bound both latency and the runaway tail.
+DEFAULT_NUM_PREDICT = 1024
 
 
 @dataclass
@@ -44,8 +48,13 @@ class OllamaProvider:
             self._pull()
             resp = self._generate(system_prompt, user_prompt)
         resp.raise_for_status()
-        text = resp.json().get("response", "")
-        return ProviderResult(raw_text=text, model_id=self.model_id)
+        body = resp.json()
+        return ProviderResult(
+            raw_text=body.get("response", ""),
+            model_id=self.model_id,
+            prompt_tokens=body.get("prompt_eval_count"),
+            completion_tokens=body.get("eval_count"),
+        )
 
     def _generate(self, system_prompt: str, user_prompt: str):
         return self.client.post(
@@ -56,6 +65,7 @@ class OllamaProvider:
                 "prompt": user_prompt,
                 "stream": False,
                 "think": False,  # disable qwen3's default-on thinking mode
+                "num_predict": DEFAULT_NUM_PREDICT,  # cap output length
             },
         )
 

@@ -24,6 +24,19 @@ def test_resolve_returns_provider_result_with_model_id():
     assert kwargs["messages"][0]["content"] == "u"
 
 
+def test_resolve_captures_token_counts_from_usage():
+    """A message carrying a usage object populates the token fields
+    (Anthropic names them input_tokens / output_tokens)."""
+    client = _fake_anthropic_client('{"action": "abstain"}')
+    fake_message = client.messages.create.return_value
+    fake_message.usage = MagicMock(input_tokens=210, output_tokens=44)
+    out = ClaudeProvider(client=client, model_id="claude-haiku-4-5").resolve(
+        system_prompt="s", user_prompt="u"
+    )
+    assert out.prompt_tokens == 210
+    assert out.completion_tokens == 44
+
+
 def test_model_id_property_matches_constructor():
     p = ClaudeProvider(client=MagicMock(), model_id="claude-sonnet-4-6")
     assert p.model_id == "claude-sonnet-4-6"

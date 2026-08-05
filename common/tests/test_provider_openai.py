@@ -36,6 +36,18 @@ def test_resolve_returns_provider_result_with_model_id():
     assert kwargs["reasoning_effort"] == "none"
 
 
+def test_resolve_captures_token_counts_from_usage():
+    """A response carrying a usage object populates the token fields."""
+    client = _fake_openai_client('{"action": "abstain"}')
+    fake_resp = client.chat.completions.create.return_value
+    fake_resp.usage = MagicMock(prompt_tokens=321, completion_tokens=57)
+    out = OpenAIProvider(client=client, model_id="gpt-5-mini").resolve(
+        system_prompt="s", user_prompt="u"
+    )
+    assert out.prompt_tokens == 321
+    assert out.completion_tokens == 57
+
+
 def test_resolve_omits_reasoning_effort_for_non_gpt5_models():
     """gpt-4o-mini and older models reject reasoning_effort with a 400.
     The provider must only set it for gpt-5-family models."""

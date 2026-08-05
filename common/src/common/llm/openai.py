@@ -81,4 +81,10 @@ class OpenAIProvider:
         # See common.llm.openai_batch._strip_nul_from_json_text for why.
         from .openai_batch import _strip_nul_from_json_text
         text = _strip_nul_from_json_text(text) or ""
-        return ProviderResult(raw_text=text, model_id=self.model_id)
+        usage = getattr(resp, "usage", None)
+        return ProviderResult(
+            raw_text=text,
+            model_id=self.model_id,
+            prompt_tokens=getattr(usage, "prompt_tokens", None),
+            completion_tokens=getattr(usage, "completion_tokens", None),
+        )
