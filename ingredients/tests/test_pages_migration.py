@@ -70,9 +70,14 @@ def test_pages_indexes_exist(db_conn):
             "select indexname from pg_indexes where tablename = 'pages'"
         ).fetchall()
     }
-    assert "pages_site_idx" in idx
     assert "pages_content_idx" in idx
-    assert "pages_denylist_idx" in idx
+    # The hot lookup paths — url dedup and the PK — carry the table's read load.
+    assert "pages_url_key" in idx
+    assert "pages_pkey" in idx
+    # Dropped in 20260804090000_audit_slim_payloads.sql: both sat at zero scans
+    # since creation. Re-add if a query ever needs them.
+    assert "pages_site_idx" not in idx
+    assert "pages_denylist_idx" not in idx
 
 
 def test_pages_fetch_status_check_constraint_rejects_unknown(db_conn):

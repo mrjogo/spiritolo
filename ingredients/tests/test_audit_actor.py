@@ -8,7 +8,9 @@ distinction, and it must fall out of ``auth.uid()`` + the ``app.job_id`` /
 - human   → user JWT (auth.uid non-null)          → actor_kind='human'
 - system  → neither                               → actor_kind='system'
 
-Plus: INSERT/UPDATE/DELETE all captured with the right op + before/after.
+Plus: INSERT/UPDATE/DELETE all captured with the right op. Payload SHAPES
+(insert has no after, update is narrowed to changed_keys) are covered in
+test_audit_payload_shape.py.
 Runs against ``TEST_DB_URL``.
 """
 from __future__ import annotations
@@ -141,7 +143,8 @@ def test_insert_and_delete_captured(clean):
     ins = _latest_audit(conn, "taxonomy_nodes", nid)
     assert ins["op"] == "I"
     assert ins["before"] is None
-    assert ins["after"] is not None and ins["after"]["slug"] == "vodka"
+    # Payload dropped as derivable; the event itself is what this test guards.
+    assert ins["after"] is None
 
     conn.execute("delete from taxonomy_nodes where id = %s", (nid,))
 
