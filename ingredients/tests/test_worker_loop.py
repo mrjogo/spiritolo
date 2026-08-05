@@ -81,6 +81,60 @@ def test_claim_run_finish(test_db_url, db_conn):
     assert sr == ("resolved", jid)
 
 
+def test_finalize_rolls_up_token_counts(test_db_url, db_conn):
+    # A stage_fn that records per-item token usage: the counts persist on each
+    # job_item and the parent job's prompt_tokens/completion_tokens roll up to
+    # the exact sum of its items.
+    db_conn.execute("truncate table jobs restart identity cascade")
+    db_conn.execute("truncate table job_items restart identity cascade")
+    payload = {"entity_ids": [301, 302], "entity_type": "recipe", "version": "vtok"}
+    jid = _seed_job(db_conn, stage="tok", payload=payload)
+    for eid in payload["entity_ids"]:
+        db_conn.execute(
+            "insert into job_items (entity_type, entity_id, stage, code_version, "
+            "outcome, method, state, job_id) "
+            "values ('recipe', %s, 'tok', '', 'pending', 'deterministic', 'pending', %s)",
+            (eid, jid),
+        )
+
+    usage = {301: (25, 10), 302: (30, 12)}
+
+    def tok_fn(job, conn, providers):
+        p = job["payload"]
+        for eid in p["entity_ids"]:
+            pt, ct = usage[eid]
+            record_run(
+                conn, entity_type=p["entity_type"], entity_id=eid,
+                stage=job["stage"], version=p["version"], outcome="resolved",
+                method="llm", cost_cents=1, prompt_tokens=pt, completion_tokens=ct,
+                job_id=job["id"],
+            )
+        return {"processed": len(p["entity_ids"])}
+
+    conn = psycopg.connect(test_db_url)
+    try:
+        assert tick(conn, stage_fns={"tok": tok_fn}) is True
+    finally:
+        conn.close()
+
+    # Per-item token counts persisted on the job_items rows.
+    per_item = dict(
+        db_conn.execute(
+            "select entity_id, prompt_tokens from job_items where job_id=%s order by entity_id",
+            (jid,),
+        ).fetchall()
+    )
+    assert per_item == {301: 25, 302: 30}
+
+    # Job roll-up == the sum of its items' tokens.
+    state, jp, jc = db_conn.execute(
+        "select state, prompt_tokens, completion_tokens from jobs where id=%s", (jid,)
+    ).fetchone()
+    assert state == "succeeded"
+    assert jp == 55  # 25 + 30
+    assert jc == 22  # 10 + 12
+
+
 def test_heartbeat_updates_during_run(test_db_url, db_conn):
     db_conn.execute("truncate table jobs restart identity cascade")
     db_conn.execute("truncate table job_items restart identity cascade")

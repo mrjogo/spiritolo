@@ -40,27 +40,29 @@ from psycopg.types.json import Json
 _UPSERT_LEDGER_SQL = """
     insert into job_items (
         entity_type, entity_id, stage, code_version, outcome, method,
-        confidence, model_id, cost_cents, error_code, job_id, state,
-        payload, finished_at
+        confidence, model_id, cost_cents, prompt_tokens, completion_tokens,
+        error_code, job_id, state, payload, finished_at
     )
     values (
         %s, %s, %s, %s, %s, %s,
-        %s, %s, %s, %s, %s, %s,
-        %s, coalesce(%s, now())
+        %s, %s, %s, %s, %s,
+        %s, %s, %s, %s, coalesce(%s, now())
     )
     on conflict (entity_type, entity_id, stage, code_version) where job_id is null
     do update set
-        outcome     = excluded.outcome,
-        method      = excluded.method,
-        confidence  = excluded.confidence,
-        model_id    = excluded.model_id,
-        cost_cents  = excluded.cost_cents,
-        error_code  = excluded.error_code,
-        job_id      = excluded.job_id,
-        state       = excluded.state,
-        payload     = excluded.payload,
-        started_at  = now(),
-        finished_at = excluded.finished_at
+        outcome           = excluded.outcome,
+        method            = excluded.method,
+        confidence        = excluded.confidence,
+        model_id          = excluded.model_id,
+        cost_cents        = excluded.cost_cents,
+        prompt_tokens     = excluded.prompt_tokens,
+        completion_tokens = excluded.completion_tokens,
+        error_code        = excluded.error_code,
+        job_id            = excluded.job_id,
+        state             = excluded.state,
+        payload           = excluded.payload,
+        started_at        = now(),
+        finished_at       = excluded.finished_at
 """
 
 # Run-member UPDATE (job_id IS NOT NULL). The member row was inserted 'pending'
@@ -70,17 +72,19 @@ _UPSERT_LEDGER_SQL = """
 # why_added) is deliberately left untouched.
 _UPDATE_MEMBER_SQL = """
     update job_items set
-        code_version = %s,
-        outcome      = %s,
-        method       = %s,
-        confidence   = %s,
-        model_id     = %s,
-        cost_cents   = %s,
-        error_code   = %s,
-        state        = %s,
-        payload      = %s,
-        started_at   = now(),
-        finished_at  = coalesce(%s, now())
+        code_version      = %s,
+        outcome           = %s,
+        method            = %s,
+        confidence        = %s,
+        model_id          = %s,
+        cost_cents        = %s,
+        prompt_tokens     = %s,
+        completion_tokens = %s,
+        error_code        = %s,
+        state             = %s,
+        payload           = %s,
+        started_at        = now(),
+        finished_at       = coalesce(%s, now())
     where job_id = %s and entity_type = %s and entity_id = %s and stage = %s
 """
 
@@ -107,6 +111,8 @@ def _upsert_params(
     confidence: float | None = None,
     model_id: str | None = None,
     cost_cents: float | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
     error_code: str | None = None,
     job_id: int | None = None,
     payload: Any | None = None,
@@ -114,7 +120,8 @@ def _upsert_params(
 ) -> tuple:
     return (
         entity_type, entity_id, stage, version, outcome, method,
-        confidence, model_id, cost_cents, error_code, job_id,
+        confidence, model_id, cost_cents, prompt_tokens, completion_tokens,
+        error_code, job_id,
         state or _default_state(outcome),
         Json(payload) if payload is not None else None, finished_at,
     )
@@ -132,13 +139,16 @@ def _member_params(
     confidence: float | None = None,
     model_id: str | None = None,
     cost_cents: float | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
     error_code: str | None = None,
     job_id: int | None = None,
     payload: Any | None = None,
     finished_at: Any | None = None,
 ) -> tuple:
     return (
-        version, outcome, method, confidence, model_id, cost_cents, error_code,
+        version, outcome, method, confidence, model_id, cost_cents,
+        prompt_tokens, completion_tokens, error_code,
         state or _default_state(outcome),
         Json(payload) if payload is not None else None, finished_at,
         job_id, entity_type, entity_id, stage,

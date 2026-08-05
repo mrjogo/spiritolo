@@ -11,8 +11,12 @@ offline.
 
 from __future__ import annotations
 
+from common.llm.claude import ClaudeProvider
 from common.llm.openai import OpenAIProvider
-from ingredients.worker.providers_local import build_provider_for_run
+from ingredients.worker.providers_local import (
+    available_providers,
+    build_provider_for_run,
+)
 
 
 def test_ollama_always_available_even_with_no_keys():
@@ -45,17 +49,21 @@ def test_openai_without_key_is_none():
     assert build_provider_for_run("openai", "gpt-5-mini", env={}) is None
 
 
-def test_claude_uses_the_runs_model():
+def test_anthropic_uses_the_runs_model():
     prov = build_provider_for_run(
-        "claude", "claude-sonnet-4-5", env={"ANTHROPIC_API_KEY": "sk-a"}
+        "anthropic", "claude-sonnet-4-5", env={"ANTHROPIC_API_KEY": "sk-a"}
     )
-    assert prov is not None
+    assert isinstance(prov, ClaudeProvider)
     assert prov.model_id == "claude-sonnet-4-5"
 
 
-def test_claude_falls_back_to_default_model():
-    prov = build_provider_for_run("claude", None, env={"ANTHROPIC_API_KEY": "sk-a"})
+def test_anthropic_falls_back_to_default_model():
+    prov = build_provider_for_run("anthropic", None, env={"ANTHROPIC_API_KEY": "sk-a"})
     assert prov.model_id == "claude-haiku-4-5"  # DEFAULT
+
+
+def test_available_providers_lists_anthropic_when_key_present():
+    assert "anthropic" in available_providers({"ANTHROPIC_API_KEY": "k"})
 
 
 def test_deepseek_builds_an_openai_compatible_provider():

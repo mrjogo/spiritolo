@@ -111,14 +111,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--concurrency", type=int, default=4,
                    help="Concurrent in-flight provider requests (default: 4).")
     p.add_argument(
-        "--provider", choices=["ollama", "claude", "openai"], default="ollama",
+        "--provider", choices=["ollama", "anthropic", "openai"], default="ollama",
         help="LLM provider for classification (default: ollama, free local).",
     )
     p.add_argument(
         "--model", default="qwen3:14b",
         help=(
             "Model id for the chosen provider (default: qwen3:14b for ollama). "
-            "For claude pass e.g. claude-haiku-4-5; for openai pass e.g. gpt-5-mini."
+            "For anthropic pass e.g. claude-haiku-4-5; for openai pass e.g. gpt-5-mini."
         ),
     )
     p.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Path to scraper.db.")
@@ -168,7 +168,7 @@ def _build_provider(args: argparse.Namespace):
     if provider_name == "ollama":
         from common.llm.ollama import OllamaProvider
         return OllamaProvider.from_env(model_id=model) if model else OllamaProvider.from_env()
-    if provider_name == "claude":
+    if provider_name == "anthropic":
         from common.llm.claude import ClaudeProvider
         return ClaudeProvider.from_env(model_id=model) if model else ClaudeProvider.from_env()
     if provider_name == "openai":

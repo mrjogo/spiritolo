@@ -125,6 +125,110 @@ def test_packing_maps_by_id():
     assert llm.calls == 2, "3 items at pack_size 2 -> ceil(3/2) == 2 calls"
 
 
+@dataclass
+class _TokenProvider:
+    """An LLM tier that answers every packed item and reports fixed token usage
+    per call — lets a test pin the per-item usage attribution."""
+
+    prompt_tokens: int | None
+    completion_tokens: int | None
+    calls: int = 0
+
+    def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+        self.calls += 1
+        ids = packing.decode_request(user_prompt)
+        rows = [{"id": i, "answer": f"a:{i}"} for i in ids]
+        return ProviderResult(
+            raw_text=packing.encode_response(rows),
+            model_id="x",
+            prompt_tokens=self.prompt_tokens,
+            completion_tokens=self.completion_tokens,
+        )
+
+
+def test_pack_token_usage_split_evenly_across_items():
+    # One packed call reporting 100 prompt / 40 completion tokens over 4 items
+    # attributes 25 / 10 to each item, and the per-item totals sum back to the
+    # exact call usage.
+    prov = _TokenProvider(prompt_tokens=100, completion_tokens=40)
+    chain = ProviderChain(tiers=[("openai", prov)], pack_size=4)
+
+    res = chain.resolve([Item(str(i)) for i in range(4)])
+
+    assert prov.calls == 1
+    tokens = res.per_item_tokens
+    assert set(tokens) == {"0", "1", "2", "3"}
+    assert all(tokens[i] == (25, 10) for i in tokens)
+    assert sum(p for p, _ in tokens.values()) == 100
+    assert sum(c for _, c in tokens.values()) == 40
+
+
+def test_pack_token_usage_remainder_goes_to_first_item():
+    # An indivisible total (101 / 41 over 4 items) puts the whole remainder on
+    # the first item; the split still sums to exactly the call usage.
+    prov = _TokenProvider(prompt_tokens=101, completion_tokens=41)
+    chain = ProviderChain(tiers=[("openai", prov)], pack_size=4)
+
+    res = chain.resolve([Item(str(i)) for i in range(4)])
+
+    tokens = res.per_item_tokens
+    assert tokens["0"] == (26, 11)  # per=25/10 + remainder 1/1 on the first
+    assert tokens["1"] == tokens["2"] == tokens["3"] == (25, 10)
+    assert sum(p for p, _ in tokens.values()) == 101
+    assert sum(c for _, c in tokens.values()) == 41
+
+
+def test_pack_token_usage_none_when_provider_reports_no_usage():
+    # A provider that reports no usage yields (None, None) per item — nothing to
+    # roll up (mirrors ProviderResult's default token fields).
+    prov = _TokenProvider(prompt_tokens=None, completion_tokens=None)
+    chain = ProviderChain(tiers=[("ollama", prov)], pack_size=2)
+
+    res = chain.resolve([Item("1"), Item("2")])
+
+    assert res.per_item_tokens == {"1": (None, None), "2": (None, None)}
+
+
+def test_per_item_cost_splits_tier_cost_across_resolved_ids():
+    # A hosted tier that resolves 4 items in one 7-cent call splits the cost
+    # evenly across those ids, whole remainder on the first, summing to 7.
+    hosted = FakeProvider(
+        canned_map={str(i): {"n": i} for i in range(4)}, cost_per_call=7
+    )
+    chain = ProviderChain(tiers=[("openai", hosted)], pack_size=4)
+
+    res = chain.resolve([Item(str(i)) for i in range(4)])
+
+    cost = res.per_item_cost
+    assert set(cost) == {"0", "1", "2", "3"}
+    assert sum(cost.values()) == 7
+    assert cost["0"] == 4 and cost["1"] == cost["2"] == cost["3"] == 1
+
+
+def test_per_item_model_records_resolving_model():
+    # Each resolved id carries the model that answered it; the ChainResult's
+    # per_item_model maps id -> model_id.
+    hosted = FakeProvider(
+        canned_map={"a": {"n": 1}, "b": {"n": 2}}, model_id="gpt-5-mini"
+    )
+    chain = ProviderChain(tiers=[("openai", hosted)], pack_size=10)
+
+    res = chain.resolve([Item("a"), Item("b")])
+
+    assert res.per_item_model == {"a": "gpt-5-mini", "b": "gpt-5-mini"}
+
+
+def test_deterministic_tier_contributes_zero_cost_and_no_model():
+    # A deterministic tier resolves for free: its ids get 0 cost and no model.
+    det = _Deterministic(resolve_fn=_resolve_all(lambda it: f"det:{it.id}"))
+    chain = ProviderChain(tiers=[("det", det)], pack_size=2)
+
+    res = chain.resolve([Item("1"), Item("2")])
+
+    assert res.per_item_cost == {"1": 0, "2": 0}
+    assert res.per_item_model == {}
+
+
 def test_metered_tier_surfaces_cost():
     # A hosted (metered) LLM tier reports cost_cents per call and marks the chain
     # metered; the per-tier breakdown carries the provider id + cost.
@@ -149,7 +253,7 @@ def test_build_providers_uses_the_runs_provider_and_model():
     # that provider id and model, at the stage's pack size, bound to the cap.
     job = {
         "stage": "map-ingredient",
-        "llm_provider": "claude",
+        "llm_provider": "anthropic",
         "llm_model": "claude-sonnet-4-5",
         "max_cost_cents": 500,
     }
@@ -159,7 +263,7 @@ def test_build_providers_uses_the_runs_provider_and_model():
     assert chain.pack_size == DEFAULT_PACK_SIZE
     assert chain.meter.cap_cents == 500
     [(provider_id, impl)] = chain.tiers
-    assert provider_id == "claude"
+    assert provider_id == "anthropic"
     assert impl.model_id == "claude-sonnet-4-5"
 
 
@@ -170,7 +274,7 @@ def test_available_providers_reflects_present_keys():
     assert available_providers({}) == ["ollama"]
     got = available_providers({"DEEPSEEK_API_KEY": "x", "OPENAI_API_KEY": "y"})
     assert got[0] == "ollama"
-    assert "deepseek" in got and "openai" in got and "claude" not in got
+    assert "deepseek" in got and "openai" in got and "anthropic" not in got
 
 
 def test_build_providers_no_provider_is_none():

@@ -120,7 +120,10 @@ def _pages_by_ids(conn: psycopg.Connection, page_ids: list[int]) -> list[dict[st
     ]
 
 
-def _record(conn, page_id, *, outcome, method, job, error_code=None):
+def _record(
+    conn, page_id, *, outcome, method, job, error_code=None,
+    prompt_tokens=None, completion_tokens=None, cost_cents=None, model_id=None,
+):
     ledger.record_run(
         conn,
         entity_type="page",
@@ -132,6 +135,10 @@ def _record(conn, page_id, *, outcome, method, job, error_code=None):
         state=base.item_state(outcome),
         job_id=job.get("id"),
         error_code=error_code,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        cost_cents=cost_cents,
+        model_id=model_id,
     )
 
 
@@ -192,8 +199,9 @@ def extract_stage_fn(
 
                 recipe = jsonld.find_recipe_jsonld(html)
                 method = "deterministic"
+                telemetry: dict[str, Any] = {}
                 if recipe is None and providers is not None:
-                    recipe = _llm_synthesize(providers, page, html)
+                    recipe, telemetry = _llm_synthesize(providers, page, html)
                     method = "llm"
 
                 if recipe is None:
@@ -203,13 +211,26 @@ def extract_stage_fn(
 
                 _upsert_recipe(conn, page, recipe)
                 counts["extracted"] += 1
-                _record(conn, page["id"], outcome="resolved", method=method, job=job)
+                # A JSON-LD (deterministic) extraction carries no telemetry; an
+                # LLM-synthesized one carries the page's tokens/cost/model.
+                _record(
+                    conn, page["id"], outcome="resolved", method=method, job=job,
+                    **telemetry,
+                )
 
     return counts
 
 
-def _llm_synthesize(providers: Any, page: dict[str, Any], html: str) -> dict[str, Any] | None:
+def _llm_synthesize(
+    providers: Any, page: dict[str, Any], html: str
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Route a page with no Recipe JSON-LD through the provider chain; the tier
-    returns a recipe-source dict or abstains."""
-    result = providers.resolve([Item(id=str(page["id"]), payload=html)])
-    return result.resolved.get(str(page["id"]))
+    returns a recipe-source dict or abstains.
+
+    Returns ``(recipe, telemetry)`` where ``telemetry`` is the page's per-item
+    LLM tokens/cost/model (``base.item_telemetry``) — persisted onto its
+    job_item when the synthesis resolves. On abstain the recipe is ``None`` (the
+    caller records ``abstain`` without telemetry)."""
+    pid = str(page["id"])
+    result = providers.resolve([Item(id=pid, payload=html)])
+    return result.resolved.get(pid), base.item_telemetry(result, pid)

@@ -15,14 +15,31 @@ from ingredients.pipeline.stages.connect import CONNECT_VERSION, connect_stage_f
 
 
 class _FakeChain:
-    """Stands in for a ProviderChain: resolve(items) -> .resolved {id: answer}."""
+    """Stands in for a ProviderChain: resolve(items) -> a result with
+    ``.resolved`` {id: answer} plus the per-item telemetry maps. Optional
+    ``tokens`` / ``cost`` / ``model`` maps (id -> value) let a test pin the
+    telemetry a node's job_item should persist."""
 
-    def __init__(self, mapping: dict[str, object]):
+    def __init__(
+        self,
+        mapping: dict[str, object],
+        *,
+        tokens: dict[str, tuple[int | None, int | None]] | None = None,
+        cost: dict[str, int] | None = None,
+        model: dict[str, str] | None = None,
+    ):
         self.mapping = mapping
+        self.tokens = tokens or {}
+        self.cost = cost or {}
+        self.model = model or {}
 
     def resolve(self, items, **_kw):
+        ids = [it.id for it in items if it.id in self.mapping]
         return SimpleNamespace(
-            resolved={it.id: self.mapping[it.id] for it in items if it.id in self.mapping}
+            resolved={i: self.mapping[i] for i in ids},
+            per_item_tokens={i: self.tokens.get(i, (None, None)) for i in ids},
+            per_item_cost={i: self.cost[i] for i in ids if i in self.cost},
+            per_item_model={i: self.model[i] for i in ids if i in self.model},
         )
 
 
@@ -104,6 +121,50 @@ def test_places_node_under_parent_and_promotes(conn):
     # Outcome resolved -> applied; no review opened.
     assert _job_item(conn, node) == ("resolved", "applied")
     assert _open_review(conn, node) is None
+
+
+def test_resolved_node_persists_tokens_cost_model_and_rolls_up(conn):
+    # A placed+promoted node run as a job member carries its LLM tokens/cost/model
+    # onto its job_item, and the job-level SUM (finalize's roll-up) reflects it.
+    parent = _node(conn, "citrus", "Citrus", status="live")
+    node = _node(conn, "lime-juice", "lime juice", status="provisional")
+
+    job_id = conn.execute(
+        "insert into jobs (stage, state) values ('connect-nodes', 'running') returning id"
+    ).fetchone()[0]
+    conn.execute(
+        "insert into job_items (job_id, entity_type, entity_id, stage, code_version, "
+        "outcome, method, state) "
+        "values (%s, 'taxonomy_node', %s, 'connect-nodes', '', 'pending', 'deterministic', 'pending')",
+        (job_id, node),
+    )
+
+    chain = _FakeChain(
+        {str(node): {"node_kind": None, "parent_slugs": ["citrus"], "is_cluster_node": False}},
+        tokens={str(node): (150, 60)},
+        cost={str(node): 4},
+        model={str(node): "gpt-5-mini"},
+    )
+    counts = connect_stage_fn({"id": job_id, "payload": {}}, conn, chain)
+    assert counts == {"connected": 1, "pending": 0}
+    assert conn.execute(
+        "select 1 from taxonomy_edges where parent_id = %s and child_id = %s",
+        (parent, node),
+    ).fetchone()
+
+    row = conn.execute(
+        "select outcome, prompt_tokens, completion_tokens, cost_cents, model_id "
+        "from job_items where job_id = %s and entity_id = %s and stage = 'connect-nodes'",
+        (job_id, node),
+    ).fetchone()
+    assert row == ("resolved", 150, 60, 4, "gpt-5-mini")
+
+    rollup = conn.execute(
+        "select sum(prompt_tokens), sum(completion_tokens), sum(cost_cents) "
+        "from job_items where job_id = %s",
+        (job_id,),
+    ).fetchone()
+    assert rollup == (150, 60, 4)
 
 
 def test_unknown_parent_slug_parks_for_review(conn):

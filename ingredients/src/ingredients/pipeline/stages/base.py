@@ -162,6 +162,25 @@ def recipes_with_provisional_ingredients(
     return {r[0] for r in rows}
 
 
+def item_telemetry(result: Any, item_id: str) -> dict[str, Any]:
+    """The per-item LLM telemetry a stage persists onto ``item_id``'s job_item,
+    pulled from a ``ChainResult``'s per-item maps: prompt/completion tokens, the
+    item's share of the resolving tier's cost, and the model that resolved it.
+
+    Used only by the stages whose job_item entity IS the resolved LLM item
+    (extract / combine / connect). Absent entries — a deterministically resolved
+    or parked item, or a chain that ran no LLM — come back ``None`` (tokens) /
+    ``None`` (cost) / ``None`` (model), which ``record`` / ``record_node`` store
+    as SQL NULL and the finalize roll-up ignores."""
+    pt, ct = result.per_item_tokens.get(item_id, (None, None))
+    return {
+        "prompt_tokens": pt,
+        "completion_tokens": ct,
+        "cost_cents": result.per_item_cost.get(item_id),
+        "model_id": result.per_item_model.get(item_id),
+    }
+
+
 def record(
     conn: psycopg.Connection,
     *,
@@ -173,6 +192,8 @@ def record(
     job_id: int | None = None,
     cost_cents: float | None = None,
     model_id: str | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
     error_code: str | None = None,
     payload: Any | None = None,
 ) -> None:
@@ -180,7 +201,8 @@ def record(
 
     For a run member (``job_id`` set) the pending member row is UPDATEd to its
     terminal ``state``; for the cold-build (``job_id`` None) the append-versioned
-    ledger row is UPSERTed."""
+    ledger row is UPSERTed. ``prompt_tokens`` / ``completion_tokens`` carry the
+    LLM usage attributed to this item (rolled up to the job on finalize)."""
     ledger.record_run(
         conn,
         entity_type=ENTITY_RECIPE,
@@ -193,6 +215,8 @@ def record(
         job_id=job_id,
         cost_cents=cost_cents,
         model_id=model_id,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
         error_code=error_code,
         payload=payload,
     )
@@ -209,6 +233,8 @@ def record_node(
     job_id: int | None = None,
     cost_cents: float | None = None,
     model_id: str | None = None,
+    prompt_tokens: int | None = None,
+    completion_tokens: int | None = None,
     error_code: str | None = None,
     payload: Any | None = None,
 ) -> None:
@@ -229,6 +255,8 @@ def record_node(
         job_id=job_id,
         cost_cents=cost_cents,
         model_id=model_id,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
         error_code=error_code,
         payload=payload,
     )

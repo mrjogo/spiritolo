@@ -9,6 +9,16 @@ import { isActiveRun, isFinishedRun, type RunHeader } from './useRun';
 // runtime, so a stub is enough — matches how the other /ops tests mock it.
 vi.mock('../../supabase', () => ({ supabase: {} }));
 
+// useEstimatedRunSeconds wraps react-query (needs a QueryClientProvider) and
+// hits supabase.rpc; the cockpit only consumes its {seconds} for the pre-first-
+// item fallback, so a controllable stub keeps this test hermetic.
+const estimateMock = vi.hoisted(() => ({
+  value: null as { seconds: number; source: string } | null,
+}));
+vi.mock('./useEstimateSeconds', () => ({
+  useEstimatedRunSeconds: () => estimateMock.value,
+}));
+
 vi.mock('./useWorkerHealth', () => ({
   useWorkerHealth: () => ({
     freshest: { worker_id: 'w1', last_seen: new Date().toISOString(), providers: ['deepseek'], stages: [] },
@@ -90,6 +100,47 @@ describe('<RunCockpit>', () => {
     expect(screen.getByText(/Insufficient Balance/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /retry residue/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /cancel run/i })).not.toBeInTheDocument();
+  });
+
+  it('active with progress: shows time-remaining from elapsed ÷ done', () => {
+    estimateMock.value = null; // done > 0, so the pre-run fallback is unused
+    render(
+      <RunCockpit
+        run={run({
+          state: 'running',
+          started_at: new Date(Date.now() - 100_000).toISOString(), // ~100s elapsed
+          task_count: 100,
+          items_applied: 25,
+          items_flagged: 0,
+          items_failed: 0,
+          items_pending: 75,
+        })}
+        onCancel={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+    // ETR = (elapsed/done) × (total−done) = (100/25) × 75 = 300s → "about 5 minutes"
+    expect(screen.getByText(/about 5 minutes left/)).toBeInTheDocument();
+  });
+
+  it('active before the first item (done=0): falls back to the pre-run estimate', () => {
+    estimateMock.value = { seconds: 1500, source: 'seed' }; // → "about 30 minutes"
+    render(
+      <RunCockpit
+        run={run({
+          state: 'running',
+          started_at: new Date(Date.now() - 5_000).toISOString(),
+          task_count: 100,
+          items_applied: 0,
+          items_flagged: 0,
+          items_failed: 0,
+          items_pending: 100,
+        })}
+        onCancel={vi.fn()}
+        onRetry={vi.fn()}
+      />,
+    );
+    expect(screen.getByText(/about 30 minutes left/)).toBeInTheDocument();
   });
 
   it('fires onCancel from the Cancel button', async () => {

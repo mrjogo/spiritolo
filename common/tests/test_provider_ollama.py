@@ -1,6 +1,16 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, Mock
 
 from common.llm.ollama import OllamaProvider
+
+
+def test_ollama_captures_token_counts():
+    from common.llm.ollama import OllamaProvider
+    resp = Mock(status_code=200)
+    resp.json.return_value = {"response": "{}", "prompt_eval_count": 142, "eval_count": 188}
+    client = Mock()
+    client.post.return_value = resp
+    r = OllamaProvider(client=client).resolve(system_prompt="", user_prompt="x")
+    assert r.prompt_tokens == 142 and r.completion_tokens == 188
 
 
 def _fake_httpx_client(reply_text: str) -> MagicMock:
@@ -28,6 +38,17 @@ def test_resolve_posts_to_generate_endpoint_and_returns_text():
     assert payload["prompt"] == "u"
     assert payload["stream"] is False
     assert payload["think"] is False  # qwen3 thinking mode disabled
+
+
+def test_ollama_sends_num_predict_cap():
+    from common.llm.ollama import OllamaProvider, DEFAULT_NUM_PREDICT
+    resp = Mock(status_code=200)
+    resp.json.return_value = {"response": "{}"}
+    client = Mock()
+    client.post.return_value = resp
+    OllamaProvider(client=client).resolve(system_prompt="", user_prompt="x")
+    body = client.post.call_args.kwargs["json"]
+    assert body["num_predict"] == DEFAULT_NUM_PREDICT and body["think"] is False
 
 
 def test_model_id_property_matches_constructor():

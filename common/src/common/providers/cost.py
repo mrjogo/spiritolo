@@ -2,7 +2,7 @@
 
 A tier's cost is `calls * unit_cost`. The `deterministic` heuristic tier and the
 local `ollama` LLM cost nothing and are *not metered*; hosted providers (openai,
-claude, deepseek) carry a positive per-call cost and are metered. A provider may
+anthropic, deepseek) carry a positive per-call cost and are metered. A provider may
 self-report its per-call cost via a `cost_per_call` attribute (the fake seam
 uses this so tests control cost); otherwise the id-keyed default table applies.
 """
@@ -16,7 +16,7 @@ UNIT_COST_CENTS: dict[str, int] = {
     "deterministic": 0,
     "ollama": 0,
     "openai": 1,
-    "claude": 2,
+    "anthropic": 2,
     "deepseek": 1,
 }
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+from types import SimpleNamespace
 
 import psycopg
 import pytest
@@ -11,6 +12,34 @@ import pytest
 from ingredients.pipeline.corpus import CorpusMiss
 from ingredients.pipeline.stages import extract
 from ingredients.pipeline.stages.extract import EXTRACTOR_VERSION, extract_stage_fn
+
+
+class _FakeChain:
+    """ProviderChain stand-in for the extract LLM synthesis tier: resolve(items)
+    -> a result carrying ``.resolved`` {id: recipe} plus the per-item telemetry
+    maps a real ChainResult exposes, so the stage can persist per-page usage."""
+
+    def __init__(
+        self,
+        mapping: dict[str, dict],
+        *,
+        tokens: dict[str, tuple[int | None, int | None]] | None = None,
+        cost: dict[str, int] | None = None,
+        model: dict[str, str] | None = None,
+    ):
+        self.mapping = mapping
+        self.tokens = tokens or {}
+        self.cost = cost or {}
+        self.model = model or {}
+
+    def resolve(self, items, **_kw):
+        ids = [it.id for it in items if it.id in self.mapping]
+        return SimpleNamespace(
+            resolved={i: self.mapping[i] for i in ids},
+            per_item_tokens={i: self.tokens.get(i, (None, None)) for i in ids},
+            per_item_cost={i: self.cost[i] for i in ids if i in self.cost},
+            per_item_model={i: self.model[i] for i in ids if i in self.model},
+        )
 
 _HTML = (
     '<script type="application/ld+json">'
@@ -100,6 +129,50 @@ def test_extract_skips_non_recipe_pages(conn):
     extract.set_corpus_reader(_FakeCorpus({}))
     counts = extract_stage_fn(_job(), conn, None)
     assert counts == {"extracted": 0, "no_recipe": 0, "html_missing": 0}
+
+
+def test_llm_synthesis_persists_tokens_cost_and_model(conn):
+    # A page with no Recipe JSON-LD is synthesized by the LLM tier; the resolved
+    # page's job_item carries the tokens/cost/model the chain attributed to it,
+    # and those roll up to the parent job.
+    url = "https://ex.test/story"
+    key = _page(conn, url)
+    pid = conn.execute("select id from pages where url = %s", (url,)).fetchone()[0]
+    extract.set_corpus_reader(_FakeCorpus({key: "<html>a drink write-up, no jsonld</html>"}))
+
+    synthesized = {"@type": "Recipe", "name": "Story Sour",
+                   "recipeIngredient": ["2 oz whiskey"]}
+    chain = _FakeChain(
+        {str(pid): synthesized},
+        tokens={str(pid): (120, 45)},
+        cost={str(pid): 3},
+        model={str(pid): "gpt-5-mini"},
+    )
+    # A run member so the token/cost/model land on a real job_items row + roll up.
+    job_id = conn.execute(
+        "insert into jobs (stage, state) values ('extract-recipe', 'running') returning id"
+    ).fetchone()[0]
+    conn.execute(
+        "insert into job_items (job_id, entity_type, entity_id, stage, code_version, "
+        "outcome, method, state) "
+        "values (%s, 'page', %s, 'extract-recipe', '', 'pending', 'deterministic', 'pending')",
+        (job_id, pid),
+    )
+
+    counts = extract_stage_fn({"id": job_id, "payload": {}}, conn, chain)
+    assert counts["extracted"] == 1
+
+    row = conn.execute(
+        "select outcome, method, prompt_tokens, completion_tokens, cost_cents, model_id "
+        "from job_items where job_id = %s and entity_id = %s and stage = 'extract-recipe'",
+        (job_id, pid),
+    ).fetchone()
+    assert row == ("resolved", "llm", 120, 45, 3, "gpt-5-mini")
+
+    # The recipe was written from the synthesized source.
+    assert conn.execute(
+        "select title from recipes where source_url = %s", (url,)
+    ).fetchone()[0] == "Story Sour"
 
 
 def test_extract_threads_reads_across_window(conn):

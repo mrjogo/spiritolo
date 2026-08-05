@@ -20,19 +20,36 @@ from ingredients.pipeline.stages.combine import (
 
 
 class _FakeChain:
-    """ProviderChain stand-in: resolve(items, system_prompt=...) -> .resolved.
+    """ProviderChain stand-in: resolve(items, system_prompt=...) -> a result with
+    ``.resolved`` plus the per-item telemetry maps a real ChainResult carries.
 
     ``mapping`` is keyed by the item id (str(node_id)); records whether resolve
-    was called so a test can assert the LLM tier was skipped entirely."""
+    was called so a test can assert the LLM tier was skipped entirely. Optional
+    ``tokens`` / ``cost`` / ``model`` maps (id -> value) let a test pin the
+    telemetry a resolved node's job_item should persist."""
 
-    def __init__(self, mapping: dict[str, dict]):
+    def __init__(
+        self,
+        mapping: dict[str, dict],
+        *,
+        tokens: dict[str, tuple[int | None, int | None]] | None = None,
+        cost: dict[str, int] | None = None,
+        model: dict[str, str] | None = None,
+    ):
         self.mapping = mapping
+        self.tokens = tokens or {}
+        self.cost = cost or {}
+        self.model = model or {}
         self.called = False
 
     def resolve(self, items, **_kw):
         self.called = True
+        ids = [it.id for it in items if it.id in self.mapping]
         return SimpleNamespace(
-            resolved={it.id: self.mapping[it.id] for it in items if it.id in self.mapping}
+            resolved={i: self.mapping[i] for i in ids},
+            per_item_tokens={i: self.tokens.get(i, (None, None)) for i in ids},
+            per_item_cost={i: self.cost[i] for i in ids if i in self.cost},
+            per_item_model={i: self.model[i] for i in ids if i in self.model},
         )
 
 
@@ -146,6 +163,57 @@ def test_no_llm_opens_review(conn):
     origin, state, payload = review
     assert (origin, state) == ("machine_proposal", "open")
     assert payload["candidates"][0]["slug"] == "lime-juice"
+
+
+def _run_member(conn, node_id, job_id):
+    conn.execute(
+        "insert into job_items (job_id, entity_type, entity_id, stage, code_version, "
+        "outcome, method, state) "
+        "values (%s, 'taxonomy_node', %s, 'combine-nodes', '', 'pending', 'deterministic', 'pending')",
+        (job_id, node_id),
+    )
+
+
+def test_resolved_node_persists_tokens_cost_model_and_rolls_up(conn):
+    # Two provisional nodes the LLM judges 'distinct', run as members of a job.
+    # Each carries its own tokens/cost/model onto its job_item, and the job-level
+    # SUM (what finalize rolls up) equals the total across the two.
+    _node(conn, "lime-juice", "Lime Juice", "live")
+    a = _node(conn, "lime", "lime", "provisional")
+    b = _node(conn, "limes", "limes", "provisional")
+
+    job_id = conn.execute(
+        "insert into jobs (stage, state) values ('combine-nodes', 'running') returning id"
+    ).fetchone()[0]
+    _run_member(conn, a, job_id)
+    _run_member(conn, b, job_id)
+
+    chain = _FakeChain(
+        {str(a): {"action": "distinct"}, str(b): {"action": "distinct"}},
+        tokens={str(a): (80, 20), str(b): (40, 10)},
+        cost={str(a): 2, str(b): 1},
+        model={str(a): "claude-haiku-4-5", str(b): "claude-haiku-4-5"},
+    )
+    counts = combine_stage_fn({"id": job_id, "payload": {}}, conn, chain)
+    assert counts["distinct"] == 2
+
+    rows = dict(
+        (r[0], r[1:])
+        for r in conn.execute(
+            "select entity_id, prompt_tokens, completion_tokens, cost_cents, model_id "
+            "from job_items where job_id = %s and stage = 'combine-nodes'",
+            (job_id,),
+        ).fetchall()
+    )
+    assert rows[a] == (80, 20, 2, "claude-haiku-4-5")
+    assert rows[b] == (40, 10, 1, "claude-haiku-4-5")
+
+    rollup = conn.execute(
+        "select sum(prompt_tokens), sum(completion_tokens), sum(cost_cents) "
+        "from job_items where job_id = %s",
+        (job_id,),
+    ).fetchone()
+    assert rollup == (120, 30, 3)
 
 
 def test_no_candidates_resolved_without_llm_call(conn):

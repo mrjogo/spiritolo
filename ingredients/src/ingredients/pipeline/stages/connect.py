@@ -133,12 +133,15 @@ def _park(
     candidates: list[dict[str, str]],
     job_id: int | None,
     payload: dict[str, Any],
+    telemetry: dict[str, Any] | None = None,
 ) -> None:
     """Open a connect-nodes machine-proposal review and record the node pending.
 
     The node stays ``provisional`` (nothing was written to the DAG); the review
     hands the placement decision to a curator, and the ``pending`` outcome flags
-    the entity's job_item."""
+    the entity's job_item. ``telemetry`` carries the node's LLM tokens/cost/model
+    (empty when no LLM tier ran) so a parked-after-LLM node still records what its
+    call cost."""
     insert_review(
         conn,
         entity_kind=base.ENTITY_TAXONOMY_NODE,
@@ -157,6 +160,7 @@ def _park(
         method="llm",
         job_id=job_id,
         payload=payload,
+        **(telemetry or {}),
     )
 
 
@@ -167,6 +171,7 @@ def _apply_answer(
     answer: Any,
     candidates: list[dict[str, str]],
     job_id: int | None,
+    telemetry: dict[str, Any] | None = None,
 ) -> str:
     """Apply one node's LLM answer. Returns ``"connected"`` or ``"pending"``.
 
@@ -175,7 +180,11 @@ def _apply_answer(
     antichain invariant, and promotes the node to ``live``. If ``connect_place``
     RAISES (unknown parent slug or antichain violation), the savepoint rolls back
     — so no partial edge survives — and the node is parked for review. A missing
-    answer, an explicit ``uncertain``, or an empty parent set parks it too."""
+    answer, an explicit ``uncertain``, or an empty parent set parks it too.
+
+    ``telemetry`` is the node's per-item LLM tokens/cost/model, persisted onto its
+    job_item on both the connect and the park path (empty when no LLM ran)."""
+    tel = telemetry or {}
     if not isinstance(answer, dict) or answer.get("action") == "uncertain":
         _park(
             conn,
@@ -183,6 +192,7 @@ def _apply_answer(
             candidates=candidates,
             job_id=job_id,
             payload={"candidate_parents": candidates},
+            telemetry=tel,
         )
         return "pending"
 
@@ -204,6 +214,7 @@ def _apply_answer(
             candidates=candidates,
             job_id=job_id,
             payload={"candidate_parents": candidates},
+            telemetry=tel,
         )
         return "pending"
 
@@ -228,6 +239,7 @@ def _apply_answer(
             candidates=candidates,
             job_id=job_id,
             payload={"candidate_parents": candidates, "proposed": proposed},
+            telemetry=tel,
         )
         return "pending"
 
@@ -240,6 +252,7 @@ def _apply_answer(
         method="llm",
         job_id=job_id,
         payload=proposed,
+        **tel,
     )
     return "connected"
 
@@ -300,8 +313,13 @@ def connect_stage_fn(
             )
 
         answers: dict[str, Any] = {}
+        telemetry: dict[str, dict[str, Any]] = {}
         if providers is not None and items:
-            answers = providers.resolve(items, system_prompt=CONNECT_PROMPT).resolved
+            # Keep the full ChainResult so each node's job_item carries the LLM
+            # tokens/cost/model attributed to it (the node IS the entity here).
+            result = providers.resolve(items, system_prompt=CONNECT_PROMPT)
+            answers = result.resolved
+            telemetry = {it.id: base.item_telemetry(result, it.id) for it in items}
 
         for nid in chunk:
             if nid not in cand_by_node:
@@ -312,6 +330,7 @@ def connect_stage_fn(
                 answer=answers.get(str(nid)),
                 candidates=cand_by_node[nid],
                 job_id=job.get("id"),
+                telemetry=telemetry.get(str(nid), {}),
             )
             counts["connected" if outcome == "connected" else "pending"] += 1
 

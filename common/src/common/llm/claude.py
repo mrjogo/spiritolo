@@ -52,4 +52,10 @@ class ClaudeProvider:
             messages=[{"role": "user", "content": user_prompt}],
         )
         text = msg.content[0].text
-        return ProviderResult(raw_text=text, model_id=self.model_id)
+        usage = getattr(msg, "usage", None)
+        return ProviderResult(
+            raw_text=text,
+            model_id=self.model_id,
+            prompt_tokens=getattr(usage, "input_tokens", None),
+            completion_tokens=getattr(usage, "output_tokens", None),
+        )
