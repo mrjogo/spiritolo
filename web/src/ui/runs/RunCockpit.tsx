@@ -1,4 +1,6 @@
 import { formatCents } from '../formatCents';
+import { bucketSeconds } from './bucketSeconds';
+import { useEstimatedRunSeconds } from './useEstimateSeconds';
 import { useWorkerHealth } from './useWorkerHealth';
 import { isActiveRun, isFinishedRun, type RunHeader } from './useRun';
 
@@ -32,6 +34,21 @@ export function RunCockpit({ run, onCancel, onRetry, cancelling, retrying, actio
   const done = run.items_applied + run.items_flagged + run.items_failed;
   const total = run.task_count || 0;
   const pct = total ? Math.round((done / total) * 100) : 0;
+
+  // Estimated time remaining: extrapolate from the run's own pace once at least
+  // one item is done (elapsed ÷ done × remaining); before the first item, fall
+  // back to the history/seed pre-run estimate. Rendered coarsely via bucketSeconds.
+  const elapsedSec = run.started_at
+    ? Math.max(0, (Date.now() - new Date(run.started_at).getTime()) / 1000)
+    : 0;
+  const preRun = useEstimatedRunSeconds(
+    run.stage,
+    run.llm_provider,
+    run.llm_model,
+    total,
+    active && done === 0,
+  );
+  const etrSec = done > 0 ? (elapsedSec / done) * (total - done) : preRun?.seconds ?? null;
 
   const costActual = run.cost_actual_cents ?? 0;
   const cap = run.max_cost_cents;
@@ -76,6 +93,9 @@ export function RunCockpit({ run, onCancel, onRetry, cancelling, retrying, actio
             <span className="runs-badge runs-badge--failed">{run.items_failed.toLocaleString()} failed</span>
             <span className="runs-badge runs-badge--pending">{run.items_pending.toLocaleString()} pending</span>
           </div>
+          {active && etrSec != null && (
+            <div className="runs-progress__meta">≈ {bucketSeconds(etrSec)} left</div>
+          )}
         </div>
       )}
 
