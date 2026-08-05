@@ -99,4 +99,58 @@ describe('<AuditLogBrowser>', () => {
     expect(await screen.findByText('"New"')).toBeInTheDocument();
     expect(screen.getByText('"Old"')).toBeInTheDocument();
   });
+
+  it('explains that insert rows store no payload', async () => {
+    const row = {
+      id: 7, ts: '2026-08-04T00:00:00Z', table_name: 'recipes', pk: '99',
+      op: 'I', actor_kind: 'worker', actor_id: '42', source: 'job:extract-recipe',
+    };
+    mockSupabase([row], { ...row, before: null, after: null, changed_keys: null });
+    renderBrowser(makeClient());
+
+    await userEvent.click(await within(await screen.findByRole('table')).findByRole('button'));
+
+    expect(await screen.findByText(/payload not stored/i)).toBeInTheDocument();
+    // The bare `before:`/`after:` leaves would imply a stored (null) image.
+    expect(screen.queryByText('before:')).not.toBeInTheDocument();
+    expect(screen.queryByText('after:')).not.toBeInTheDocument();
+  });
+
+  it('labels update images as the changed-key subset', async () => {
+    const row = {
+      id: 8, ts: '2026-08-04T00:00:00Z', table_name: 'recipes', pk: '99',
+      op: 'U', actor_kind: 'worker', actor_id: '42', source: 'job:extract-recipe',
+    };
+    mockSupabase([row], {
+      ...row,
+      before: { title: 'Old' },
+      after: { title: 'New' },
+      changed_keys: ['title'],
+    });
+    renderBrowser(makeClient());
+
+    await userEvent.click(await within(await screen.findByRole('table')).findByRole('button'));
+
+    expect(await screen.findByText('before (changed keys only):')).toBeInTheDocument();
+    expect(screen.getByText('after (changed keys only):')).toBeInTheDocument();
+  });
+
+  it('leaves the delete pre-image labelled as a full row', async () => {
+    const row = {
+      id: 9, ts: '2026-08-04T00:00:00Z', table_name: 'recipes', pk: '99',
+      op: 'D', actor_kind: 'system', actor_id: null, source: 'hand-sql',
+    };
+    mockSupabase([row], {
+      ...row,
+      before: { title: 'Gone' },
+      after: null,
+      changed_keys: null,
+    });
+    renderBrowser(makeClient());
+
+    await userEvent.click(await within(await screen.findByRole('table')).findByRole('button'));
+
+    expect(await screen.findByText('before:')).toBeInTheDocument();
+    expect(screen.queryByText('before (changed keys only):')).not.toBeInTheDocument();
+  });
 });
