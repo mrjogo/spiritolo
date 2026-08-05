@@ -53,7 +53,9 @@ const COLUMNS: DataTableColumn<AuditLogListRow>[] = [
 
 // The audit_log_public browser: actor legibility is the point (human vs
 // worker vs system, and the source that triggered the write), plus a
-// before/after diff on drill-down.
+// before/after diff on drill-down. Updates store only the changed-key
+// subset; inserts store no payload at all (it is derivable) — so the detail
+// pane labels each shape rather than implying a full row image.
 export function AuditLogBrowser() {
   const [actorKind, setActorKind] = useState('');
   const [tableName, setTableName] = useState('');
@@ -152,8 +154,23 @@ function AuditLogDetail({ id }: { id: string | null }) {
           changed: {row.changed_keys.join(', ')}
         </p>
       )}
-      <JsonView value={row.before} name="before" />
-      <JsonView value={row.after} name="after" />
+      {row.op === 'I' ? (
+        <p style={{ fontSize: 12, opacity: 0.7 }}>
+          Row created — payload not stored. It is derivable from the current row by
+          reverse-applying later updates.
+        </p>
+      ) : (
+        <>
+          <JsonView
+            value={row.before}
+            name={row.op === 'U' ? 'before (changed keys only)' : 'before'}
+          />
+          <JsonView
+            value={row.after}
+            name={row.op === 'U' ? 'after (changed keys only)' : 'after'}
+          />
+        </>
+      )}
     </DetailPane>
   );
 }
