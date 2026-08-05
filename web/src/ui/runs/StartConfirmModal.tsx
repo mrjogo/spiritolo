@@ -4,6 +4,8 @@ import { formatCents } from '../formatCents';
 import type { RunHeader } from './useRun';
 import type { LlmTier } from './llmTiers';
 import { useEstimatedRunCents } from './useEstimate';
+import { useEstimatedRunSeconds } from './useEstimateSeconds';
+import { bucketSeconds } from './bucketSeconds';
 
 interface Props {
   run: RunHeader;
@@ -46,6 +48,9 @@ export function StartConfirmModal({
     tier.provider, tier.model, run.task_count, run.cost_estimate_cents == null,
   );
   const estimateCents = run.cost_estimate_cents ?? draftEstimate;
+  const est = useEstimatedRunSeconds(
+    run.stage, tier.provider, tier.model, run.task_count, run.cost_estimate_cents == null,
+  );
   const capDollars = Number.parseFloat(capInput);
   const capValid = Number.isFinite(capDollars) && capDollars > 0;
   const startEnabled = capValid && !submitting;
@@ -86,6 +91,12 @@ export function StartConfirmModal({
             Estimated cost
           </div>
           <div className="runs-estbox__amt">≈ {formatCents(estimateCents)}</div>
+          {est && (
+            <div className="runs-progress__meta">
+              {est.source === 'model' || est.source === 'provider' ? '' : 'rough estimate: '}
+              ~ {bucketSeconds(est.seconds)}
+            </div>
+          )}
         </div>
         {tier.metered && <span className="runs-tag">metered</span>}
       </div>
