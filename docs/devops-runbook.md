@@ -1,156 +1,137 @@
-# DevOps runbook — zero to a running worker
+# DevOps runbook — zero to a running service
 
-Fully-cloud, single environment (`staging` == live). One Supabase Pro Postgres
-(queue + serving) · one Railway worker + Storage Bucket (HTML corpus) · Vercel
-SPA. The worker polls `jobs` (`FOR UPDATE SKIP LOCKED`) — no broker, no inbound
-port.
+One Railway service (`spiritolo`, project `spiritolo-neo`, environment
+`staging`) running the FastAPI app + executor over a SQLite file on a volume,
+replicated by Litestream to a Railway bucket, with secrets read from a
+1Password vault at boot. No Postgres, no separate frontend host, no worker daemon.
 
-**Tools:** `gh` (authed), `supabase`, `railway` (`npm i -g @railway/cli`),
-`vercel`, `aws-cli`, `psql`/`pg_restore` v17+, Node; a Tailscale account with
-`barbot` on the tailnet.
+**Tools:** `gh` (authed), `railway` (`npm i -g @railway/cli`) or the Railway
+dashboard, the 1Password CLI (`op`) for setting up the vault, `pg_restore`
+only for the one-time data migration.
 
-**Fill in once** (paste real values; commands below reference these):
-
-```bash
-export DB_URL="postgresql://postgres.atvlzbgrquiseczzeczn:<pw>@aws-1-us-east-2.pooler.supabase.com:5432/postgres"
-export SCRAPERAPI_KEY=
-export OPENAI_API_KEY=
-export ANTHROPIC_API_KEY=
-export DEEPSEEK_API_KEY=
-export RECIPEGF_TOKEN=      # read-only PAT for mrjogo/RecipeGF (skip if public)
-```
-
-> Use the **session pooler** host (`aws-1-us-east-2.pooler.supabase.com:5432`).
-> The direct `db.<ref>` host is IPv6-only; the transaction pooler (6543) breaks
-> session DDL and `pg_dump`.
-
-**Required vs optional:** only `DB_URL` is required (the worker exits without
-it). `SCRAPERAPI_KEY` matters only if you re-scrape (the `fetch` stage). The
-hosted-LLM keys (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `DEEPSEEK_API_KEY`) are
-optional — the worker builds a hosted provider only for a run that selects it and
-only when its key is set; none are read for runs on local `ollama` (always
-available, free). Adding a key is all that's needed to make that provider usable:
-the client wiring is automatic.
-
-**Choosing which model a run uses — set it on the run, not in env config.** There
-is no provider-chain config file. Each run carries its own LLM tier on the `jobs`
-row — `llm_provider` (`ollama` / `openai` / `claude` / `deepseek`) + `llm_model`
-— chosen at run assembly in `/ops` (the `set_run_llm` RPC; the same fields the
-Start-confirm cost gate reads). The worker builds exactly that one provider per
-job from the env's API keys and runs it as the chain's LLM tier; the model string
-is threaded straight into the provider (falling back to the provider's default
-model when the run left it blank). A run that names no provider — or whose hosted
-key is absent from the worker's env — runs its deterministic tier only (the
-alias/lexical resolvers live in the stage code) and parks anything an LLM would
-resolve. `pack_size` (items per LLM call) is a per-stage code constant
-(`STAGE_PACK_SIZE` in `ingredients/worker/providers.py`), not a config knob.
+Everything the service needs is declared in the repo:
+[`railway.json`](../railway.json) (builder, health check, restart policy),
+[`Dockerfile`](../Dockerfile), [`scripts/entrypoint.sh`](../scripts/entrypoint.sh),
+[`litestream.yml`](../litestream.yml) and [`secrets.env`](../secrets.env)
+(1Password references). The steps below are the parts that live outside the
+repo: the Railway resources, the vault, and the few plain variables.
 
 ---
 
-## 1. Supabase Pro
+## 1. Railway project, service, volume
 
-1. Dashboard → project `spiritolo-staging` → **Settings → Billing** → upgrade to **Pro**. Same project — don't recreate it (keeps the ref + every secret/Vercel env). Removes the 7-day pause + egress cap.
-2. Link the CLI (for `supabase migration list` / ad-hoc ops):
+1. Dashboard → **New project** → **GitHub Repo** → `mrjogo/spiritolo`. Name the
+   project `spiritolo-neo`, the service `spiritolo`, and rename the
+   environment to `staging`.
+2. Service → **Settings → Source**: set the **deploy branch** (during the
+   changeover: `claude/project-thread-0e8m4j`; afterwards `main`). Leave
+   build/start commands empty — `railway.json` declares the Dockerfile builder
+   and the entrypoint is the start command.
+3. Service → **Volumes** → add a volume mounted at **`/data`** (name
+   `spiritolo-volume`). The database lives at `/data/spiritolo.db`.
+4. Service → **Settings → Networking** → **Generate domain** on port `8000`.
+   This is the `PUBLIC_ORIGIN` (currently `https://spiritolo-staging.up.railway.app`).
 
-   ```bash
-   supabase login
-   supabase link --project-ref atvlzbgrquiseczzeczn
-   ```
+The health check (`/api/health`, 120 s), single replica and `ON_FAILURE`
+restart policy come from `railway.json`; the API also accepts them via
+`serviceInstanceUpdate` if you prefer to set them explicitly.
 
-Migrations apply themselves — CI (`deploy-migrations.yml`) runs `supabase db push` to the Pro DB when you promote to `staging` (§9). No manual push.
+## 2. Buckets
 
-## 2. Repo secrets
+Two S3-compatible Railway buckets (project-token API access cannot create
+buckets, so this is a dashboard step):
 
-```bash
-gh secret set SUPABASE_STAGING_DB_URL --body "$DB_URL"
-gh secret set RECIPEGF_TOKEN          --body "$RECIPEGF_TOKEN"   # skip if RecipeGF is public
+- **Litestream replica** — new bucket, e.g. `spiritolo-litestream`. Litestream
+  writes `s3://<bucket>/spiritolo/…`.
+- **HTML corpus** — the existing `spiritolo-corpus` bucket (page HTML the
+  extract stage reads). It currently lives in the old Railway project; either
+  reuse it (put its credentials in the vault) or create a new one and copy the
+  objects over.
+
+For each bucket, open **Credentials** once and put the access key id + secret
+into the vault (step 3). Do **not** add them to the service as variables.
+
+## 3. 1Password vault
+
+Create a vault for the service and the items `secrets.env` references (names
+are the spec defaults — if yours differ, edit `secrets.env`, not the vault):
+
+| Reference | Holds |
+|---|---|
+| `op://spiritolo/app/session-secret` | a long random string (`openssl rand -base64 48`) |
+| `op://spiritolo/llm/anthropic-api-key`, `…/openai-api-key`, `…/deepseek-api-key` | hosted LLM keys (omit a line in `secrets.env` for a provider you don't use) |
+| `op://spiritolo/litestream-bucket/access-key-id`, `…/secret-access-key` | the Litestream bucket credentials |
+| `op://spiritolo/corpus-bucket/access-key-id`, `…/secret-access-key` | the corpus bucket credentials |
+
+Then create a **service account** (1Password → Developer → Service accounts)
+with read access to that vault only, and copy its token: that is
+`OP_SERVICE_ACCOUNT_TOKEN`.
+
+## 4. Service variables
+
+Plain (non-secret) variables on the service:
+
+```
+PUBLIC_ORIGIN=https://spiritolo-staging.up.railway.app
+SPIRITOLO_DB=/data/spiritolo.db
+STATIC_DIR=/app/web/dist
+RUN_EXECUTOR=1
+LOG_LEVEL=INFO
+LITESTREAM_REPLICA_URL=s3://<litestream bucket>/spiritolo
+LITESTREAM_ENDPOINT=<litestream bucket S3 endpoint>
+AWS_ENDPOINT_URL=<corpus bucket S3 endpoint>
+AWS_S3_BUCKET_NAME=spiritolo-corpus
+AWS_DEFAULT_REGION=<corpus bucket region>
+AWS_S3_URL_STYLE=path
 ```
 
-- **`RECIPEGF_TOKEN`** — a GitHub **fine-grained PAT** (Settings → Developer settings → Fine-grained tokens) scoped to **`mrjogo/RecipeGF` only**, permission **Contents: Read-only** (Metadata: Read auto-adds). It authenticates the private `recipegf` clone in `ingredients-ci.yml` and in the Railway image build (set as a plain worker variable in §5 — `worker.Dockerfile`'s `ARG RECIPEGF_TOKEN` receives it at build). Skip it if RecipeGF is public. PATs expire → rotate the repo secret + the worker variable when it lapses.
+Optional: `OLLAMA_BASE_URL=http://barbot:11434` + `TAILSCALE_AUTHKEY` (a
+Tailscale OAuth client secret tagged `tag:worker`) if a run should use a
+tailnet Ollama; the entrypoint only starts tailscaled when the key is present.
 
-## 3. Tailscale OAuth client
+One **sealed** variable: `OP_SERVICE_ACCOUNT_TOKEN`. With it set the entrypoint
+runs everything under `op run`, so every `secrets.env` line resolves; without
+it the service boots secret-less (sessions reset on restart, hosted LLM tiers
+unavailable, Litestream skipped if its URL is unset).
 
-The worker authenticates with a Tailscale **OAuth client secret**, which never
-expires (plain auth keys cap at 90 days), so it re-auths on every boot forever —
-no rotation. The entrypoint (`scripts/worker-entrypoint.sh`) already passes
-`--advertise-tags=tag:worker ...?ephemeral=true&preauthorized=true`. One-time setup:
+Setting any of these from the API is `variableCollectionUpsert` with
+`skipDeploys: true`, then one redeploy.
 
-1. **Define the tag.** Admin console → **Access controls → Tags → Create tag** → **Tag name** `tag:worker`, **Tag owner** = your Tailscale login email → **Save tag**. (If you've tightened access rules beyond the open default, also allow `tag:worker` → barbot on `:11434`.)
-2. **Create the OAuth client.** Admin console → **Settings → Trust credentials** (<https://login.tailscale.com/admin/settings/trust-credentials>) → **Credential** → **OAuth** → enable the **`auth_keys`** *Write* scope → attach tag **`tag:worker`** → **Generate credential** → copy the **secret** (shown once).
-3. **Capture it** — this is the worker's `TAILSCALE_AUTHKEY` (§5): `export TAILSCALE_AUTHKEY=<client secret>`.
-4. Confirm `barbot` is on the tailnet (`http://barbot:11434`). The worker joins tagged `tag:worker`, ephemeral, each boot.
+## 5. RecipeGF
 
-## 4. Railway project + Storage Bucket
+`recipegf` is a git dependency pinned to `mrjogo/RecipeGF@v0.4.0`. If that repo
+is private, the image build needs a `RECIPEGF_TOKEN` **build argument**
+(fine-grained PAT, Contents: read on that repo only) — set it as a service
+variable; the Dockerfile reads it as `ARG` and never bakes it into the image —
+and `python-ci.yml` needs the same value as a repo secret. Making the repo
+public removes both.
 
-```bash
-railway login
-railway init --name spiritolo            # the project (holds the worker service + the bucket); or `railway link` to an existing one
-railway bucket create spiritolo-corpus   # pick a US-East region at the prompt (nearest Supabase us-east-2)
-```
+## 6. First deploy and passkey setup
 
-- Corpus bucket: S3-compatible (Tigris), $0.015/GB, free egress. **No object-lock/versioning** → your local `data/html/` is the corpus's only other copy; keep it.
-- **Region:** pick a **US-East** region at the bucket prompt (nearest Supabase `us-east-2`); the worker's region is set when its service is created in §5.
+1. Push to the deploy branch (or **Deploy** in the dashboard). Watch the build,
+   then `GET https://<domain>/api/health` → `{"ok": true, "executor": {...}}`.
+2. Open `https://<domain>/login`. With no operators yet the page offers
+   **first-time setup**: pick a handle, register a passkey → you are the admin.
+   From then on registration needs a signed-in operator.
+3. Seal `OP_SERVICE_ACCOUNT_TOKEN` (if you deployed without it first) and
+   redeploy; the logs should show `op run` resolving `secrets.env` and
+   Litestream starting replication.
 
-## 5. Railway worker
+## 7. Data migration (one time)
 
-1. **Connect the repo** — creates the worker service (auto-deploys on push):
-   - Project canvas → **Create** → **GitHub Repo**.
-   - If `mrjogo/spiritolo` isn't listed → grant the **Railway GitHub App** access to it on GitHub → back in Railway, **Refresh**.
-   - Pick `mrjogo/spiritolo`; rename the service to **`worker`**.
-   - Service → **Settings**: **branch = `staging`**, **region = `us-east4-eqdc4a`**. Leave build command / root dir / start command at defaults — `railway.json` + `worker.Dockerfile` pin the builder, replicas, and entrypoint.
-   - Rename the environment **Production → staging** (environment settings).
-2. **Connect the bucket → the worker** — the `spiritolo-corpus` bucket → **Credentials** → **Add to service** → Service **`worker`**, Style **AWS SDK (Generic)** → **Add Variables**. This injects `AWS_ENDPOINT_URL` / `AWS_S3_BUCKET_NAME` / `AWS_DEFAULT_REGION` / `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` as auto-syncing references — the worker reads these directly.
-3. **Set the app variables** — `railway link` → the `worker` service. **Set only the ones you have a value for; omit the rest** — Railway rejects an empty `KEY=`. (`RECIPEGF_TOKEN` is a plain variable; `worker.Dockerfile`'s `ARG RECIPEGF_TOKEN` reads it at build.)
-
-   ```bash
-   railway variables \
-     --set SUPABASE_DB_URL="$DB_URL" \
-     --set TAILSCALE_AUTHKEY="$TAILSCALE_AUTHKEY" \
-     --set OLLAMA_BASE_URL="http://barbot:11434" \
-     --set RECIPEGF_TOKEN="$RECIPEGF_TOKEN"
-   ```
-
-   Add the hosted-LLM / scraper keys you actually use, e.g. `--set OPENAI_API_KEY="$OPENAI_API_KEY" --set ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" --set DEEPSEEK_API_KEY="$DEEPSEEK_API_KEY" --set SCRAPERAPI_KEY="$SCRAPERAPI_KEY"`. Which provider/model a job uses is chosen per-run in `/ops` (see **Choosing which model a run uses** above) — no env config picks it; the keys just make a run's chosen hosted provider buildable. Only `SUPABASE_DB_URL` is strictly required (see **Required vs optional** above).
-4. **Builds fail until you promote (§9)** — `railway.json` + `worker.Dockerfile` are on `main`, not yet on `staging`, so Railway falls back to Railpack auto-detect and errors with "no start command." That's expected. Once `main → staging` lands, Railway builds `worker.Dockerfile` (its `ENTRYPOINT` is the start command) and `railway logs` shows: tailscaled up, tailnet joined, poll loop started. (To smoke-test the image before promoting, point the deploy branch at `main`, build, then switch back to `staging`.)
-
-## 6. Vercel — web SPA
-
-```bash
-vercel link
-vercel env add VITE_SUPABASE_URL production             # https://atvlzbgrquiseczzeczn.supabase.co
-vercel env add VITE_SUPABASE_PUBLISHABLE_KEY production  # sb_publishable_…
-vercel env add VITE_SUPABASE_URL preview
-vercel env add VITE_SUPABASE_PUBLISHABLE_KEY preview
-```
-
-- `production` / `preview` are Vercel's fixed environment **types** (not free-form like Railway's) — `production` = the live deployment. The `staging` branch feeds it via **Project Settings → Git → Production Branch = `staging`** (already set, since the project deploys on staging pushes). Keep `production` here; don't rename it.
-- `/ops` ships inside the same SPA behind the admin gate. Deploys are native: push `staging` = production, PR = preview.
-
-## 7. RecipeGF v0.4.0 pin
-
-```bash
-cd ~/code-projects/RecipeGF && git checkout main && git pull
-(cd python && uv run pytest) && (cd spec/conformance && npm test)      # green before tagging
-git tag -a v0.4.0 -m "Ingredient seams + unit registry as sole authority" && git push origin v0.4.0
-# Optional (release notes only — the uv git dep resolves the TAG; nothing consumes the GitHub release):
-# gh release create v0.4.0 --title v0.4.0 --notes "Optional-additive; schema const unchanged."
-cd ~/code-projects/spiritolo && uv lock --upgrade-package recipegf
-(cd ingredients && uv run --extra dev pytest)
-```
+The staging Supabase data is exported with the *Backup staging database*
+GitHub Action, converted with `scripts/pg_to_sqlite`, and loaded through
+**/ops → Import**. Full steps in [migration.md](migration.md).
 
 ## 8. Smoke the loop
 
-1. `/ops` → sign in as admin → enqueue a **1-URL** scoped `fetch` job → approve it (metered → confirm-before-cost).
-2. Expect: bytes land in the bucket; `pages` + `stage_runs` rows appear; `/ops` shows live status; an `audit_log` row records the mutation.
-3. `railway logs`: tailscaled up, tailnet joined, poll loop running.
-
-## 9. Promote to staging
-
-```bash
-gh pr create --base staging --head main --title "Promote main → staging" --body "…"
-```
-
-- Merge with a **merge commit — never squash** (a squash diverges the branches and breaks the next promotion). Vercel, the migrations workflow, and the worker all pick it up.
+1. `/ops → Runs` → create a `parse-ingredients` run on local `ollama` (free),
+   add a handful of recipes, **Start**.
+2. Expect: items go `pending → applied`, `recipe_ingredients` rows appear, the
+   audit log records each mutation with `actor_kind = worker`, and
+   `/api/ops/executor` shows the run id while it is live.
+3. Railway logs: `spiritolo up: db=/data/spiritolo.db …`, Litestream `sync`
+   lines after the writes.
 
 ---
 
@@ -158,9 +139,7 @@ gh pr create --base staging --head main --title "Promote main → staging" --bod
 
 | Path changed | Trigger | Effect |
 |---|---|---|
-| `supabase/migrations/**` (PR → main) | `deploy-migrations.yml` validate job | forward-apply on a throwaway Postgres; blocks a broken migration |
-| `supabase/migrations/**` (push → staging) | `deploy-migrations.yml` push job | `supabase db push` to the Pro DB |
-| `ingredients/**`, `common/**` (PR → main) | `ingredients-ci.yml` | pytest gate |
+| `app/**`, `common/**`, `ingredients/**`, `scripts/**` (PR → main) | `python-ci.yml` | pytest gates for every workspace member (SQLite, no services) |
 | `web/**` (PR → main) | `web-ci.yml` | Vitest gate |
-| worker code / image / config (push → staging) | Railway GitHub App | rebuilds `worker.Dockerfile` + redeploys the worker |
-| `web/**` (push → staging / any PR) | Vercel native | prod / preview deploy |
+| deploy artifacts (PR → main) | `workflows-ci.yml` | shape tests over Dockerfile, entrypoint, railway.json, litestream.yml, secrets.env, this runbook |
+| anything (push → deploy branch) | Railway GitHub App | builds the Dockerfile, health-checks `/api/health`, swaps the deployment |

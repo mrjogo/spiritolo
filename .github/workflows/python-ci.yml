@@ -1,0 +1,80 @@
+# Python CI — the PR gate for every uv workspace member that has tests:
+# common (the SQLite data layer), ingredients (the content pipeline), app (the
+# FastAPI service) and scripts (the pg_dump → SQLite ETL + corpus tooling).
+#
+# Every suite runs against throwaway SQLite files under pytest's tmp_path, so
+# the job needs no database service, vendor CLI or seeds. recipegf is a git
+# dependency on the (private) mrjogo/RecipeGF repo, so the runner needs git +
+# outbound network at `uv sync` time — and a RECIPEGF_TOKEN secret unless that
+# repo is public.
+
+name: Python CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'common/**'
+      - 'ingredients/**'
+      - 'scripts/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/python-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: python-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-
+
+      - name: Install uv
+        run: |
+          set -euo pipefail
+          curl -LsSf https://astral.sh/uv/install.sh | sh
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Authenticate git for the recipegf dependency
+        env:
+          RECIPEGF_TOKEN: ${{ secrets.RECIPEGF_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -n "${RECIPEGF_TOKEN:-}" ]; then
+            git config --global \
+              url."https://x-access-token:${RECIPEGF_TOKEN}@github.com/".insteadOf \
+              "https://github.com/"
+            echo "Configured authenticated GitHub access for the recipegf git dependency."
+          else
+            echo "RECIPEGF_TOKEN not set — assuming mrjogo/RecipeGF is reachable anonymously."
+          fi
+
+      - name: Sync the workspace
+        run: uv sync --frozen --all-packages --all-extras
+
+      - name: common
+        run: cd common && uv run --no-sync pytest -q
+
+      - name: ingredients
+        run: cd ingredients && uv run --no-sync pytest -q
+
+      - name: app
+        run: cd app && uv run --no-sync pytest -q
+
+      - name: scripts
+        run: cd scripts && uv run --no-sync pytest -q
