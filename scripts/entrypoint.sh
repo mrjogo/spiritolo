@@ -16,6 +16,16 @@ set -euo pipefail
 DB_PATH="${SPIRITOLO_DB:-/data/spiritolo.db}"
 mkdir -p "$(dirname "$DB_PATH")"
 
+# 0. A staged import (/ops → Import, then Apply) replaces the live database.
+#    The app exits to get here, so this runs before Litestream or uvicorn
+#    have the file open; Litestream then starts a new generation for it.
+if [ -f "$DB_PATH.import" ]; then
+  echo "entrypoint: applying staged database import" >&2
+  rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"
+  mv "$DB_PATH.import" "$DB_PATH"
+  rm -f "$DB_PATH.import.json"
+fi
+
 run_with_secrets() {
   if [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
     exec op run --env-file /app/secrets.env --no-masking -- "$@"

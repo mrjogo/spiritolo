@@ -60,6 +60,7 @@ COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENV SPIRITOLO_DB=/data/spiritolo.db \
+    IMPORT_RESTART=1 \
     STATIC_DIR=/app/web/dist \
     PORT=8000 \
     PYTHONUNBUFFERED=1

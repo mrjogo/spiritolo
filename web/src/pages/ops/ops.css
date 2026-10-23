@@ -509,3 +509,20 @@
   animation: ops-spin 0.7s linear infinite;
 }
 @keyframes ops-spin { to { transform: rotate(360deg); } }
+
+/* --- import database --- */
+.ops-import { max-width: 760px; }
+.ops-import__lead { color: var(--ops-muted); font-size: 13.5px; margin: 0 0 18px; }
+.ops-import__step { border: 1px solid var(--ops-border); border-radius: 8px; padding: 14px 16px; margin-bottom: 14px; background: var(--ops-surface); }
+.ops-import__step h3 { font-size: 14px; margin: 0 0 10px; }
+.ops-import__step input[type='file'] { display: block; margin-bottom: 10px; font-size: 13px; }
+.ops-import__staged dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; font-size: 13px; margin: 0 0 12px; }
+.ops-import__staged dt { color: var(--ops-muted); }
+.ops-import__staged dd { margin: 0; overflow-wrap: anywhere; }
+.ops-import__counts { font-size: 13px; border-collapse: collapse; margin-bottom: 12px; }
+.ops-import__counts th, .ops-import__counts td { text-align: left; padding: 4px 12px 4px 0; border-bottom: 1px solid var(--ops-border); }
+.ops-import__counts td:last-child { text-align: right; font-variant-numeric: tabular-nums; }
+.ops-import__actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.ops-import__apply { font-weight: 600; }
+.ops-import__notice { font-size: 13.5px; }
+.ops-import__error { color: #b42318; font-size: 13.5px; }

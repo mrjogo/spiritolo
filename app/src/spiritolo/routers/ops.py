@@ -3,9 +3,11 @@ curation, executor health. Every route requires an admin session."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.concurrency import run_in_threadpool
 
 from common.db import Connection, IntegrityError
 
@@ -14,6 +16,7 @@ from ingredients.reviews import ops as reviews
 from ingredients.taxonomy import curate
 from ingredients.taxonomy.ops import TaxonomyError
 
+from .. import importdb
 from ..auth import Operator
 from ..deps import AppState, conn, require_admin, state
 from ..query import columns, decode_row, run_query
@@ -252,3 +255,64 @@ def executor_health(request: Request) -> dict[str, Any]:
     if st.executor is None:
         return {"alive": False, "disabled": True}
     return st.executor.health()
+
+
+# -------------------------------------------------------------- import-db
+# Replace the live database with an uploaded SQLite file (the staging data
+# migration). See spiritolo.importdb for the stage → apply protocol.
+
+def _paths(st: AppState) -> importdb.Paths:
+    return importdb.Paths(Path(st.settings.db_path))
+
+
+@router.get("/import-db")
+def import_status(request: Request) -> dict[str, Any]:
+    st: AppState = state(request)
+    return {"staged": importdb.staged_info(_paths(st)), "restart_on_apply": st.settings.import_restart}
+
+
+@router.post("/import-db")
+async def import_stage(request: Request) -> dict[str, Any]:
+    st: AppState = state(request)
+    expected = request.headers.get("x-content-sha256")
+    if not expected:
+        raise HTTPException(400, "X-Content-SHA256 header required")
+    chunks: list[bytes] = []
+    async for chunk in request.stream():
+        chunks.append(chunk)
+    try:
+        info = await run_in_threadpool(importdb.stage, _paths(st), chunks, expected)
+    except importdb.ImportError_ as exc:
+        raise HTTPException(422, str(exc)) from None
+    return {"staged": info}
+
+
+@router.delete("/import-db")
+def import_discard(request: Request) -> dict[str, Any]:
+    st: AppState = state(request)
+    return {"discarded": importdb.discard(_paths(st))}
+
+
+@router.post("/import-db/apply")
+def import_apply(request: Request) -> dict[str, Any]:
+    st: AppState = state(request)
+    paths = _paths(st)
+    if importdb.staged_info(paths) is None:
+        raise HTTPException(409, "nothing staged")
+    if st.settings.import_restart:
+        # The entrypoint swaps the staged file in before Litestream and the
+        # app start again; the response goes out before the exit.
+        importdb.schedule_exit()
+        return {"applied": False, "restarting": True}
+    if st.executor is not None:
+        st.executor.stop()
+    st.db.close_all()
+    try:
+        importdb.swap_files(paths)
+    except importdb.ImportError_ as exc:
+        raise HTTPException(409, str(exc)) from None
+    finally:
+        st.db.reopen()
+        if st.executor is not None:
+            st.executor.start()
+    return {"applied": True, "restarting": False}

@@ -22,18 +22,26 @@ class Database:
         self._local = threading.local()
         self._all: list[Connection] = []
         self._lock = threading.Lock()
-        # Boot: migrate once, synchronously, before anything else touches the file.
-        boot = open_database(path, migrate=True, audit=False)
+        # Bumped by reopen(); a thread whose cached connection predates the
+        # current generation opens a new one (the old was closed under it).
+        self._generation = 0
+        self.migrate()
+
+    def migrate(self) -> None:
+        """Apply pending migrations synchronously, before anything else
+        touches the file (boot, and again after an import swap)."""
+        boot = open_database(self.path, migrate=True, audit=False)
         boot.close()
 
     def connection(self) -> Connection:
-        conn = getattr(self._local, "conn", None)
-        if conn is None:
-            conn = open_database(self.path, migrate=False, audit=True,
-                                 actor=("system", None, "api"))
-            self._local.conn = conn
-            with self._lock:
-                self._all.append(conn)
+        cached = getattr(self._local, "conn", None)
+        if cached is not None and cached[0] == self._generation:
+            return cached[1]
+        conn = open_database(self.path, migrate=False, audit=True,
+                             actor=("system", None, "api"))
+        self._local.conn = (self._generation, conn)
+        with self._lock:
+            self._all.append(conn)
         return conn
 
     def new_connection(self, *, actor: tuple[str, str | None, str]) -> Connection:
@@ -43,11 +51,18 @@ class Database:
     def close_all(self) -> None:
         with self._lock:
             conns, self._all = self._all, []
+            self._generation += 1
         for c in conns:
             try:
                 c.close()
             except Exception:  # noqa: BLE001
                 pass
+
+    def reopen(self) -> None:
+        """After the file on disk was replaced: drop every cached connection
+        and migrate the new file. Threads reconnect lazily."""
+        self.close_all()
+        self.migrate()
 
 
 def as_actor(conn: Connection, operator_id: int | None, source: str) -> None:

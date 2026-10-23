@@ -30,6 +30,11 @@ class Settings:
     # Any extra origins (e.g. the Vite dev server) allowed as WebAuthn
     # origins and for CORS with credentials.
     extra_origins: tuple[str, ...] = field(default_factory=tuple)
+    # How `POST /api/ops/import-db/apply` takes effect: exit the process and
+    # let the supervisor's entrypoint swap the staged file in (the container
+    # shape, where Litestream must see the swap from a cold start), or swap
+    # in place and reopen (local runs with no supervisor).
+    import_restart: bool = False
 
     @property
     def rp_id(self) -> str:
@@ -65,4 +70,5 @@ def from_env(env: dict[str, str] | None = None) -> Settings:
         run_executor=e.get("RUN_EXECUTOR", "1") not in ("0", "false", "no"),
         executor_poll_seconds=float(e.get("EXECUTOR_POLL_SECONDS", "5")),
         extra_origins=extra,
+        import_restart=e.get("IMPORT_RESTART", "0") not in ("0", "false", "no", ""),
     )

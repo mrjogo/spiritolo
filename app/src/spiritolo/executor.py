@@ -76,6 +76,9 @@ class Executor:
                 c.cancel()
         if self._thread is not None:
             self._thread.join(timeout)
+            self._thread = None
+        self._stop.clear()
+        self._wake.clear()
 
     @property
     def alive(self) -> bool:

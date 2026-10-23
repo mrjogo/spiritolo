@@ -48,6 +48,9 @@ export function OpsLayout() {
           <li>
             <NavLink to="/ops/reviews">Reviews</NavLink>
           </li>
+          <li>
+            <NavLink to="/ops/import">Import</NavLink>
+          </li>
         </ul>
       </nav>
       <div className="ops-content">

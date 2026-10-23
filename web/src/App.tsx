@@ -26,6 +26,9 @@ const OpsRecipesBrowser = lazy(() =>
 const OpsStageRunsBrowser = lazy(() =>
   import('./pages/ops/StageRunsBrowser').then((m) => ({ default: m.StageRunsBrowser })),
 );
+const OpsImportDatabase = lazy(() =>
+  import('./pages/ops/ImportDatabase').then((m) => ({ default: m.ImportDatabase })),
+);
 const OpsAuditLogBrowser = lazy(() =>
   import('./pages/ops/AuditLogBrowser').then((m) => ({ default: m.AuditLogBrowser })),
 );
@@ -193,6 +196,14 @@ export default function App() {
                 element={
                   <Suspense fallback={<OpsChunkFallback />}>
                     <OpsRunDetail />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="import"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsImportDatabase />
                   </Suspense>
                 }
               />
