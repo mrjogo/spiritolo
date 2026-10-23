@@ -1748,6 +1748,7 @@ dependencies = [
     { name = "boto3" },
     { name = "psycopg", extra = ["binary"] },
     { name = "python-dotenv" },
+    { name = "spiritolo-common" },
 ]
 
 [package.optional-dependencies]
@@ -1761,6 +1762,7 @@ requires-dist = [
     { name = "psycopg", extras = ["binary"], specifier = ">=3.2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "spiritolo-common", editable = "common" },
 ]
 provides-extras = ["dev"]
 

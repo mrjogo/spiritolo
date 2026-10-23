@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Back up the Supabase hosted Postgres `public` schema to a custom-format
-# pg_dump. Excludes `public.profiles` — those rows FK to `auth.users`,
+# Back up the Supabase hosted Postgres `public` + `audit` schemas to a
+# custom-format pg_dump. Excludes `public.profiles` — those rows FK to `auth.users`,
 # which Supabase manages and we don't dump; on restore, admins re-invite
 # themselves and re-flip `is_admin` from Studio.
 #
@@ -93,10 +93,11 @@ cleanup_partial() {
 }
 trap cleanup_partial EXIT
 
-echo "Backing up staging public schema → $OUT"
+echo "Backing up staging public + audit schemas → $OUT"
 pg_dump \
   --dbname="$URL" \
   --schema=public \
+  --schema=audit \
   --exclude-table=public.profiles \
   --format=custom \
   --no-owner \
@@ -134,7 +135,7 @@ cat > "$META" <<EOF_META
   "dump_basename": "$(basename "$OUT")",
   "dump_sha256": "$DUMP_SHA",
   "dump_schema_sha256": "$SCHEMA_SHA",
-  "backup_script_version": 1
+  "backup_script_version": 2
 }
 EOF_META
 
