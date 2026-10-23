@@ -5,8 +5,15 @@ import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 
-const fromMock = vi.fn();
-vi.mock('../../supabase', () => ({ supabase: { from: (table: string) => fromMock(table) } }));
+const queryTableMock = vi.fn();
+const queryOneMock = vi.fn();
+const queryAllMock = vi.fn();
+vi.mock('../../api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api')>()),
+  queryTable: (...args: unknown[]) => queryTableMock(...args),
+  queryOne: (...args: unknown[]) => queryOneMock(...args),
+  queryAll: (...args: unknown[]) => queryAllMock(...args),
+}));
 
 import { StageRunsBrowser } from './StageRunsBrowser';
 
@@ -23,28 +30,21 @@ interface RunRow {
   finished_at: string | null;
 }
 
-// usePagedQuery always calls .select(sel, {count:'exact'}); the detail fetch
-// always calls .select('*') with no options — dispatch on that shape rather
-// than on call order, since the list re-queries on every filter change.
-function mockSupabase(rows: RunRow[], detailRow: unknown = null) {
-  const listEqCalls: [string, unknown][] = [];
-  const range = vi.fn().mockResolvedValue({ data: rows, count: rows.length, error: null });
-  const listChain: Record<string, unknown> = {};
-  listChain.eq = vi.fn((col: string, value: unknown) => { listEqCalls.push([col, value]); return listChain; });
-  listChain.order = vi.fn(() => ({ range }));
-
-  const maybeSingle = vi.fn().mockResolvedValue({ data: detailRow, error: null });
-  const detailEq = vi.fn(() => ({ maybeSingle }));
-
-  fromMock.mockImplementation((table: string) => {
-    if (table !== 'job_items') throw new Error(`unexpected table ${table}`);
-    return {
-      select: (_sel: string, opts?: { count?: string }) =>
-        (opts && opts.count ? listChain : { eq: detailEq }),
-    };
+// The list goes through queryTable (paged), the detail through queryOne.
+function mockApi(rows: RunRow[], detailRow: unknown = null) {
+  const specs: { table: string; filters?: { col: string; value: unknown }[] }[] = [];
+  queryTableMock.mockImplementation(async (spec: { table: string; filters?: { col: string; value: unknown }[] }) => {
+    if (spec.table !== 'job_items') throw new Error(`unexpected table ${spec.table}`);
+    specs.push(spec);
+    return { rows, total: rows.length };
   });
-
-  return { listEqCalls, detailEq, maybeSingle };
+  queryOneMock.mockImplementation(async (table: string) => {
+    if (table !== 'job_items') throw new Error(`unexpected table ${table}`);
+    return detailRow;
+  });
+  const listEqCalls = (): [string, unknown][] =>
+    specs.flatMap((s) => (s.filters ?? []).map((f) => [f.col, f.value] as [string, unknown]));
+  return { listEqCalls, detailEq: queryOneMock };
 }
 
 function renderBrowser(client: QueryClient) {
@@ -63,12 +63,14 @@ function makeClient() {
 }
 
 beforeEach(() => {
-  fromMock.mockReset();
+  queryTableMock.mockReset();
+  queryOneMock.mockReset();
+  queryAllMock.mockReset();
 });
 
 describe('<StageRunsBrowser>', () => {
   it('lists job_items rows with outcome as a StatusPill', async () => {
-    mockSupabase([
+    mockApi([
       { id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse-ingredients', code_version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null },
     ]);
     renderBrowser(makeClient());
@@ -80,19 +82,19 @@ describe('<StageRunsBrowser>', () => {
   });
 
   it('selecting a row fetches and renders its full detail including payload', async () => {
-    const { detailEq } = mockSupabase(
+    const { detailEq } = mockApi(
       [{ id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse-ingredients', code_version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null }],
       { id: 1, entity_type: 'recipe', entity_id: 10, stage: 'parse-ingredients', code_version: 'v10', outcome: 'resolved', method: 'deterministic', cost_cents: 0, started_at: '2026-07-01T00:00:00Z', finished_at: null, payload: { structured: 3 } },
     );
     renderBrowser(makeClient());
     const row = await within(await screen.findByRole('table')).findByRole('button');
     await userEvent.click(row);
-    await waitFor(() => expect(detailEq).toHaveBeenCalledWith('id', 1));
+    await waitFor(() => expect(detailEq).toHaveBeenCalledWith('job_items', [{ col: 'id', op: 'eq', value: 1 }]));
     expect(await screen.findByText(/structured/)).toBeInTheDocument();
   });
 
   it('applies the stage/outcome/version filters to the underlying query', async () => {
-    const { listEqCalls } = mockSupabase([]);
+    const { listEqCalls } = mockApi([]);
     renderBrowser(makeClient());
 
     await userEvent.selectOptions(screen.getByLabelText('stage'), 'map-ingredient');
@@ -100,9 +102,9 @@ describe('<StageRunsBrowser>', () => {
     await userEvent.type(screen.getByLabelText('version'), 'v2');
 
     await waitFor(() => {
-      expect(listEqCalls).toContainEqual(['stage', 'map-ingredient']);
-      expect(listEqCalls).toContainEqual(['outcome', 'failed']);
-      expect(listEqCalls).toContainEqual(['code_version', 'v2']);
+      expect(listEqCalls()).toContainEqual(['stage', 'map-ingredient']);
+      expect(listEqCalls()).toContainEqual(['outcome', 'failed']);
+      expect(listEqCalls()).toContainEqual(['code_version', 'v2']);
     });
   });
 });

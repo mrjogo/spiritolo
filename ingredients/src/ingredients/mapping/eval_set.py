@@ -21,7 +21,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-import psycopg
+from common.db import Connection
 
 from ingredients.recipegf.slug import is_valid_slug, slugify
 
@@ -57,7 +57,7 @@ EVAL_CASES: list[MapperEvalCase] = [
 ]
 
 
-def run_eval(conn: psycopg.Connection) -> dict[str, Any]:
+def run_eval(conn: Connection) -> dict[str, Any]:
     """Run the deterministic path (alias + lexical + mint/abstain terminal) against
     each case. The LLM attach-tier isn't exercised here — that's covered by
     test_stage_map_llm_actions.py. The mint terminal is computed read-only from the
@@ -74,7 +74,7 @@ def run_eval(conn: psycopg.Connection) -> dict[str, Any]:
         source: str
         if isinstance(result, Resolved):
             slug_row = conn.execute(
-                "select slug from taxonomy_nodes where id = %s", (result.taxonomy_node_id,),
+                "select slug from taxonomy_nodes where id = ?", (result.taxonomy_node_id,),
             ).fetchone()
             slug = slug_row[0] if slug_row else None
             source = result.source

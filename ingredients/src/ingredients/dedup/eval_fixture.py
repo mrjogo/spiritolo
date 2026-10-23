@@ -1,5 +1,5 @@
 """In-memory dedup fixture: small taxonomy + antichain markers + cocktail
-aliases. Loaded into TEST_DB_URL by tests via seed_dedup_fixture(conn).
+aliases. Loaded into an in-memory SQLite database by tests via seed_dedup_fixture(conn).
 
 Returns a slug→id dict for tests to look up node_ids by name.
 
@@ -9,7 +9,7 @@ that mapping/eval_fixture didn't need.
 
 from __future__ import annotations
 
-import psycopg
+from common.db import Connection
 
 # Each tuple: (slug, display_name, node_kind, is_cluster_node, default_role,
 #              is_defining_garnish, parent_slug_or_None)
@@ -83,7 +83,7 @@ _COCKTAIL_ALIASES = [
 ]
 
 
-def seed_dedup_fixture(conn: psycopg.Connection) -> dict[str, int]:
+def seed_dedup_fixture(conn: Connection) -> dict[str, int]:
     """Insert the fixture taxonomy + cocktail aliases. Idempotent: ON
     CONFLICT clauses make it safe to call multiple times in a session.
 
@@ -96,14 +96,14 @@ def seed_dedup_fixture(conn: psycopg.Connection) -> dict[str, int]:
             insert into taxonomy_nodes
                 (slug, display_name, node_kind, is_cluster_node, default_role,
                  is_defining_garnish)
-            values (%s, %s, %s, %s, %s, %s)
+            values (?, ?, ?, ?, ?, ?)
             on conflict (slug) do update
                 set is_cluster_node = excluded.is_cluster_node,
                     default_role    = excluded.default_role,
                     is_defining_garnish = excluded.is_defining_garnish
             returning id
             """,
-            (slug, display, node_kind, is_cluster, default_role, def_garnish),
+            (slug, display, node_kind, 1 if is_cluster else 0, default_role, 1 if def_garnish else 0),
         ).fetchone()
         ids[slug] = row[0]
 
@@ -112,9 +112,8 @@ def seed_dedup_fixture(conn: psycopg.Connection) -> dict[str, int]:
             continue
         conn.execute(
             """
-            insert into taxonomy_edges (parent_id, child_id)
-            values (%s, %s)
-            on conflict do nothing
+            insert or ignore into taxonomy_edges (parent_id, child_id)
+            values (?, ?)
             """,
             (ids[parent], ids[slug]),
         )
@@ -122,9 +121,8 @@ def seed_dedup_fixture(conn: psycopg.Connection) -> dict[str, int]:
     for alias, slug in _ALIASES_TAX:
         conn.execute(
             """
-            insert into taxonomy_aliases (alias, node_id)
-            values (%s, %s)
-            on conflict do nothing
+            insert or ignore into taxonomy_aliases (alias, node_id)
+            values (?, ?)
             """,
             (alias, ids[slug]),
         )
@@ -133,11 +131,9 @@ def seed_dedup_fixture(conn: psycopg.Connection) -> dict[str, int]:
         for a in aliases:
             conn.execute(
                 """
-                insert into cocktail_aliases (alias, canonical_name, source)
-                values (%s, %s, 'seed')
-                on conflict do nothing
+                insert or ignore into cocktail_aliases (alias, canonical_name, source)
+                values (?, ?, 'seed')
                 """,
                 (a, canonical),
             )
-    conn.commit()
     return ids

@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import psycopg
+from common.db import Connection, jdump, jlist, jload
 
 from ingredients.parser import PARSER_VERSION, parse
 
@@ -39,7 +39,7 @@ def _recipe_ingredient_strings(source: dict[str, Any] | None) -> list[str]:
 _INSERT_ROWS_SQL = """
     insert into recipe_ingredients
         (recipe_id, position, name, amount, amount_max, unit, modifiers, raw_text)
-    values (%s, %s, %s, %s, %s, %s, %s, %s)
+    values (?, ?, ?, ?, ?, ?, ?, ?)
 """
 
 
@@ -54,7 +54,7 @@ def _parse_rows(recipe_id: int, strings: list[str], site: str | None) -> tuple[l
         modifiers = [result.modifier] if result.modifier else []
         tuples.append(
             (recipe_id, position, result.name, result.amount, result.amount_max,
-             result.unit, modifiers, result.raw_text)
+             result.unit, jdump(modifiers), result.raw_text)
         )
         if result.name:
             structured += 1
@@ -63,7 +63,7 @@ def _parse_rows(recipe_id: int, strings: list[str], site: str | None) -> tuple[l
 
 def parse_stage_fn(
     job: dict[str, Any],
-    conn: psycopg.Connection,
+    conn: Connection,
     providers: Any,
     *,
     chunk_size: int = base.CHUNK_SIZE,
@@ -85,9 +85,10 @@ def parse_stage_fn(
     for chunk in base.chunked(recipe_ids, chunk_size):
         with conn.transaction():
             rows = conn.execute(
-                "select id, source, site from recipes where id = any(%s)", (chunk,)
+                "select id, source, site from recipes where id in (select value from json_each(?))",
+                (jlist(chunk),),
             ).fetchall()
-            by_id = {r[0]: (r[1], r[2]) for r in rows}
+            by_id = {r[0]: (jload(r[1], {}), r[2]) for r in rows}
 
             insert_tuples: list[tuple] = []
             records: list[dict[str, Any]] = []
@@ -109,7 +110,8 @@ def parse_stage_fn(
                 })
 
             conn.execute(
-                "delete from recipe_ingredients where recipe_id = any(%s)", (chunk,)
+                "delete from recipe_ingredients where recipe_id in (select value from json_each(?))",
+                (jlist(chunk),),
             )
             if insert_tuples:
                 with conn.cursor() as cur:

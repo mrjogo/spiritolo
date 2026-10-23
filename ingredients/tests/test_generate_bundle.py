@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import json
 
-import psycopg
 import pytest
 from recipegf import RecipeDocument, parse_ingredient_ref, parse_recipe_id
 
@@ -25,19 +24,19 @@ from ingredients.recipegf.generate import (
 
 
 @pytest.fixture()
-def conn(test_db_url: str):
-    with psycopg.connect(test_db_url, autocommit=True) as c:
-        c.execute("truncate recipes restart identity cascade")
-        c.execute("truncate ingredient_resolutions restart identity cascade")
+def conn(db_conn):
+    if (c := db_conn) is not None:
+        c.execute("delete from recipes")
+        c.execute("delete from ingredient_resolutions")
         yield c
-        c.execute("truncate recipes restart identity cascade")
-        c.execute("truncate ingredient_resolutions restart identity cascade")
+        c.execute("delete from recipes")
+        c.execute("delete from ingredient_resolutions")
 
 
 def _seed_resolution(conn, normalized_name, slug):
     conn.execute(
         "insert into ingredient_resolutions (normalized_name, taxonomy_slug, method, version) "
-        "values (%s, %s, 'alias', 'v1') on conflict (normalized_name) do update "
+        "values (?, ?, 'alias', 'v1') on conflict (normalized_name) do update "
         "set taxonomy_slug = excluded.taxonomy_slug",
         (normalized_name, slug),
     )
@@ -48,9 +47,9 @@ def _seed_stirred_old_fashioned(conn) -> int:
         """
         insert into recipes (source_url, site, source, title, canonical_name,
                              recipe_slug, equipment)
-        values ('https://ex.test/of', 'ex', '{}'::jsonb, 'Old Fashioned',
+        values ('https://ex.test/of', 'ex', '{}', 'Old Fashioned',
                 'old fashioned', 'old-fashioned',
-                array['mixing_glass','bar_spoon','rocks_glass'])
+                '["mixing_glass","bar_spoon","rocks_glass"]')
         returning id
         """
     ).fetchone()[0]
@@ -63,7 +62,7 @@ def _seed_stirred_old_fashioned(conn) -> int:
     for pos, name, amount, amount_max, unit, slug in ings:
         conn.execute(
             "insert into recipe_ingredients (recipe_id, position, name, amount, "
-            "amount_max, unit, raw_text) values (%s, %s, %s, %s, %s, %s, %s)",
+            "amount_max, unit, raw_text) values (?, ?, ?, ?, ?, ?, ?)",
             (recipe_id, pos, name, amount, amount_max, unit, f"{name} raw"),
         )
         _seed_resolution(conn, name.lower().strip(), slug)
@@ -78,7 +77,7 @@ def _seed_stirred_old_fashioned(conn) -> int:
     for idx, verb, roles, result in steps:
         conn.execute(
             "insert into recipe_steps (recipe_id, step_index, verb, roles, result) "
-            "values (%s, %s, %s, %s::jsonb, %s)",
+            "values (?, ?, ?, ?, ?)",
             (recipe_id, idx, verb, json.dumps(roles), result),
         )
     return recipe_id
@@ -133,14 +132,14 @@ def test_generate_bundle_unresolved_ingredient_raises(conn):
         """
         insert into recipes (source_url, site, source, title, canonical_name,
                              recipe_slug, equipment)
-        values ('https://ex.test/u', 'ex', '{}'::jsonb, 'Mystery', 'mystery',
-                'mystery', array[]::text[])
+        values ('https://ex.test/u', 'ex', '{}', 'Mystery', 'mystery',
+                'mystery', '[]')
         returning id
         """
     ).fetchone()[0]
     conn.execute(
         "insert into recipe_ingredients (recipe_id, position, name, amount, unit, "
-        "raw_text) values (%s, 0, 'Unobtanium', 1, 'oz', '1 oz unobtanium')",
+        "raw_text) values (?, 0, 'Unobtanium', 1, 'oz', '1 oz unobtanium')",
         (recipe_id,),
     )
     with pytest.raises(UnresolvedIngredient):
@@ -153,18 +152,18 @@ def test_generate_bundles_matches_per_recipe(conn):
     ok_id = _seed_stirred_old_fashioned(conn)
     unresolved_id = conn.execute(
         "insert into recipes (source_url, site, source, title, canonical_name, "
-        "recipe_slug, equipment) values ('https://ex.test/u2','ex','{}'::jsonb,"
-        "'Mystery','mystery','mystery', array[]::text[]) returning id"
+        "recipe_slug, equipment) values ('https://ex.test/u2','ex','{}',"
+        "'Mystery','mystery','mystery', '[]') returning id"
     ).fetchone()[0]
     conn.execute(
         "insert into recipe_ingredients (recipe_id, position, name, amount, unit, "
-        "raw_text) values (%s, 0, 'Unobtanium', 1, 'oz', '1 oz unobtanium')",
+        "raw_text) values (?, 0, 'Unobtanium', 1, 'oz', '1 oz unobtanium')",
         (unresolved_id,),
     )
     noslug_id = conn.execute(
         "insert into recipes (source_url, site, source, title, canonical_name, "
-        "recipe_slug, equipment) values ('https://ex.test/n', 'ex', '{}'::jsonb, "
-        "NULL, NULL, NULL, array[]::text[]) returning id"
+        "recipe_slug, equipment) values ('https://ex.test/n', 'ex', '{}', "
+        "NULL, NULL, NULL, '[]') returning id"
     ).fetchone()[0]
     ids = [ok_id, unresolved_id, noslug_id, 999999]
 
@@ -191,12 +190,12 @@ def test_slugless_and_unresolved_raises_bundle_error_first(conn):
     # check runs before ingredient assembly, matching the original per-field order.
     recipe_id = conn.execute(
         "insert into recipes (source_url, site, source, title, canonical_name, "
-        "recipe_slug, equipment) values ('https://ex.test/su', 'ex', '{}'::jsonb, "
-        "NULL, NULL, NULL, array[]::text[]) returning id"
+        "recipe_slug, equipment) values ('https://ex.test/su', 'ex', '{}', "
+        "NULL, NULL, NULL, '[]') returning id"
     ).fetchone()[0]
     conn.execute(
         "insert into recipe_ingredients (recipe_id, position, name, amount, unit, "
-        "raw_text) values (%s, 0, 'Unobtanium', 1, 'oz', '1 oz unobtanium')",
+        "raw_text) values (?, 0, 'Unobtanium', 1, 'oz', '1 oz unobtanium')",
         (recipe_id,),
     )
     at = "2026-07-12T00:00:00+00:00"

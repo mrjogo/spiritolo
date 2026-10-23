@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../../supabase';
+import { queryAll, queryOne } from '../../api';
 import { DataTable, type DataTableColumn } from '../../ui/DataTable';
 import { SplitView, DetailPane } from '../../ui/SplitView';
 import { JsonView } from '../../ui/JsonView';
@@ -108,21 +108,17 @@ export function RecipesBrowser() {
 }
 
 async function fetchRecipeDetail(id: number): Promise<RecipeDetailData | null> {
-  const { data: header, error: headerError } = await supabase
-    .from('recipes')
-    .select('id, source_url, site, title, canonical_name, cluster_id, recipe_slug, source')
-    .eq('id', id)
-    .maybeSingle();
-  if (headerError) throw headerError;
+  const header = await queryOne<RecipeHeader>(
+    'recipes', [{ col: 'id', op: 'eq', value: id }],
+    'id, source_url, site, title, canonical_name, cluster_id, recipe_slug, source',
+  );
   if (!header) return null;
 
-  const { data: ingredientRows, error: ingredientsError } = await supabase
-    .from('recipe_ingredients')
-    .select('id, position, name, amount, amount_max, unit, raw_text')
-    .eq('recipe_id', id)
-    .order('position', { ascending: true });
-  if (ingredientsError) throw ingredientsError;
-  const ingredients = (ingredientRows ?? []) as IngredientRow[];
+  const ingredients = await queryAll<IngredientRow>('recipe_ingredients', {
+    select: 'id, position, name, amount, amount_max, unit, raw_text',
+    filters: [{ col: 'recipe_id', op: 'eq', value: id }],
+    order: { col: 'position', asc: true },
+  });
 
   const names = [
     ...new Set(
@@ -134,37 +130,29 @@ async function fetchRecipeDetail(id: number): Promise<RecipeDetailData | null> {
   ];
   const resolutions = new Map<string, string | null>();
   if (names.length > 0) {
-    const { data: resolutionRows, error: resolutionsError } = await supabase
-      .from('ingredient_resolutions')
-      .select('normalized_name, taxonomy_slug')
-      .in('normalized_name', names);
-    if (resolutionsError) throw resolutionsError;
-    for (const r of (resolutionRows ?? []) as { normalized_name: string; taxonomy_slug: string | null }[]) {
-      resolutions.set(r.normalized_name, r.taxonomy_slug);
-    }
+    const resolutionRows = await queryAll<{ normalized_name: string; taxonomy_slug: string | null }>(
+      'ingredient_resolutions',
+      { select: 'normalized_name, taxonomy_slug', filters: [{ col: 'normalized_name', op: 'in', value: names }] },
+    );
+    for (const r of resolutionRows) resolutions.set(r.normalized_name, r.taxonomy_slug);
   }
 
   let cluster: ClusterInfo | null = null;
-  const clusterId = (header as RecipeHeader).cluster_id;
-  if (clusterId) {
-    const { data: clusterRow, error: clusterError } = await supabase
-      .from('recipe_clusters')
-      .select('cluster_key, canonical_name, recipe_count, source_count')
-      .eq('cluster_key', clusterId)
-      .maybeSingle();
-    if (clusterError) throw clusterError;
-    cluster = clusterRow as ClusterInfo | null;
+  if (header.cluster_id) {
+    cluster = await queryOne<ClusterInfo>(
+      'recipe_clusters', [{ col: 'cluster_key', op: 'eq', value: header.cluster_id }],
+      'cluster_key, canonical_name, recipe_count, source_count',
+    );
   }
 
-  const { data: exportRows, error: exportError } = await supabase
-    .from('recipe_exports')
-    .select('recipe_ref, converter_version, exported_at')
-    .eq('recipe_id', id)
-    .order('exported_at', { ascending: false });
-  if (exportError) throw exportError;
-  const latestExport = ((exportRows ?? []) as ExportInfo[])[0] ?? null;
+  const exportRows = await queryAll<ExportInfo>('recipe_exports', {
+    select: 'recipe_ref, converter_version, exported_at',
+    filters: [{ col: 'recipe_id', op: 'eq', value: id }],
+    order: { col: 'exported_at', asc: false },
+  });
+  const latestExport = exportRows[0] ?? null;
 
-  return { header: header as RecipeHeader, ingredients, resolutions, cluster, latestExport };
+  return { header, ingredients, resolutions, cluster, latestExport };
 }
 
 function RecipeDetail({ id }: { id: string | null }) {

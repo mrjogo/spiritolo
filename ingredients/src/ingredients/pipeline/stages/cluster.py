@@ -13,10 +13,10 @@ from __future__ import annotations
 
 from typing import Any
 
-import psycopg
-from psycopg.types.json import Json
+from common.db import Connection, jdump, jlist
 
 from ingredients.dedup.alias_layer import fetch_aliases_dict
+from ingredients.dedup.lexical_layer import CocktailIndex
 from ingredients.dedup.cluster import (
     compute_cluster_key,
     compute_variant_key,
@@ -30,7 +30,7 @@ from ingredients.pipeline.stages import base, naming
 STAGE = "cluster-recipes"
 
 
-def _node_meta(conn: psycopg.Connection) -> dict[int, str]:
+def _node_meta(conn: Connection) -> dict[int, str]:
     """taxonomy node id -> slug snapshot for antichain-slug lookup."""
     return {
         r[0]: r[1]
@@ -43,15 +43,15 @@ _INGREDIENTS_SQL = """
            ir.taxonomy_slug, n.id, n.default_role, n.is_defining_garnish
     from recipe_ingredients ri
     left join ingredient_resolutions ir
-      on ir.normalized_name = lower(btrim(ri.name))
+      on ir.normalized_name = lower(trim(ri.name))
     left join taxonomy_nodes n on n.slug = ir.taxonomy_slug
-    where ri.recipe_id = any(%s)
+    where ri.recipe_id in (select value from json_each(?))
     order by ri.recipe_id, ri.position
 """
 
 
 def _ingredients_from_rows(
-    conn: psycopg.Connection,
+    conn: Connection,
     rows: list[tuple[Any, ...]],
     node_meta: dict[int, str],
     rollup_cache: dict[int, int],
@@ -90,25 +90,22 @@ def _ingredients_from_rows(
 
 _UPSERT_CLUSTER_SQL = """
     insert into recipe_clusters (cluster_key, canonical_name, ingredient_set, version)
-    values (%s, %s, %s, %s)
+    values (?, ?, ?, ?)
     on conflict (cluster_key) do update set
         canonical_name = excluded.canonical_name,
         ingredient_set = excluded.ingredient_set,
         version        = excluded.version
 """
 
-_UPDATE_CANONICAL_SQL = "update recipes set canonical_name = %s where id = %s"
-_UPDATE_CLUSTER_SQL = "update recipes set cluster_id = %s, variant_key = %s where id = %s"
+_NOW = "strftime('%Y-%m-%dT%H:%M:%fZ','now')"
+_UPDATE_CANONICAL_SQL = f"update recipes set canonical_name = ?, updated_at = {_NOW} where id = ?"
+_UPDATE_CLUSTER_SQL = f"update recipes set cluster_id = ?, variant_key = ?, updated_at = {_NOW} where id = ?"
 
 
-def _recompute_counts(conn: psycopg.Connection) -> None:
+def _recompute_counts(conn: Connection) -> None:
     conn.execute(
         """
-        update recipe_clusters c set
-            recipe_count = sub.recipe_count,
-            source_count = sub.source_count,
-            representative_recipe_id = sub.rep_id
-        from (
+        with sub as (
             select cluster_id,
                    count(*)             as recipe_count,
                    count(distinct site) as source_count,
@@ -116,15 +113,19 @@ def _recompute_counts(conn: psycopg.Connection) -> None:
             from recipes
             where cluster_id is not null
             group by cluster_id
-        ) sub
-        where c.cluster_key = sub.cluster_id
+        )
+        update recipe_clusters set
+            recipe_count = (select recipe_count from sub where sub.cluster_id = recipe_clusters.cluster_key),
+            source_count = (select source_count from sub where sub.cluster_id = recipe_clusters.cluster_key),
+            representative_recipe_id = (select rep_id from sub where sub.cluster_id = recipe_clusters.cluster_key)
+        where cluster_key in (select cluster_id from sub)
         """
     )
 
 
 def cluster_stage_fn(
     job: dict[str, Any],
-    conn: psycopg.Connection,
+    conn: Connection,
     providers: Any,
     *,
     chunk_size: int = base.CHUNK_SIZE,
@@ -148,6 +149,7 @@ def cluster_stage_fn(
         return {"clustered": 0}
 
     aliases = fetch_aliases_dict(conn)
+    name_index = CocktailIndex.load(conn)
     node_meta = _node_meta(conn)
     rollup_cache: dict[int, int] = {}
     counts = {"clustered": 0, "skipped": 0, "pending": 0}
@@ -161,13 +163,14 @@ def cluster_stage_fn(
         headers = {
             r[0]: (r[1], r[2])
             for r in conn.execute(
-                "select id, title, canonical_name from recipes where id = any(%s)",
-                (chunk,),
+                "select id, title, canonical_name from recipes "
+                "where id in (select value from json_each(?))",
+                (jlist(chunk),),
             ).fetchall()
         }
         # Bulk fetch ingredients, grouped by recipe_id, position-ordered.
         by_recipe: dict[int, list[tuple[Any, ...]]] = {}
-        for row in conn.execute(_INGREDIENTS_SQL, (chunk,)).fetchall():
+        for row in conn.execute(_INGREDIENTS_SQL, (jlist(chunk),)).fetchall():
             by_recipe.setdefault(row[0], []).append(row[1:])
 
         canonical_updates: list[tuple[Any, ...]] = []
@@ -188,7 +191,7 @@ def cluster_stage_fn(
                 continue
             title, canonical_name = header
             if canonical_name is None:
-                canonical_name = naming.canonical_name_for(conn, aliases, title)
+                canonical_name = naming.canonical_name_for(conn, aliases, title, name_index)
                 canonical_updates.append((canonical_name, recipe_id))
             if not canonical_name:
                 counts["skipped"] += 1
@@ -204,7 +207,7 @@ def cluster_stage_fn(
             cluster_key = compute_cluster_key(canonical_name, ingredients)
             variant_key = compute_variant_key(cluster_key, ingredients)
             cluster_upserts.append(
-                (cluster_key, canonical_name, Json(ingredient_set_json(ingredients)), DEDUP_VERSION)
+                (cluster_key, canonical_name, jdump(ingredient_set_json(ingredients)), DEDUP_VERSION)
             )
             recipe_updates.append((cluster_key, variant_key, recipe_id))
             counts["clustered"] += 1

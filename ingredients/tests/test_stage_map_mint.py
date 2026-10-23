@@ -12,7 +12,6 @@ Runs against TEST_DB_URL.
 
 from __future__ import annotations
 
-import psycopg
 import pytest
 
 from ingredients.mapping.mint import mint_provisional_node
@@ -20,14 +19,14 @@ from ingredients.pipeline.stages.map import MAPPER_VERSION, map_stage_fn
 
 
 @pytest.fixture()
-def conn(test_db_url: str):
-    with psycopg.connect(test_db_url, autocommit=True) as c:
+def conn(db_conn):
+    if (c := db_conn) is not None:
         _truncate(c)
         yield c
         _truncate(c)
 
 
-def _truncate(c: psycopg.Connection) -> None:
+def _truncate(c) -> None:
     for t in (
         "recipes",
         "job_items",
@@ -37,18 +36,18 @@ def _truncate(c: psycopg.Connection) -> None:
         "taxonomy_edges",
         "taxonomy_nodes",
     ):
-        c.execute(f"truncate {t} restart identity cascade")
+        c.execute(f"delete from {t}")
 
 
 def _recipe(c, url, ingredient_names):
     rid = c.execute(
-        "insert into recipes (source_url, site, source) values (%s, 'ex', '{}'::jsonb) returning id",
+        "insert into recipes (source_url, site, source) values (?, 'ex', '{}') returning id",
         (url,),
     ).fetchone()[0]
     for pos, name in enumerate(ingredient_names):
         c.execute(
             "insert into recipe_ingredients (recipe_id, position, name, raw_text) "
-            "values (%s, %s, %s, %s)",
+            "values (?, ?, ?, ?)",
             (rid, pos, name, f"{name} raw"),
         )
     return rid
@@ -94,7 +93,7 @@ def test_mint_resolution_and_provenance(conn):
         "select id from taxonomy_nodes where slug='amaro-nonino'"
     ).fetchone()[0]
     prov = conn.execute(
-        "select source, mapper_version, raw_string from taxonomy_provenance where node_id=%s",
+        "select source, mapper_version, raw_string from taxonomy_provenance where node_id=?",
         (node_id,),
     ).fetchone()
     assert prov == ("map-mint", MAPPER_VERSION, "amaro nonino")

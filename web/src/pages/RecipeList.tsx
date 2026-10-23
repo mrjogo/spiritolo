@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { supabase } from '../supabase';
+import { api, type Page } from '../api';
 import { Pagination } from '../components/Pagination';
-import { buildSearchFilters } from '../searchQuery';
 import type { RecipeListItem } from '../types';
 
 const PAGE_SIZE = 50;
@@ -31,33 +30,16 @@ export function RecipeList() {
         ? { ...prev, pending: true }
         : { status: 'initial' },
     );
-    const from = (page - 1) * PAGE_SIZE;
-    const to = from + PAGE_SIZE - 1;
-
-    let query = supabase
-      .from('recipes_public')
-      .select('id, site, name, image_url', { count: 'exact' });
-
-    const { orFilters } = buildSearchFilters(q);
-    for (const f of orFilters) {
-      query = query.or(f);
-    }
-
-    query
-      .order('name', { nullsFirst: false })
-      .range(from, to)
-      .then(({ data, count, error }) => {
+    const params = new URLSearchParams({ page: String(page), page_size: String(PAGE_SIZE) });
+    if (q) params.set('q', q);
+    api<Page<RecipeListItem>>(`/api/recipes?${params}`)
+      .then(({ rows, total }) => {
         if (cancelled) return;
-        if (error) {
-          setState({ status: 'error', message: error.message });
-          return;
-        }
-        setState({
-          status: 'loaded',
-          rows: (data ?? []) as RecipeListItem[],
-          total: count ?? 0,
-          pending: false,
-        });
+        setState({ status: 'loaded', rows, total, pending: false });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setState({ status: 'error', message: err instanceof Error ? err.message : String(err) });
       });
 
     return () => {

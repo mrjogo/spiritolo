@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { supabase } from '../supabase';
+import { api, ApiError } from '../api';
 import { ErrorPage } from '../components/ErrorPage';
 import { normalizeRecipe } from '../normalizeRecipe';
 import { useIsAdmin } from '../auth/useIsAdmin';
@@ -13,11 +13,6 @@ type RecipeState =
   | { status: 'notfound' }
   | { status: 'error'; message: string }
   | { status: 'loaded'; row: RecipeRow };
-
-const PARSED_SELECT =
-  'id, position, raw_text, amount, amount_max, unit, name, modifier, ' +
-  'role, parse_status, taxonomy_node_id, ' +
-  'taxonomy_nodes(slug, display_name)';
 
 export function RecipeDetail() {
   const { id } = useParams();
@@ -37,26 +32,18 @@ export function RecipeDetail() {
       return;
     }
 
-    supabase
-      .from('recipes_public')
-      .select('*')
-      .eq('id', numericId)
-      .single()
-      .then(({ data, error }) => {
+    api<RecipeRow>(`/api/recipes/${numericId}`)
+      .then((row) => {
         if (cancelled) return;
-        if (error) {
-          if (error.code === 'PGRST116') {
-            setState({ status: 'notfound' });
-            return;
-          }
-          setState({ status: 'error', message: error.message });
-          return;
-        }
-        if (!data) {
+        setState({ status: 'loaded', row });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        if (err instanceof ApiError && err.status === 404) {
           setState({ status: 'notfound' });
           return;
         }
-        setState({ status: 'loaded', row: data as RecipeRow });
+        setState({ status: 'error', message: err instanceof Error ? err.message : String(err) });
       });
 
     return () => {
@@ -69,19 +56,14 @@ export function RecipeDetail() {
   useEffect(() => {
     if (state.status !== 'loaded' || !isAdmin) return;
     let cancelled = false;
-    supabase
-      .from('recipe_ingredients')
-      .select(PARSED_SELECT)
-      .eq('recipe_id', state.row.id)
-      .order('position', { ascending: true })
-      .then(({ data, error }) => {
+    api<RecipeIngredientRow[]>(`/api/recipes/${state.row.id}/ingredients`)
+      .then((rows) => {
         if (cancelled) return;
-        if (error) {
-          // Non-fatal: recipe still renders, parsed panel just won't show.
-          setParsed([]);
-          return;
-        }
-        setParsed((data ?? []) as unknown as RecipeIngredientRow[]);
+        setParsed(rows);
+      })
+      .catch(() => {
+        // Non-fatal: recipe still renders, parsed panel just won't show.
+        if (!cancelled) setParsed([]);
       });
     return () => { cancelled = true; };
   }, [state, isAdmin]);

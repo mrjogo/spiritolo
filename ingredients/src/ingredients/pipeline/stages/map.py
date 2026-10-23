@@ -16,11 +16,10 @@ from __future__ import annotations
 
 from typing import Any
 
-import psycopg
-
+from common.db import Connection, jlist
 from common.providers.packing import Item
 from ingredients.mapping.alias_layer import fetch_aliases_dict
-from ingredients.mapping.lexical_layer import resolve_lexical
+from ingredients.mapping.lexical_layer import TaxonomyIndex, resolve_lexical
 from ingredients.mapping.llm_actions import apply_llm_action
 from ingredients.mapping.mint import mint_provisional_node
 from ingredients.mapping.resolutions import write_abstain, write_resolution
@@ -33,27 +32,28 @@ STAGE = "map-ingredient"
 MAPPER_VERSION = "v2"
 
 
-def _slug_for_node(conn: psycopg.Connection, node_id: int) -> str | None:
+def _slug_for_node(conn: Connection, node_id: int) -> str | None:
     row = conn.execute(
-        "select slug from taxonomy_nodes where id = %s", (node_id,)
+        "select slug from taxonomy_nodes where id = ?", (node_id,)
     ).fetchone()
     return row[0] if row else None
 
 
-def _already_resolved(conn: psycopg.Connection, names: list[str]) -> set[str]:
+def _already_resolved(conn: Connection, names: list[str]) -> set[str]:
     """Normalized names that already have a resolution row at MAPPER_VERSION."""
     if not names:
         return set()
     rows = conn.execute(
         "select normalized_name from ingredient_resolutions "
-        "where version = %s and normalized_name = any(%s)",
-        (MAPPER_VERSION, names),
+        "where version = ? and normalized_name in (select value from json_each(?))",
+        (MAPPER_VERSION, jlist(names)),
     ).fetchall()
     return {r[0] for r in rows}
 
 
 def _resolve_names(
-    conn: psycopg.Connection, names: list[str], aliases: dict[str, int], providers: Any
+    conn: Connection, names: list[str], aliases: dict[str, int], providers: Any,
+    index: TaxonomyIndex | None = None,
 ) -> None:
     """Resolve every name lacking a resolution at MAPPER_VERSION into the shared
     table: alias -> lexical -> LLM tier (existing node only) -> mint provisional.
@@ -74,7 +74,7 @@ def _resolve_names(
                 method="alias", version=MAPPER_VERSION,
             )
             continue
-        result = resolve_lexical(conn, name)
+        result = resolve_lexical(conn, name, index=index)
         if isinstance(result, Resolved):
             write_resolution(
                 conn, normalized_name=name,
@@ -97,15 +97,16 @@ def _resolve_names(
     _mint_unresolved(conn, pending)
 
 
-def _mint_unresolved(conn: psycopg.Connection, names: list[str]) -> None:
+def _mint_unresolved(conn: Connection, names: list[str]) -> None:
     """Mint a provisional node for every name in ``names`` still without a
     non-null resolution at MAPPER_VERSION. Deterministic — no LLM involved."""
     if not names:
         return
     rows = conn.execute(
         "select normalized_name from ingredient_resolutions "
-        "where version = %s and taxonomy_slug is not null and normalized_name = any(%s)",
-        (MAPPER_VERSION, names),
+        "where version = ? and taxonomy_slug is not null "
+        "and normalized_name in (select value from json_each(?))",
+        (MAPPER_VERSION, jlist(names)),
     ).fetchall()
     have = {r[0] for r in rows}
     for name in names:
@@ -118,10 +119,10 @@ def _mint_unresolved(conn: psycopg.Connection, names: list[str]) -> None:
             write_abstain(conn, normalized_name=name, version=MAPPER_VERSION)
 
 
-def _recipe_names(conn: psycopg.Connection, recipe_id: int) -> list[str]:
+def _recipe_names(conn: Connection, recipe_id: int) -> list[str]:
     rows = conn.execute(
-        "select distinct lower(btrim(name)) from recipe_ingredients "
-        "where recipe_id = %s and name is not null and btrim(name) <> ''",
+        "select distinct lower(trim(name)) from recipe_ingredients "
+        "where recipe_id = ? and name is not null and trim(name) <> ''",
         (recipe_id,),
     ).fetchall()
     return [r[0] for r in rows]
@@ -129,7 +130,7 @@ def _recipe_names(conn: psycopg.Connection, recipe_id: int) -> list[str]:
 
 def map_stage_fn(
     job: dict[str, Any],
-    conn: psycopg.Connection,
+    conn: Connection,
     providers: Any,
     *,
     chunk_size: int = base.CHUNK_SIZE,
@@ -149,6 +150,10 @@ def map_stage_fn(
             conn, stage=STAGE, version=MAPPER_VERSION, site=site, limit=limit
         )
     aliases = fetch_aliases_dict(conn) if recipe_ids else {}
+    # One trigram index over the taxonomy for the whole run; the lexical tier
+    # only ever matches *existing* nodes, and a node minted mid-run is by
+    # construction a miss for the name that minted it.
+    index = TaxonomyIndex.load(conn) if recipe_ids else None
     counts = {"resolved": 0, "pending": 0}
 
     for chunk in base.chunked(recipe_ids, chunk_size):
@@ -156,9 +161,10 @@ def map_stage_fn(
         #    _recipe_names) and the deduped union across the chunk.
         per_recipe: dict[int, dict[str, None]] = {rid: {} for rid in chunk}
         for rid, name in conn.execute(
-            "select recipe_id, lower(btrim(name)) from recipe_ingredients "
-            "where recipe_id = any(%s) and name is not null and btrim(name) <> ''",
-            (chunk,),
+            "select recipe_id, lower(trim(name)) from recipe_ingredients "
+            "where recipe_id in (select value from json_each(?)) "
+            "and name is not null and trim(name) <> ''",
+            (jlist(chunk),),
         ).fetchall():
             per_recipe[rid][name] = None
         recipe_names = {rid: list(d) for rid, d in per_recipe.items()}
@@ -168,7 +174,7 @@ def map_stage_fn(
         #    outside the chunk transaction: the shared resolution helpers own
         #    their own writes on the autocommit connection, exactly as when the
         #    per-recipe loop ran them.
-        _resolve_names(conn, union_names, aliases, providers)
+        _resolve_names(conn, union_names, aliases, providers, index)
 
         # Pin: re-stamp any human overrides the auto-resolution just clobbered,
         # supersede machine proposals now resolved, and point map's live version.
@@ -180,9 +186,10 @@ def map_stage_fn(
             if union_names:
                 for name, cnt in conn.execute(
                     "select normalized_name, count(*) from ingredient_resolutions "
-                    "where taxonomy_slug is not null and normalized_name = any(%s) "
+                    "where taxonomy_slug is not null "
+                    "and normalized_name in (select value from json_each(?)) "
                     "group by normalized_name",
-                    (union_names,),
+                    (jlist(union_names),),
                 ).fetchall():
                     name_counts[name] = cnt
 

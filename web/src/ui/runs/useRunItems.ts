@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../../supabase';
-import { useRpc } from '../hooks/useRpc';
+import { api, type Page } from '../../api';
+import { useApiMutation } from '../hooks/useApiMutation';
 import type { PFilter } from './filter';
 
 // The per-entity task state within a run (the latest job_item outcome).
@@ -15,7 +15,7 @@ export type TaskStatus =
 // eligible-pool status that qualified it.
 export type WhyAdded = 'flagged' | 'never_run' | 'retry_failed' | 'applied';
 
-// One row of the run's task list (run_items RPC).
+// One row of the run's task list (POST /api/ops/runs/:id/items/query).
 export interface RunItem {
   item_id: string;
   entity_id: string;
@@ -23,13 +23,10 @@ export interface RunItem {
   source: string;
   why_added: WhyAdded;
   task_state: TaskStatus;
-  /** Window count the RPC stamps on every row so the pager knows the total
-   *  without a second round-trip. */
-  total_count?: number;
 }
 
-// Facet counts keyed by dimension → value → count (eligible_pool_facets /
-// run_items_facets shape: { status: { flagged: N, ... }, source: { ... } }).
+// Facet counts keyed by dimension → value → count (the facets endpoints'
+// shape: { status: { flagged: N, ... }, source: { ... } }).
 export type Facets = Record<string, Record<string, number>>;
 
 // One sort key. An ordered list of these is a multidimensional sort: the first
@@ -39,7 +36,7 @@ export interface Sort {
   asc: boolean;
 }
 
-/** Serialize an ordered sort to the RPCs' comma-separated "col:dir" form. */
+/** Serialize an ordered sort to the API's comma-separated "col:dir" form. */
 export function serializeSort(keys: Sort[]): string {
   return keys.map((k) => `${k.col}:${k.asc ? 'asc' : 'desc'}`).join(',');
 }
@@ -51,15 +48,9 @@ export interface UseRunItemsResult {
   status: 'loading' | 'error' | 'loaded';
 }
 
-function readTotal(rows: RunItem[]): number {
-  if (rows.length === 0) return 0;
-  const stamped = rows[0].total_count;
-  return typeof stamped === 'number' ? stamped : rows.length;
-}
-
-// Reads a page of a run's tasks via run_items + run_items_facets. The
-// p_filter is the same jsonb the RPCs share with the eligible pool, so the
-// in-run status chips and the add-tasks filters speak one language.
+// Reads a page of a run's tasks plus its facet counts. The filter is the same
+// object the eligible pool takes, so the in-run status chips and the
+// add-tasks filters speak one language.
 export function useRunItems(
   jobId: number | null,
   pFilter: PFilter,
@@ -72,36 +63,21 @@ export function useRunItems(
   const itemsQuery = useQuery({
     queryKey: ['runItems', jobId, pFilter, sort, page, pageSize],
     enabled: jobId != null,
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc('run_items', {
-        job_id: jobId,
-        p_filter: pFilter,
-        sort: serializeSort(sort),
-        limit: pageSize,
-        offset,
-      });
-      if (error) throw error;
-      return (data as RunItem[] | null) ?? [];
-    },
+    queryFn: () =>
+      api<Page<RunItem>>(`/api/ops/runs/${jobId}/items/query`, {
+        body: { filter: pFilter, sort: serializeSort(sort), limit: pageSize, offset },
+      }),
   });
 
   const facetsQuery = useQuery({
     queryKey: ['runItemsFacets', jobId, pFilter],
     enabled: jobId != null,
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc('run_items_facets', {
-        job_id: jobId,
-        p_filter: pFilter,
-      });
-      if (error) throw error;
-      return (data as Facets | null) ?? {};
-    },
+    queryFn: () => api<Facets>(`/api/ops/runs/${jobId}/items/facets`, { body: { filter: pFilter } }),
   });
 
-  const rows = itemsQuery.data ?? [];
   return {
-    rows,
-    total: readTotal(rows),
+    rows: itemsQuery.data?.rows ?? [],
+    total: itemsQuery.data?.total ?? 0,
     facets: facetsQuery.data ?? {},
     status: itemsQuery.isError ? 'error' : itemsQuery.isPending ? 'loading' : 'loaded',
   };
@@ -111,9 +87,10 @@ export function useRunItems(
 
 type RemoveArgs = { job_id: number; item_ids: string[] };
 
-/** remove_run_items(job_id, item_ids[]) — draft-run only. */
+/** POST /api/ops/runs/:id/items/remove {item_ids} — draft-run only. */
 export function useRemoveRunItems(jobId: number) {
-  return useRpc<RemoveArgs, void>('remove_run_items', {
-    invalidate: [['runItems'], ['runItemsFacets'], ['run', jobId]],
-  });
+  return useApiMutation<RemoveArgs, void>(
+    async (a) => { await api(`/api/ops/runs/${a.job_id}/items/remove`, { body: { item_ids: a.item_ids } }); },
+    { invalidate: [['runItems'], ['runItemsFacets'], ['run', jobId]] },
+  );
 }

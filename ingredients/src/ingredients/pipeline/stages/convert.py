@@ -11,13 +11,12 @@ either way no steps are written. Versioned at `CONVERTER_VERSION`.
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
-import psycopg
-from psycopg.types.json import Json
+from common.db import Connection, jdump, jlist, jload
 
 from ingredients.dedup.alias_layer import fetch_aliases_dict
+from ingredients.dedup.lexical_layer import CocktailIndex
 from ingredients.dedup.role_classifier import classify_role
 from ingredients.pipeline.stages import base, naming
 from ingredients.recipegf.converter import (
@@ -40,16 +39,16 @@ _RESERVED_STEP_KEYS = {"verb", "result", "modifiers"}
 
 
 # The join `_source_ingredients` runs per recipe, chunked into a single bulk
-# fetch keyed on `ri.recipe_id = any(%s)`. Column order matches
+# fetch keyed on the chunk's recipe ids. Column order matches
 # `_ingredient_from_row` below (recipe_id first, then the per-ingredient fields).
 _INGREDIENTS_SQL = """
     select ri.recipe_id, ri.position, ri.raw_text, ri.amount, ri.amount_max,
            ri.unit, ri.name, ir.taxonomy_slug, n.default_role
     from recipe_ingredients ri
     left join ingredient_resolutions ir
-      on ir.normalized_name = lower(btrim(ri.name))
+      on ir.normalized_name = lower(trim(ri.name))
     left join taxonomy_nodes n on n.slug = ir.taxonomy_slug
-    where ri.recipe_id = any(%s)
+    where ri.recipe_id in (select value from json_each(?))
     order by ri.recipe_id, ri.position
 """
 
@@ -72,13 +71,13 @@ def _ingredient_from_row(pos, raw, amount, amount_max, unit, name, slug, default
     )
 
 
-def _fetch_ingredients(conn: psycopg.Connection, recipe_ids: list[int]) -> dict[int, list[SourceIngredient]]:
+def _fetch_ingredients(conn: Connection, recipe_ids: list[int]) -> dict[int, list[SourceIngredient]]:
     """Bulk form of `_source_ingredients` for a chunk: one query over all ids,
     grouped by recipe_id (preserving position order)."""
     grouped: dict[int, list[SourceIngredient]] = {rid: [] for rid in recipe_ids}
     if not recipe_ids:
         return grouped
-    rows = conn.execute(_INGREDIENTS_SQL, (recipe_ids,)).fetchall()
+    rows = conn.execute(_INGREDIENTS_SQL, (jlist(recipe_ids),)).fetchall()
     for recipe_id, pos, raw, amount, amount_max, unit, name, slug, default_role in rows:
         grouped[recipe_id].append(
             _ingredient_from_row(pos, raw, amount, amount_max, unit, name, slug, default_role)
@@ -93,13 +92,13 @@ def _step_rows(recipe_id: int, ok: Ok) -> list[tuple]:
     for idx, step in enumerate(ok.recipe.get("steps") or []):
         roles = {k: v for k, v in step.items() if k not in _RESERVED_STEP_KEYS}
         modifiers = step.get("modifiers") or []
-        rows.append((recipe_id, idx, step["verb"], json.dumps(roles), step["result"], list(modifiers)))
+        rows.append((recipe_id, idx, step["verb"], jdump(roles), step["result"], jdump(list(modifiers))))
     return rows
 
 
 def convert_stage_fn(
     job: dict[str, Any],
-    conn: psycopg.Connection,
+    conn: Connection,
     providers: Any,
     *,
     chunk_size: int = base.CHUNK_SIZE,
@@ -119,6 +118,7 @@ def convert_stage_fn(
             conn, stage=STAGE, version=CONVERTER_VERSION, site=site, limit=limit
         )
     aliases = fetch_aliases_dict(conn) if recipe_ids else {}
+    name_index = CocktailIndex.load(conn) if recipe_ids else None
     counts = {"converted": 0, "pending": 0, "proposes_new": 0}
 
     for chunk in base.chunked(recipe_ids, chunk_size):
@@ -127,8 +127,8 @@ def convert_stage_fn(
                 row[0]: row
                 for row in conn.execute(
                     "select id, title, canonical_name, source_url, source "
-                    "from recipes where id = any(%s)",
-                    (chunk,),
+                    "from recipes where id in (select value from json_each(?))",
+                    (jlist(chunk),),
                 ).fetchall()
             }
             present_ids = [rid for rid in chunk if rid in headers]
@@ -161,13 +161,13 @@ def convert_stage_fn(
                     continue
                 _id, title, canonical_name, source_url, source = header
                 if canonical_name is None:
-                    canonical_name = naming.canonical_name_for(conn, aliases, title)
+                    canonical_name = naming.canonical_name_for(conn, aliases, title, name_index)
                     canonical_updates.append((canonical_name, recipe_id))
 
                 recipe = SourceRecipe(
                     canonical_name=canonical_name or title or "",
                     source_url=source_url or "",
-                    jsonld=source or {},
+                    jsonld=jload(source, {}) or {},
                     ingredients=ingredients_by_recipe.get(recipe_id, []),
                 )
                 result = convert_recipe(recipe)
@@ -176,7 +176,7 @@ def convert_stage_fn(
                     ok_ids.append(recipe_id)
                     step_inserts.extend(_step_rows(recipe_id, result))
                     equipment_updates.append(
-                        (list(result.recipe.get("equipment") or []), result.slug, recipe_id)
+                        (jdump(list(result.recipe.get("equipment") or [])), result.slug, recipe_id)
                     )
                     outcome, counts_key = "resolved", "converted"
                 elif result.reason in _PENDING_REASONS:
@@ -198,22 +198,25 @@ def convert_stage_fn(
             with conn.cursor() as cur:
                 if canonical_updates:
                     cur.executemany(
-                        "update recipes set canonical_name = %s where id = %s",
+                        "update recipes set canonical_name = ?, "
+                        "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') where id = ?",
                         canonical_updates,
                     )
                 if ok_ids:
                     cur.execute(
-                        "delete from recipe_steps where recipe_id = any(%s)", (ok_ids,)
+                        "delete from recipe_steps where recipe_id in (select value from json_each(?))",
+                        (jlist(ok_ids),),
                     )
                 if step_inserts:
                     cur.executemany(
                         "insert into recipe_steps (recipe_id, step_index, verb, roles, result, modifiers) "
-                        "values (%s, %s, %s, %s::jsonb, %s, %s)",
+                        "values (?, ?, ?, ?, ?, ?)",
                         step_inserts,
                     )
                 if equipment_updates:
                     cur.executemany(
-                        "update recipes set equipment = %s, recipe_slug = %s where id = %s",
+                        "update recipes set equipment = ?, recipe_slug = ?, "
+                        "updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') where id = ?",
                         equipment_updates,
                     )
             base.record_many(conn, records)

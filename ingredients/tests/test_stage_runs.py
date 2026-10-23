@@ -16,8 +16,8 @@ the ledger is decoupled from the `recipes` schema and already speaks the
 
 from __future__ import annotations
 
-import psycopg
 import pytest
+from common.db import IntegrityError
 
 from ingredients.pipeline import ledger
 
@@ -29,10 +29,10 @@ def content_table(db_conn):
     """A throwaway stand-in for a content table: (id, state, site). Stands in for
     the real `recipes`/`pages` content the ledger's work_queue joins against,
     keeping the ledger tests independent of any particular content schema."""
-    db_conn.execute("truncate table job_items restart identity cascade")
+    db_conn.execute("delete from job_items")
     db_conn.execute(f"drop table if exists {_CONTENT}")
     db_conn.execute(
-        f"create table {_CONTENT} (id bigint primary key, state text, site text)"
+        f"create table {_CONTENT} (id integer primary key, state text, site text)"
     )
     yield _CONTENT
     db_conn.execute(f"drop table if exists {_CONTENT}")
@@ -40,7 +40,7 @@ def content_table(db_conn):
 
 def _seed_content(conn, table, id_, *, state="extracted", site=None):
     conn.execute(
-        f"insert into {table} (id, state, site) values (%s, %s, %s)",
+        f"insert into {table} (id, state, site) values (?, ?, ?)",
         (id_, state, site),
     )
     return id_
@@ -52,63 +52,22 @@ def _seed_content(conn, table, id_, *, state="extracted", site=None):
 
 def test_schema_shape(db_conn):
     cols = {
-        r[0]: (r[1], r[2])
-        for r in db_conn.execute(
-            """
-            select column_name, data_type, is_nullable
-            from information_schema.columns
-            where table_name = 'job_items'
-            """
-        ).fetchall()
+        r["name"]: (r["type"].lower(), r["notnull"])
+        for r in db_conn.execute("pragma table_info(job_items)").fetchall()
     }
-    assert cols["entity_type"] == ("text", "NO")
-    assert cols["entity_id"] == ("bigint", "NO")
-    assert cols["stage"] == ("text", "NO")
-    assert cols["code_version"] == ("text", "NO")
-    assert cols["outcome"] == ("text", "NO")
-    assert cols["method"] == ("text", "NO")
-    assert cols["confidence"][0] == "real"
-    assert cols["model_id"][0] == "text"
-    assert cols["cost_cents"][0] == "numeric"
-    assert cols["error_code"][0] == "text"
-    assert cols["job_id"][0] == "bigint"
-    assert cols["state"][0] == "text"
-    assert cols["outcome_payload"][0] == "jsonb"
-    assert cols["payload"][0] == "jsonb"
-    assert cols["started_at"][0] == "timestamp with time zone"
-    assert cols["finished_at"][0] == "timestamp with time zone"
+    for col in ("entity_type", "entity_id", "stage", "code_version", "outcome", "method", "state"):
+        assert cols[col][1] == 1, f"{col} must be NOT NULL"
+    assert cols["entity_id"][0] == "integer"
+    assert cols["payload"][0] == "jsontext"
+    assert cols["outcome_payload"][0] == "jsontext"
 
-    # CHECK constraints enumerate the allowed values.
-    checks = " ".join(
-        r[0]
-        for r in db_conn.execute(
-            """
-            select cc.check_clause
-            from information_schema.check_constraints cc
-            join information_schema.constraint_column_usage ccu
-              on cc.constraint_name = ccu.constraint_name
-            where ccu.table_name = 'job_items'
-            """
-        ).fetchall()
-    )
-    for v in ("page", "recipe"):
-        assert v in checks, f"entity_type CHECK missing {v}"
-    assert "recipe_doc" not in checks, "entity_type must be 'recipe', not 'recipe_doc'"
-    for v in ("resolved", "abstain", "pending", "failed", "proposes_new"):
-        assert v in checks, f"outcome CHECK missing {v}"
-    for v in ("deterministic", "llm", "manual"):
-        assert v in checks, f"method CHECK missing {v}"
-
-    # Append-versioned uniqueness is now a PARTIAL unique index scoped to the
+    # Append-versioned uniqueness is a PARTIAL unique index scoped to the
     # cold-build ledger rows (job_id IS NULL). Run-member rows (job_id NOT NULL)
     # are deliberately unconstrained — the same entity can be a member of many
-    # runs over time, and the add_run_items RPC dedups membership instead.
-    idxdef = db_conn.execute(
-        "select indexdef from pg_indexes "
-        "where tablename = 'job_items' and indexname = 'job_items_ledger_key'"
-    ).fetchone()
-    assert idxdef is not None, "missing job_items_ledger_key partial unique index"
-    definition = idxdef[0].lower()
+    # runs over time, and add_run_items dedups membership instead.
+    definition = db_conn.execute(
+        "select sql from sqlite_master where type = 'index' and name = 'job_items_ledger_key'"
+    ).fetchone()[0].lower()
     assert "unique" in definition
     for col in ("entity_type", "entity_id", "stage", "code_version"):
         assert col in definition, f"ledger key missing {col}: {definition}"
@@ -116,8 +75,8 @@ def test_schema_shape(db_conn):
 
 
 def test_entity_type_check_rejects_unknown(db_conn):
-    db_conn.execute("truncate table job_items restart identity cascade")
-    with pytest.raises(psycopg.errors.CheckViolation):
+    db_conn.execute("delete from job_items")
+    with pytest.raises(IntegrityError):
         db_conn.execute(
             "insert into job_items (entity_type, entity_id, stage, code_version, "
             "outcome, method) values ('widget', 1, 'parse', 'v1', 'resolved', "
@@ -132,7 +91,7 @@ def test_entity_type_check_rejects_unknown(db_conn):
 def test_upsert_appends_versions(db_conn):
     # Append-versioned: one row per (entity, stage, VERSION); a bump keeps the
     # prior version's decision. A re-run at the SAME version overwrites in place.
-    db_conn.execute("truncate table job_items restart identity cascade")
+    db_conn.execute("delete from job_items")
 
     ledger.record_run(
         db_conn, entity_type="recipe", entity_id=1, stage="parse",
@@ -182,7 +141,7 @@ def test_work_queue_not_exists_predicate(db_conn, content_table):
     )
     q = ledger.work_queue(
         db_conn, content_table=content_table, entity_type="recipe",
-        stage="parse", version="v1", where="c.state = %s", params=("extracted",),
+        stage="parse", version="v1", where="c.state = ?", params=("extracted",),
     )
     assert set(q) == {b, c}
 
@@ -195,7 +154,7 @@ def test_work_queue_not_exists_predicate(db_conn, content_table):
     )
     q2 = ledger.work_queue(
         db_conn, content_table=content_table, entity_type="recipe",
-        stage="parse", version="v1", where="c.state = %s", params=("extracted",),
+        stage="parse", version="v1", where="c.state = ?", params=("extracted",),
     )
     assert set(q2) == {b, c}, "parse@v0 entity must re-appear in the v1 queue"
 
@@ -212,22 +171,8 @@ def test_truncate_job_items_requeues_everything(db_conn, content_table):
         stage="parse", version="v1",
     ) == []
 
-    db_conn.execute("truncate table job_items")
+    db_conn.execute("delete from job_items")
     assert ledger.work_queue(
         db_conn, content_table=content_table, entity_type="recipe",
         stage="parse", version="v1",
     ) == [a]
-
-
-# --------------------------------------------------------------------------
-# --------------------------------------------------------------------------
-# Boundary — RLS keeps the ledger admin/pipeline-only
-# --------------------------------------------------------------------------
-
-def test_anon_cannot_read_job_items(db_conn):
-    db_conn.execute("set role anon")
-    try:
-        with pytest.raises(psycopg.errors.InsufficientPrivilege):
-            db_conn.execute("select * from job_items limit 1")
-    finally:
-        db_conn.execute("reset role")

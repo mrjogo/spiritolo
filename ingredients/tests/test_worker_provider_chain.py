@@ -23,7 +23,7 @@ from common.llm.provider import ProviderResult
 from common.providers import FakeProvider, Item, packing
 
 from ingredients.worker.cost import CostMeter
-from ingredients.worker.loop import _build_providers
+from ingredients.worker.runner import build_providers as _build_providers
 from ingredients.worker.providers import (
     DEFAULT_PACK_SIZE,
     ProviderChain,

@@ -9,14 +9,14 @@ Each case fixes:
 
 The fixture taxonomy (eval_fixture.py) is the only DB state these cases
 depend on. The eval suite (ingredients/tests/test_dedup_eval.py, via run_eval)
-runs it against TEST_DB_URL.
+runs it against an in-memory SQLite database.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import psycopg
+from common.db import Connection
 
 from .cluster import compute_cluster_key
 from .eval_fixture import seed_dedup_fixture
@@ -93,16 +93,11 @@ class EvalReport:
 
 
 def run_eval() -> EvalReport:
-    """Run cases against TEST_DB_URL using the fixture."""
-    import os
-    import psycopg as pg
-
-    test_db_url = os.environ.get("TEST_DB_URL")
-    if not test_db_url:
-        raise RuntimeError("TEST_DB_URL not set; eval requires fixture DB.")
+    """Run cases against a fresh in-memory database seeded with the fixture."""
+    from common.db import open_memory_database
 
     report = EvalReport()
-    with pg.connect(test_db_url, autocommit=True) as conn:
+    with open_memory_database() as conn:
         ids = seed_dedup_fixture(conn)
 
         labels: dict[str, str] = {}
@@ -122,7 +117,7 @@ def run_eval() -> EvalReport:
 
 
 def _evaluate_case(
-    conn: psycopg.Connection,
+    conn: Connection,
     case: DedupEvalCase,
     ids: dict[str, int],
     labels: dict[str, str],
@@ -130,7 +125,7 @@ def _evaluate_case(
     # 1. Name normalization expectation.
     normalized = normalize_cocktail_name(case.raw_name)
     row = conn.execute(
-        "select canonical_name from cocktail_aliases where alias = %s",
+        "select canonical_name from cocktail_aliases where alias = ?",
         (normalized,),
     ).fetchone()
     canonical = row[0] if row else None
@@ -143,7 +138,7 @@ def _evaluate_case(
     for slug, amount, unit, pos in case.ingredients:
         node_id = ids[slug]
         node_row = conn.execute(
-            "select default_role, is_defining_garnish from taxonomy_nodes where id = %s",
+            "select default_role, is_defining_garnish from taxonomy_nodes where id = ?",
             (node_id,),
         ).fetchone()
         default_role, is_def_garnish = node_row
@@ -156,7 +151,7 @@ def _evaluate_case(
         ing["role"] = role
         antichain_id = roll_up_to_antichain(conn, node_id)
         ing["antichain_slug"] = conn.execute(
-            "select slug from taxonomy_nodes where id = %s", (antichain_id,)
+            "select slug from taxonomy_nodes where id = ?", (antichain_id,)
         ).fetchone()[0]
         ings.append(ing)
 

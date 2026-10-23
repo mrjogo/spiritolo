@@ -7,54 +7,75 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { Session, User } from '@supabase/supabase-js';
 import { useQueryClient } from '@tanstack/react-query';
-import { supabase } from '../supabase';
-import { isAdminQueryKey } from './useIsAdmin';
+import { api } from '../api';
+
+// The signed-in operator, as /api/auth/me reports it.
+export type Operator = {
+  id: number;
+  handle: string;
+  display_name: string;
+  is_admin: boolean;
+};
+
+export type MeResponse = {
+  operator: Operator | null;
+  /** True while no operator exists yet: the first passkey registration is open. */
+  setup_required: boolean;
+};
 
 type AuthContextValue = {
-  user: User | null;
-  session: Session | null;
+  user: Operator | null;
   loading: boolean;
+  setupRequired: boolean;
+  /** Re-read the session from the server (after a passkey login/registration). */
+  refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [session, setSession] = useState<Session | null>(null);
+  const [me, setMe] = useState<MeResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const queryClient = useQueryClient();
 
-  useEffect(() => {
-    // Single source of truth: onAuthStateChange. Supabase JS v2 fires
-    // INITIAL_SESSION immediately on subscribe, so a separate getSession()
-    // call would just race the listener.
-    const { data: sub } = supabase.auth.onAuthStateChange((event, next) => {
-      setSession(next ?? null);
-      setLoading(false);
-      if (event === 'SIGNED_OUT') {
-        queryClient.removeQueries({ queryKey: isAdminQueryKey() });
-      }
-    });
+  const refresh = useCallback(async () => {
+    let next: MeResponse;
+    try {
+      next = await api<MeResponse>('/api/auth/me');
+    } catch {
+      next = { operator: null, setup_required: false };
+    }
+    setMe(next);
+    setLoading(false);
+  }, []);
 
-    return () => {
-      sub.subscription.unsubscribe();
-    };
-  }, [queryClient]);
+  useEffect(() => {
+    // The probe is async, so these setState calls land after the effect
+    // returns — not the synchronous-setState cascade the rule guards against.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refresh();
+  }, [refresh]);
 
   const signOut = useCallback(async () => {
-    await supabase.auth.signOut();
-  }, []);
+    try {
+      await api('/api/auth/logout', { method: 'POST' });
+    } finally {
+      setMe((prev) => ({ operator: null, setup_required: prev?.setup_required ?? false }));
+      queryClient.clear();
+    }
+  }, [queryClient]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
-      user: session?.user ?? null,
-      session,
+      user: me?.operator ?? null,
       loading,
+      setupRequired: me?.setup_required ?? false,
+      refresh,
       signOut,
     }),
-    [session, loading, signOut],
+    [me, loading, refresh, signOut],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

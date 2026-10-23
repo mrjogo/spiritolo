@@ -8,16 +8,16 @@ Mirrors mapping/alias_layer.py shape.
 
 from __future__ import annotations
 
-import psycopg
+from common.db import Connection
 
 from .types import Pending, Phase1Result, Resolved
 
 
-def resolve_alias(conn: psycopg.Connection, normalized_name: str) -> Phase1Result:
+def resolve_alias(conn: Connection, normalized_name: str) -> Phase1Result:
     if not normalized_name:
         return Pending()
     row = conn.execute(
-        "select canonical_name from cocktail_aliases where alias = %s limit 1",
+        "select canonical_name from cocktail_aliases where alias = ? limit 1",
         (normalized_name,),
     ).fetchone()
     if row is None:
@@ -25,7 +25,7 @@ def resolve_alias(conn: psycopg.Connection, normalized_name: str) -> Phase1Resul
     return Resolved(canonical_name=row[0], source="alias")
 
 
-def fetch_aliases_dict(conn: psycopg.Connection) -> dict[str, str]:
+def fetch_aliases_dict(conn: Connection) -> dict[str, str]:
     """Snapshot every alias -> canonical_name pair for in-memory lookup.
     The table is small; pulling once and matching in Python beats one
     round-trip per name in the Phase 1 hot loop."""

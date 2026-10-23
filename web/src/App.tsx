@@ -5,7 +5,6 @@ import { RequireAuth } from './auth/RequireAuth';
 import { RequireAdmin } from './auth/RequireAdmin';
 import { Landing } from './pages/Landing';
 import { Login } from './pages/Login';
-import { AuthCallback } from './pages/AuthCallback';
 import { RecipeList } from './pages/RecipeList';
 import { RecipeDetail } from './pages/RecipeDetail';
 import { ErrorPage } from './components/ErrorPage';
@@ -101,7 +100,6 @@ export default function App() {
     <Routes>
       <Route path="/" element={<Landing />} />
       <Route path="/login" element={<Login />} />
-      <Route path="/auth/callback" element={<AuthCallback />} />
 
       <Route element={<RequireAuth />}>
         <Route element={<AppLayout />}>

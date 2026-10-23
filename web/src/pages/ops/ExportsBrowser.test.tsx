@@ -5,8 +5,15 @@ import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 
-const fromMock = vi.fn();
-vi.mock('../../supabase', () => ({ supabase: { from: (table: string) => fromMock(table) } }));
+const queryTableMock = vi.fn();
+const queryOneMock = vi.fn();
+const queryAllMock = vi.fn();
+vi.mock('../../api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api')>()),
+  queryTable: (...args: unknown[]) => queryTableMock(...args),
+  queryOne: (...args: unknown[]) => queryOneMock(...args),
+  queryAll: (...args: unknown[]) => queryAllMock(...args),
+}));
 
 import { ExportsBrowser } from './ExportsBrowser';
 
@@ -19,29 +26,6 @@ interface ExportListRow {
   exported_at: string;
 }
 
-function mockList(rows: ExportListRow[]) {
-  const range = vi.fn().mockResolvedValue({ data: rows, count: rows.length, error: null });
-  const chain: Record<string, unknown> = {};
-  chain.order = vi.fn(() => ({ range }));
-  return chain;
-}
-
-function singleEq(row: unknown) {
-  const maybeSingle = vi.fn().mockResolvedValue({ data: row, error: null });
-  const eq = vi.fn(() => ({ maybeSingle }));
-  return { eq };
-}
-
-function listByEq(rows: unknown[]) {
-  const order = vi.fn().mockResolvedValue({ data: rows, error: null });
-  const eq = vi.fn(() => ({ order }));
-  return { eq };
-}
-
-function listByIn(rows: unknown[]) {
-  return { in: vi.fn().mockResolvedValue({ data: rows, error: null }) };
-}
-
 interface MockConfig {
   exportListRows: ExportListRow[];
   exportDetail?: unknown;
@@ -51,39 +35,22 @@ interface MockConfig {
   resolutionRows?: unknown[];
 }
 
-function mockSupabase(cfg: MockConfig) {
-  const listChain = mockList(cfg.exportListRows);
-  const detail = singleEq(cfg.exportDetail ?? null);
-  const header = singleEq(cfg.recipeHeader ?? null);
-  const ingredients = listByEq(cfg.ingredientRows ?? []);
-  const steps = listByEq(cfg.stepRows ?? []);
-  const resolutions = listByIn(cfg.resolutionRows ?? []);
-
-  fromMock.mockImplementation((table: string) => {
-    if (table === 'recipe_exports') {
-      // First select() (no args tracked here) always used for the paged
-      // list AND for looking up a single export row by id — dispatch by
-      // presence of a `.order` vs `.eq` call shape via a shared object.
-      return {
-        select: vi.fn(() => ({ ...listChain, eq: detail.eq })),
-      };
-    }
-    if (table === 'recipes') {
-      return { select: vi.fn(() => ({ eq: header.eq })) };
-    }
-    if (table === 'recipe_ingredients') {
-      return { select: vi.fn(() => ({ eq: ingredients.eq })) };
-    }
-    if (table === 'recipe_steps') {
-      return { select: vi.fn(() => ({ eq: steps.eq })) };
-    }
-    if (table === 'ingredient_resolutions') {
-      return { select: vi.fn(() => ({ in: resolutions.in })) };
-    }
-    throw new Error(`unexpected table ${table}`);
+function mockApi(cfg: MockConfig) {
+  queryTableMock.mockImplementation(async (spec: { table: string }) => {
+    if (spec.table === 'recipe_exports') return { rows: cfg.exportListRows, total: cfg.exportListRows.length };
+    throw new Error(`unexpected paged table ${spec.table}`);
   });
-
-  return { listChain, detail, header, ingredients, steps, resolutions };
+  queryOneMock.mockImplementation(async (table: string) => {
+    if (table === 'recipe_exports') return cfg.exportDetail ?? null;
+    if (table === 'recipes') return cfg.recipeHeader ?? null;
+    throw new Error(`unexpected single table ${table}`);
+  });
+  queryAllMock.mockImplementation(async (table: string) => {
+    if (table === 'recipe_ingredients') return cfg.ingredientRows ?? [];
+    if (table === 'recipe_steps') return cfg.stepRows ?? [];
+    if (table === 'ingredient_resolutions') return cfg.resolutionRows ?? [];
+    throw new Error(`unexpected list table ${table}`);
+  });
 }
 
 function renderBrowser(client: QueryClient) {
@@ -102,12 +69,14 @@ function makeClient() {
 }
 
 beforeEach(() => {
-  fromMock.mockReset();
+  queryTableMock.mockReset();
+  queryOneMock.mockReset();
+  queryAllMock.mockReset();
 });
 
 describe('<ExportsBrowser>', () => {
   it('lists frozen recipe_exports rows', async () => {
-    mockSupabase({
+    mockApi({
       exportListRows: [
         { id: 1, recipe_id: 10, recipe_slug: 'old-fashioned', recipe_ref: 'com.spiritolo/old-fashioned:v1', converter_version: 'v1', exported_at: '2026-07-01T00:00:00Z' },
       ],
@@ -118,7 +87,7 @@ describe('<ExportsBrowser>', () => {
   });
 
   it('selecting a frozen export shows its bundle JSON', async () => {
-    mockSupabase({
+    mockApi({
       exportListRows: [
         { id: 1, recipe_id: 10, recipe_slug: 'old-fashioned', recipe_ref: 'com.spiritolo/old-fashioned:v1', converter_version: 'v1', exported_at: '2026-07-01T00:00:00Z' },
       ],
@@ -138,7 +107,7 @@ describe('<ExportsBrowser>', () => {
   });
 
   it('generates an unvalidated on-demand preview for a recipe id typed into the preview panel', async () => {
-    mockSupabase({
+    mockApi({
       exportListRows: [],
       recipeHeader: {
         id: 42, title: 'Negroni', canonical_name: 'negroni', recipe_slug: null,

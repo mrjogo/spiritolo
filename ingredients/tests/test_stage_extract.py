@@ -5,7 +5,6 @@ from __future__ import annotations
 import gzip
 import hashlib
 
-import psycopg
 import pytest
 
 from ingredients.pipeline.corpus import CorpusMiss
@@ -31,21 +30,21 @@ class _FakeCorpus:
 
 
 @pytest.fixture()
-def conn(test_db_url: str):
-    with psycopg.connect(test_db_url, autocommit=True) as c:
+def conn(db_conn):
+    if (c := db_conn) is not None:
         for t in ("recipes", "pages", "job_items"):
-            c.execute(f"truncate {t} restart identity cascade")
+            c.execute(f"delete from {t}")
         yield c
         extract.set_corpus_reader(None)
         for t in ("recipes", "pages", "job_items"):
-            c.execute(f"truncate {t} restart identity cascade")
+            c.execute(f"delete from {t}")
 
 
 def _page(conn, url, content_type="likely_drink_recipe", key=None):
     if key is None:
         key = hashlib.sha256(url.encode()).hexdigest()
     conn.execute(
-        "insert into pages (url, site, corpus_key, content_type) values (%s, 'ex', %s, %s)",
+        "insert into pages (url, site, corpus_key, content_type) values (?, 'ex', ?, ?)",
         (url, key, content_type),
     )
     return key
@@ -63,7 +62,7 @@ def test_extract_writes_recipe_from_jsonld(conn):
     assert counts["extracted"] == 1
 
     row = conn.execute(
-        "select site, title, author, image_url, source from recipes where source_url=%s", (url,)
+        "select site, title, author, image_url, source from recipes where source_url=?", (url,)
     ).fetchone()
     assert row[0] == "ex" and row[1] == "Daiquiri" and row[2] == "Bar"
     assert row[3] == "https://i/x.jpg"

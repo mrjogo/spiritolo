@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { TaxonomyNode } from './shapeData';
 import { TX_BROWN_INK, TX_BROWN_MID, TX_FRAME_EDGE } from './palette';
-import { supabase } from '../../supabase';
+import { api } from '../../api';
 import { EditableField } from '../../ui/EditableField';
 import { AliasChipEditor } from './AliasChipEditor';
 import { NODE_KIND_OPTIONS, DEFAULT_ROLE_OPTIONS } from './schemas';
@@ -32,8 +32,6 @@ interface Props {
 }
 
 type RecipeLink = { id: number; name: string | null; site: string };
-
-const RECIPES_SELECT = 'recipe_id, recipes(id, name, site)';
 
 // Match EditableField/AliasChipEditor row layout for the few static rows
 // that don't go through those components (just the read-only ID).
@@ -87,31 +85,14 @@ export function NodeCard({ node, mode, onDismiss, onEditField, onEditParents, on
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setRecipes(null);
     setRecipesError(null);
-    supabase
-      .from('recipe_ingredients')
-      .select(RECIPES_SELECT)
-      .eq('taxonomy_node_id', node.id)
-      .order('recipe_id', { ascending: true })
-      .then(({ data, error }) => {
+    api<RecipeLink[]>(`/api/taxonomy/${node.id}/recipes`)
+      .then((rows) => {
         if (cancelled) return;
-        if (error) {
-          setRecipesError(error.message);
-          return;
-        }
-        const seen = new Set<number>();
-        const out: RecipeLink[] = [];
-        for (const row of (data ?? []) as unknown as Array<{ recipe_id: number; recipes: { id: number; name: string | null; site: string } | null }>) {
-          if (!row.recipes) continue;
-          if (seen.has(row.recipes.id)) continue;
-          seen.add(row.recipes.id);
-          out.push(row.recipes);
-        }
-        out.sort((a, b) => {
-          const sa = a.site.localeCompare(b.site);
-          if (sa !== 0) return sa;
-          return (a.name ?? '').localeCompare(b.name ?? '');
-        });
-        setRecipes(out);
+        setRecipes(rows);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setRecipesError(err instanceof Error ? err.message : String(err));
       });
     return () => { cancelled = true; };
   }, [mode, node.id, node.recipe_count]);

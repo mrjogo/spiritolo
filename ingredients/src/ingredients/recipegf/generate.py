@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-import psycopg
+from common.db import Connection, jlist, jload
 from recipegf import RecipeId, format_ingredient_ref, format_recipe_id
 from recipegf.ingredient_ref import IngredientRef
 
@@ -52,13 +52,13 @@ _HEADER_COLS = "id, title, canonical_name, recipe_slug, equipment, source_url"
 def _header_from_row(row: tuple[Any, ...]) -> dict[str, Any]:
     return {
         "id": row[0], "title": row[1], "canonical_name": row[2],
-        "recipe_slug": row[3], "equipment": list(row[4] or []), "source_url": row[5],
+        "recipe_slug": row[3], "equipment": list(jload(row[4], []) or []), "source_url": row[5],
     }
 
 
-def _load_header(conn: psycopg.Connection, recipe_id: int) -> dict[str, Any] | None:
+def _load_header(conn: Connection, recipe_id: int) -> dict[str, Any] | None:
     row = conn.execute(
-        f"select {_HEADER_COLS} from recipes where id = %s", (recipe_id,)
+        f"select {_HEADER_COLS} from recipes where id = ?", (recipe_id,)
     ).fetchone()
     return _header_from_row(row) if row is not None else None
 
@@ -71,7 +71,7 @@ _INGREDIENT_COLS = (
 _INGREDIENT_JOIN = (
     "from recipe_ingredients ri "
     "left join ingredient_resolutions ir "
-    "on ir.normalized_name = lower(btrim(ri.name))"
+    "on ir.normalized_name = lower(trim(ri.name))"
 )
 
 
@@ -98,17 +98,18 @@ def _ingredients_from_rows(rows: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
             "ref": format_ingredient_ref(IngredientRef(RECIPE_AUTHORITY, slug)),
             "quantity": quantity,
         }
+        modifiers = jload(modifiers, []) if isinstance(modifiers, str) else modifiers
         if modifiers:
             ingredient["modifiers"] = list(modifiers)
         ingredients.append(ingredient)
     return ingredients
 
 
-def _load_ingredients(conn: psycopg.Connection, recipe_id: int) -> list[dict[str, Any]]:
+def _load_ingredients(conn: Connection, recipe_id: int) -> list[dict[str, Any]]:
     """RecipeGF ingredient objects for one recipe (see _ingredients_from_rows)."""
     rows = conn.execute(
         f"select {_INGREDIENT_COLS} {_INGREDIENT_JOIN} "
-        "where ri.recipe_id = %s order by ri.position",
+        "where ri.recipe_id = ? order by ri.position",
         (recipe_id,),
     ).fetchall()
     return _ingredients_from_rows(rows)
@@ -119,6 +120,8 @@ def _steps_from_rows(rows: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
     order). Pure (no DB)."""
     steps: list[dict[str, Any]] = []
     for verb, roles, result, modifiers in rows:
+        roles = jload(roles, {}) if isinstance(roles, str) else roles
+        modifiers = jload(modifiers, []) if isinstance(modifiers, str) else modifiers
         step: dict[str, Any] = {"verb": verb, **(roles or {}), "result": result}
         if modifiers:
             step["modifiers"] = list(modifiers)
@@ -126,10 +129,10 @@ def _steps_from_rows(rows: list[tuple[Any, ...]]) -> list[dict[str, Any]]:
     return steps
 
 
-def _load_steps(conn: psycopg.Connection, recipe_id: int) -> list[dict[str, Any]]:
+def _load_steps(conn: Connection, recipe_id: int) -> list[dict[str, Any]]:
     rows = conn.execute(
         "select verb, roles, result, modifiers "
-        "from recipe_steps where recipe_id = %s order by step_index",
+        "from recipe_steps where recipe_id = ? order by step_index",
         (recipe_id,),
     ).fetchall()
     return _steps_from_rows(rows)
@@ -170,7 +173,7 @@ def _build_recipe_bundle(
 
 
 def generate_bundle(
-    conn: psycopg.Connection,
+    conn: Connection,
     recipe_id: int,
     *,
     imported_at: str,
@@ -200,7 +203,7 @@ def generate_bundle(
 
 
 def generate_bundles(
-    conn: psycopg.Connection,
+    conn: Connection,
     recipe_ids: list[int],
     *,
     imported_at: str,
@@ -222,21 +225,23 @@ def generate_bundles(
     headers = {
         row[0]: _header_from_row(row)
         for row in conn.execute(
-            f"select {_HEADER_COLS} from recipes where id = any(%s)", (ids,)
+            f"select {_HEADER_COLS} from recipes where id in (select value from json_each(?))",
+            (jlist(ids),),
         ).fetchall()
     }
     ingredients_by_recipe: dict[int, list[tuple[Any, ...]]] = {}
     for row in conn.execute(
         f"select ri.recipe_id, {_INGREDIENT_COLS} {_INGREDIENT_JOIN} "
-        "where ri.recipe_id = any(%s) order by ri.recipe_id, ri.position",
-        (ids,),
+        "where ri.recipe_id in (select value from json_each(?)) order by ri.recipe_id, ri.position",
+        (jlist(ids),),
     ).fetchall():
         ingredients_by_recipe.setdefault(row[0], []).append(row[1:])
     steps_by_recipe: dict[int, list[tuple[Any, ...]]] = {}
     for row in conn.execute(
         "select recipe_id, verb, roles, result, modifiers "
-        "from recipe_steps where recipe_id = any(%s) order by recipe_id, step_index",
-        (ids,),
+        "from recipe_steps where recipe_id in (select value from json_each(?)) "
+        "order by recipe_id, step_index",
+        (jlist(ids),),
     ).fetchall():
         steps_by_recipe.setdefault(row[0], []).append(row[1:])
 

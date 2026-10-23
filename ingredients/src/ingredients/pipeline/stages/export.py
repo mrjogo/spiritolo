@@ -16,8 +16,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-import psycopg
-from psycopg.types.json import Json
+from common.db import Connection, jdump
 
 from ingredients.recipegf.bundle import BundleError
 from ingredients.recipegf.generate import UnresolvedIngredient, generate_bundles
@@ -31,22 +30,23 @@ STAGE = "export-recipegf"
 _FREEZE_EXPORT_SQL = """
     insert into recipe_exports
         (recipe_id, recipe_slug, recipe_ref, converter_version, bundle)
-    values (%s, %s, %s, %s, %s)
+    values (?, ?, ?, ?, ?)
     on conflict (recipe_id, converter_version) do update set
         recipe_slug = excluded.recipe_slug,
         recipe_ref  = excluded.recipe_ref,
         bundle      = excluded.bundle,
-        exported_at = now()
+        exported_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
 """
 
 _FREEZE_SLUG_SQL = (
-    "update recipes set recipe_slug = %s where id = %s and recipe_slug is distinct from %s"
+    "update recipes set recipe_slug = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') "
+    "where id = ? and recipe_slug is not ?"
 )
 
 
 def export_stage_fn(
     job: dict[str, Any],
-    conn: psycopg.Connection,
+    conn: Connection,
     providers: Any,
     *,
     chunk_size: int = base.CHUNK_SIZE,
@@ -105,7 +105,7 @@ def export_stage_fn(
                     recipe = bundle["recipe"]
                     slug = bundle["meta"]["slug"]
                     export_rows.append(
-                        (recipe_id, slug, recipe["id"], CONVERTER_VERSION, Json(bundle))
+                        (recipe_id, slug, recipe["id"], CONVERTER_VERSION, jdump(bundle))
                     )
                     slug_updates.append((slug, recipe_id, slug))
                     outcome = "resolved"

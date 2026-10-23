@@ -1,6 +1,6 @@
 import { useQuery, keepPreviousData } from '@tanstack/react-query';
-import { supabase } from '../../supabase';
-import { useRpc } from '../hooks/useRpc';
+import { api, type Page } from '../../api';
+import { useApiMutation } from '../hooks/useApiMutation';
 import type { PFilter } from './filter';
 import { serializeSort, type Facets, type Sort } from './useRunItems';
 
@@ -15,8 +15,7 @@ export interface EligibleRow {
   status: string;
   /** Optional richer status detail, e.g. "flagged · 2 names". */
   status_detail?: string;
-  last_run_label?: string;
-  total_count?: number;
+  last_run_label?: string | null;
 }
 
 export interface UseEligiblePoolResult {
@@ -27,13 +26,7 @@ export interface UseEligiblePoolResult {
   pending: boolean;
 }
 
-function readTotal(rows: EligibleRow[]): number {
-  if (rows.length === 0) return 0;
-  const stamped = rows[0].total_count;
-  return typeof stamped === 'number' ? stamped : rows.length;
-}
-
-// Reads a page of the eligible pool via eligible_pool + eligible_pool_facets.
+// Reads a page of the eligible pool (POST /api/ops/eligible-pool) + its facets.
 // keepPreviousData holds the prior page on screen while a filter change loads,
 // so the JIRA-style facet counts don't flash empty.
 export function useEligiblePool(
@@ -48,36 +41,21 @@ export function useEligiblePool(
   const poolQuery = useQuery({
     queryKey: ['eligiblePool', stage, pFilter, sort, page, pageSize],
     placeholderData: keepPreviousData,
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc('eligible_pool', {
-        stage,
-        p_filter: pFilter,
-        sort: serializeSort(sort),
-        limit: pageSize,
-        offset,
-      });
-      if (error) throw error;
-      return (data as EligibleRow[] | null) ?? [];
-    },
+    queryFn: () =>
+      api<Page<EligibleRow>>('/api/ops/eligible-pool', {
+        body: { stage, filter: pFilter, sort: serializeSort(sort), limit: pageSize, offset },
+      }),
   });
 
   const facetsQuery = useQuery({
     queryKey: ['eligiblePoolFacets', stage, pFilter],
     placeholderData: keepPreviousData,
-    queryFn: async () => {
-      const { data, error } = await supabase.rpc('eligible_pool_facets', {
-        stage,
-        p_filter: pFilter,
-      });
-      if (error) throw error;
-      return (data as Facets | null) ?? {};
-    },
+    queryFn: () => api<Facets>('/api/ops/eligible-pool/facets', { body: { stage, filter: pFilter } }),
   });
 
-  const rows = poolQuery.data ?? [];
   return {
-    rows,
-    total: readTotal(rows),
+    rows: poolQuery.data?.rows ?? [],
+    total: poolQuery.data?.total ?? 0,
     facets: facetsQuery.data ?? {},
     status: poolQuery.isError ? 'error' : poolQuery.isPending ? 'loading' : 'loaded',
     pending: poolQuery.isFetching && !poolQuery.isPending,
@@ -89,17 +67,23 @@ export function useEligiblePool(
 type AddByIdsArgs = { job_id: number; entity_type: string; entity_ids: string[] };
 type AddByFilterArgs = { job_id: number; p_filter: PFilter };
 
-/** add_run_items(job_id, entity_type, entity_ids[]) — the explicit selection. */
+/** POST /api/ops/runs/:id/items {entity_type, entity_ids} — the explicit selection. */
 export function useAddRunItems(jobId: number) {
-  return useRpc<AddByIdsArgs, number>('add_run_items', {
-    invalidate: [['run', jobId], ['runItems'], ['runItemsFacets']],
-  });
+  return useApiMutation<AddByIdsArgs, number>(
+    async (a) => (await api<{ added: number }>(`/api/ops/runs/${a.job_id}/items`, {
+      body: { entity_type: a.entity_type, entity_ids: a.entity_ids },
+    })).added,
+    { invalidate: [['run', jobId], ['runItems'], ['runItemsFacets']] },
+  );
 }
 
-/** add_run_items_by_filter(job_id, p_filter) — the "all N matching" path,
- *  where the server re-derives the set from the filter. */
+/** POST /api/ops/runs/:id/items {filter} — the "all N matching" path, where
+ *  the server re-derives the set from the filter. */
 export function useAddRunItemsByFilter(jobId: number) {
-  return useRpc<AddByFilterArgs, number>('add_run_items_by_filter', {
-    invalidate: [['run', jobId], ['runItems'], ['runItemsFacets']],
-  });
+  return useApiMutation<AddByFilterArgs, number>(
+    async (a) => (await api<{ added: number }>(`/api/ops/runs/${a.job_id}/items`, {
+      body: { filter: a.p_filter },
+    })).added,
+    { invalidate: [['run', jobId], ['runItems'], ['runItemsFacets']] },
+  );
 }

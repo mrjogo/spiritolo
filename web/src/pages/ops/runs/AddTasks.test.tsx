@@ -5,13 +5,10 @@ import type { ReactNode } from 'react';
 import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-const fromMock = vi.fn();
-const rpcMock = vi.fn();
-vi.mock('../../../supabase', () => ({
-  supabase: {
-    from: (table: string) => fromMock(table),
-    rpc: (fn: string, args: unknown) => rpcMock(fn, args),
-  },
+const apiMock = vi.fn();
+vi.mock('../../../api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../api')>()),
+  api: (...args: unknown[]) => apiMock(...args),
 }));
 
 import { AddTasks } from './AddTasks';
@@ -33,8 +30,8 @@ const RUN = {
 };
 
 const POOL_ROWS = [
-  { entity_id: '1', title: 'Oaxaca Old Fashioned', source: 'diffordsguide', status: 'flagged', status_detail: 'flagged · 1 name', last_run_label: '#814 · Jul 12', total_count: 1139 },
-  { entity_id: '2', title: 'Paper Plane', source: 'diffordsguide', status: 'flagged', status_detail: 'flagged · 2 names', last_run_label: '#814 · Jul 12', total_count: 1139 },
+  { entity_id: '1', title: 'Oaxaca Old Fashioned', source: 'diffordsguide', status: 'flagged', status_detail: 'flagged · 1 name', last_run_label: '#814 · Jul 12' },
+  { entity_id: '2', title: 'Paper Plane', source: 'diffordsguide', status: 'flagged', status_detail: 'flagged · 2 names', last_run_label: '#814 · Jul 12' },
 ];
 
 const FACETS = {
@@ -42,23 +39,15 @@ const FACETS = {
   source: { diffordsguide: 900, punch: 239 },
 };
 
-function installMocks() {
-  fromMock.mockImplementation((table: string) => {
-    if (table === 'runs') {
-      return {
-        select: () => ({
-          eq: () => ({ maybeSingle: () => Promise.resolve({ data: RUN, error: null }) }),
-        }),
-      };
-    }
-    throw new Error(`unexpected table ${table}`);
-  });
-  rpcMock.mockImplementation((fn: string) => {
-    if (fn === 'eligible_pool') return Promise.resolve({ data: POOL_ROWS, error: null });
-    if (fn === 'eligible_pool_facets') return Promise.resolve({ data: FACETS, error: null });
-    if (fn === 'add_run_items') return Promise.resolve({ data: 2, error: null });
-    if (fn === 'add_run_items_by_filter') return Promise.resolve({ data: 1139, error: null });
-    throw new Error(`unexpected rpc ${fn}`);
+// Dispatch by endpoint: the run header, the eligible pool + facets, and the
+// two add-items calls (explicit ids vs. "all matching" by filter).
+function installMocks(run: typeof RUN = RUN) {
+  apiMock.mockImplementation(async (path: string, init?: { body?: Record<string, unknown> }) => {
+    if (path === '/api/ops/runs/142') return run;
+    if (path === '/api/ops/eligible-pool') return { rows: POOL_ROWS, total: 1139 };
+    if (path === '/api/ops/eligible-pool/facets') return FACETS;
+    if (path === '/api/ops/runs/142/items') return { added: init?.body?.filter ? 1139 : 2 };
+    throw new Error(`unexpected call ${path}`);
   });
 }
 
@@ -79,8 +68,7 @@ function renderAt(path = '/ops/runs/142/add') {
 }
 
 beforeEach(() => {
-  fromMock.mockReset();
-  rpcMock.mockReset();
+  apiMock.mockReset();
   installMocks();
 });
 
@@ -115,9 +103,9 @@ describe('<AddTasks>', () => {
     await userEvent.click(addBtn);
 
     await waitFor(() =>
-      expect(rpcMock).toHaveBeenCalledWith(
-        'add_run_items',
-        expect.objectContaining({ job_id: 142, entity_type: 'recipe', entity_ids: ['1'] }),
+      expect(apiMock).toHaveBeenCalledWith(
+        '/api/ops/runs/142/items',
+        { body: { entity_type: 'recipe', entity_ids: ['1'] } },
       ),
     );
     // Navigates back to the run detail landing.
@@ -126,19 +114,7 @@ describe('<AddTasks>', () => {
 
   it('adds taxonomy_node items for a combine-nodes run', async () => {
     // A node-harmonization run points its items at taxonomy nodes, not recipes.
-    fromMock.mockImplementation((table: string) => {
-      if (table === 'runs') {
-        return {
-          select: () => ({
-            eq: () => ({
-              maybeSingle: () =>
-                Promise.resolve({ data: { ...RUN, stage: 'combine-nodes' }, error: null }),
-            }),
-          }),
-        };
-      }
-      throw new Error(`unexpected table ${table}`);
-    });
+    installMocks({ ...RUN, stage: 'combine-nodes' });
     renderAt();
     await screen.findByText('Oaxaca Old Fashioned');
 
@@ -146,9 +122,9 @@ describe('<AddTasks>', () => {
     await userEvent.click(await screen.findByRole('button', { name: /Add 1 to run/ }));
 
     await waitFor(() =>
-      expect(rpcMock).toHaveBeenCalledWith(
-        'add_run_items',
-        expect.objectContaining({ job_id: 142, entity_type: 'taxonomy_node', entity_ids: ['1'] }),
+      expect(apiMock).toHaveBeenCalledWith(
+        '/api/ops/runs/142/items',
+        { body: { entity_type: 'taxonomy_node', entity_ids: ['1'] } },
       ),
     );
   });
