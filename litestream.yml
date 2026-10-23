@@ -3,8 +3,8 @@
 # file serves staging and any future environment:
 #   LITESTREAM_REPLICA_URL          s3://<bucket>/spiritolo     (non-secret variable)
 #   LITESTREAM_ENDPOINT             the bucket's S3 endpoint     (non-secret variable)
-#   LITESTREAM_ACCESS_KEY_ID        }  resolved by `op run` from the vault
-#   LITESTREAM_SECRET_ACCESS_KEY    }  (never set as plain Railway variables)
+#   LITESTREAM_ACCESS_KEY_ID        }  reference variables from the attached
+#   LITESTREAM_SECRET_ACCESS_KEY    }  Railway bucket (never literal values)
 # The nightly VACUUM INTO snapshot is a separate, operator-driven safety net
 # (scripts/snapshot-sqlite.sh); Litestream is the continuous one.
 dbs:

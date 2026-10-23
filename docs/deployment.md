@@ -56,17 +56,17 @@ Non-secret configuration is plain Railway variables on the service:
 | `STATIC_DIR` | `/app/web/dist` (image default) |
 | `RUN_EXECUTOR` | `1` |
 | `LOG_LEVEL` | `INFO` |
-| `LITESTREAM_REPLICA_URL` | `s3://<litestream bucket>/spiritolo` |
-| `LITESTREAM_ENDPOINT` | the bucket's S3 endpoint |
-| `AWS_ENDPOINT_URL`, `AWS_S3_BUCKET_NAME`, `AWS_DEFAULT_REGION`, `AWS_S3_URL_STYLE` | the HTML corpus bucket (read by the extract stage) |
+| `LITESTREAM_REPLICA_URL` | `s3://spiritolo-litestream/spiritolo` |
+| `LITESTREAM_ENDPOINT`, `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY` | reference variables from the attached `spiritolo-litestream` bucket |
+| `AWS_ENDPOINT_URL`, `AWS_S3_BUCKET_NAME`, `AWS_DEFAULT_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_URL_STYLE` | reference variables from the attached `spiritolo-corpus` bucket (read by the extract stage) |
 | `OLLAMA_BASE_URL`, `TAILSCALE_AUTHKEY` | only if a tailnet Ollama is used |
 
 Secrets never live in Railway variables. [`secrets.env`](../secrets.env) holds
 `op://vault/item/field` references; the entrypoint runs the app under
 `op run --env-file /app/secrets.env` when `OP_SERVICE_ACCOUNT_TOKEN` is set,
 which is the service's only sealed variable. The referenced items are the
-session-cookie secret, the hosted-LLM API keys, the Litestream bucket keys and
-the corpus bucket keys. Without the token (local docker runs) the process boots
+session-cookie secret, the hosted-LLM API keys and the Tailscale key. Bucket
+credentials are Railway reference variables, not vault items. Without the token (local docker runs) the process boots
 with whatever the environment already has.
 
 ## Auth

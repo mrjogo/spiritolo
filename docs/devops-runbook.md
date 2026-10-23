@@ -39,33 +39,41 @@ restart policy come from `railway.json`; the API also accepts them via
 ## 2. Buckets
 
 Two S3-compatible Railway buckets (project-token API access cannot create
-buckets, so this is a dashboard step):
+buckets, so this is a dashboard step). Their credentials never go in the
+vault: attach each bucket to the service with **Bucket → Credentials → Add to
+service**, which injects the keys and endpoint as **reference variables**
+(auto-rotating, never visible to Claude).
 
-- **Litestream replica** — new bucket, e.g. `spiritolo-litestream`. Litestream
-  writes `s3://<bucket>/spiritolo/…`.
-- **HTML corpus** — the existing `spiritolo-corpus` bucket (page HTML the
-  extract stage reads). It currently lives in the old Railway project; either
-  reuse it (put its credentials in the vault) or create a new one and copy the
-  objects over.
-
-For each bucket, open **Credentials** once and put the access key id + secret
-into the vault (step 3). Do **not** add them to the service as variables.
+- **Litestream replica** — `spiritolo-litestream`. Litestream reads
+  `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY`,
+  `LITESTREAM_ENDPOINT` and `LITESTREAM_REPLICA_URL`
+  (`s3://spiritolo-litestream/spiritolo`). If the attach dialog only offers
+  the `AWS_*` naming style, attach it anyway and map the names with reference
+  variables (`LITESTREAM_ACCESS_KEY_ID=${{ … }}`), or ask Claude to adapt
+  `litestream.yml` to the names Railway created.
+- **HTML corpus** — the existing `spiritolo-corpus` bucket lives in the old
+  Railway project and cannot be referenced across projects. Create
+  `spiritolo-corpus` in this project, attach it in the **AWS SDK (Generic)**
+  style (`AWS_ENDPOINT_URL`, `AWS_S3_BUCKET_NAME`, `AWS_DEFAULT_REGION`,
+  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, read by
+  `ingredients/pipeline/corpus.py`), and copy the objects over once (e.g.
+  `rclone sync` with both buckets' credentials in a local shell). The corpus
+  is only read by future `extract-recipe` runs — migrated recipes already
+  carry their `source` — so the copy can follow the cut-over.
 
 ## 3. 1Password vault
 
-Create a vault for the service and the items `secrets.env` references (names
-are the spec defaults — if yours differ, edit `secrets.env`, not the vault):
+One vault (`spiritolo-prod`) of **API Credential** items named after the env
+var, field `credential`, read by `secrets.env`:
 
-| Reference | Holds |
+| Item | Holds |
 |---|---|
-| `op://spiritolo/app/session-secret` | a long random string (`openssl rand -base64 48`) |
-| `op://spiritolo/llm/anthropic-api-key`, `…/openai-api-key`, `…/deepseek-api-key` | hosted LLM keys (omit a line in `secrets.env` for a provider you don't use) |
-| `op://spiritolo/litestream-bucket/access-key-id`, `…/secret-access-key` | the Litestream bucket credentials |
-| `op://spiritolo/corpus-bucket/access-key-id`, `…/secret-access-key` | the corpus bucket credentials |
+| `SESSION_SECRET` | a long random string (`openssl rand -base64 48`) |
+| `DEEPSEEK_API_KEY` (and optionally `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) | hosted LLM keys; `secrets.env` lists only the items that exist, since `op run` fails on a missing reference |
+| `TAILSCALE_AUTHKEY` | the Tailscale OAuth client secret (tag `tag:worker`), if a tailnet Ollama is used |
 
-Then create a **service account** (1Password → Developer → Service accounts)
-with read access to that vault only, and copy its token: that is
-`OP_SERVICE_ACCOUNT_TOKEN`.
+A **service account** (1Password → Developer → Service accounts) with read
+access to that vault only gives `OP_SERVICE_ACCOUNT_TOKEN`.
 
 ## 4. Service variables
 
@@ -77,17 +85,17 @@ SPIRITOLO_DB=/data/spiritolo.db
 STATIC_DIR=/app/web/dist
 RUN_EXECUTOR=1
 LOG_LEVEL=INFO
-LITESTREAM_REPLICA_URL=s3://<litestream bucket>/spiritolo
-LITESTREAM_ENDPOINT=<litestream bucket S3 endpoint>
-AWS_ENDPOINT_URL=<corpus bucket S3 endpoint>
-AWS_S3_BUCKET_NAME=spiritolo-corpus
-AWS_DEFAULT_REGION=<corpus bucket region>
-AWS_S3_URL_STYLE=path
+LITESTREAM_REPLICA_URL=s3://spiritolo-litestream/spiritolo
 ```
 
-Optional: `OLLAMA_BASE_URL=http://barbot:11434` + `TAILSCALE_AUTHKEY` (a
-Tailscale OAuth client secret tagged `tag:worker`) if a run should use a
-tailnet Ollama; the entrypoint only starts tailscaled when the key is present.
+Reference variables from the attached buckets (step 2): `LITESTREAM_ENDPOINT`,
+`LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY`, and the corpus
+bucket's `AWS_ENDPOINT_URL`, `AWS_S3_BUCKET_NAME`, `AWS_DEFAULT_REGION`,
+`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (+ `AWS_S3_URL_STYLE=path`).
+
+Optional: `OLLAMA_BASE_URL=http://barbot:11434` for a tailnet Ollama; the
+entrypoint only starts tailscaled when `TAILSCALE_AUTHKEY` resolves from the
+vault.
 
 One **sealed** variable: `OP_SERVICE_ACCOUNT_TOKEN`. With it set the entrypoint
 runs everything under `op run`, so every `secrets.env` line resolves; without

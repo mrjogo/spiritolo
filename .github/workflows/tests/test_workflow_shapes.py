@@ -154,8 +154,11 @@ def test_secrets_env_holds_only_op_references():
         assert re.fullmatch(r"[A-Z0-9_]+", name), f"odd variable name {name!r}"
         assert value.startswith("op://"), f"{name} must be an op:// reference, got {value!r}"
     names = {ln.partition("=")[0] for ln in env.splitlines() if ln and not ln.startswith("#")}
-    assert {"SESSION_SECRET", "LITESTREAM_ACCESS_KEY_ID", "LITESTREAM_SECRET_ACCESS_KEY",
-            "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"} <= names
+    assert "SESSION_SECRET" in names
+    # Bucket credentials are Railway reference variables, never vault items.
+    for name in ("LITESTREAM_ACCESS_KEY_ID", "LITESTREAM_SECRET_ACCESS_KEY",
+                 "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+        assert name not in names, f"{name} must come from the attached Railway bucket, not the vault"
 
 
 # --------------------------------------------------------------------------- #
