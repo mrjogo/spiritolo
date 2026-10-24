@@ -56,8 +56,8 @@ RUN if [ -n "$RECIPEGF_TOKEN" ]; then \
 COPY --from=web /web/dist /app/web/dist
 COPY litestream.yml /etc/litestream.yml
 COPY secrets.env /app/secrets.env
-COPY scripts/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY scripts/entrypoint.sh scripts/run-app.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/run-app.sh
 
 ENV SPIRITOLO_DB=/data/spiritolo.db \
     IMPORT_RESTART=1 \

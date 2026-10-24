@@ -81,7 +81,7 @@ def test_dockerfile_bakes_no_secrets():
     # The entrypoint and the secrets template are copied in; the runtime env
     # points at the volume and turns on restart-mode import.
     assert "COPY secrets.env /app/secrets.env" in df
-    assert "COPY scripts/entrypoint.sh" in df
+    assert "COPY scripts/entrypoint.sh scripts/run-app.sh" in df
     assert "SPIRITOLO_DB=/data/spiritolo.db" in df
     assert "IMPORT_RESTART=1" in df
 
@@ -116,11 +116,23 @@ def test_entrypoint_restores_then_replicates_with_uvicorn_as_child():
     sh = _text("scripts/entrypoint.sh")
     assert "litestream restore -if-replica-exists" in sh
     assert "litestream replicate -config /etc/litestream.yml" in sh
-    assert "-exec" in sh
-    assert "uvicorn spiritolo.main:app --factory" in sh
-    assert "--host 0.0.0.0" in sh
+    assert "-exec /usr/local/bin/run-app.sh" in sh
     # Without a replica URL it still boots (local docker runs).
     assert "LITESTREAM_REPLICA_URL" in sh
+    assert sh.count("/usr/local/bin/run-app.sh") == 2
+
+
+def test_run_app_wrapper_forwards_sigterm_and_exits_clean():
+    sh = _text("scripts/run-app.sh")
+    assert "uvicorn spiritolo.main:app --factory" in sh
+    assert "--host 0.0.0.0" in sh
+    assert "trap forward TERM INT" in sh
+    # SIGTERM from a redeploy is a clean shutdown, not a crash...
+    assert '-eq 143' in sh
+    # ...but the import feature's restart code must pass through untouched.
+    assert "exit \"$rc\"" in sh
+    df = _text("Dockerfile")
+    assert "scripts/run-app.sh" in df
 
 
 def test_entrypoint_tailscale_is_optional_and_userspace():

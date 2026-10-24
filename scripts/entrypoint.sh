@@ -62,10 +62,9 @@ run_with_secrets bash -c '
       echo "entrypoint: no database on the volume; restoring from the replica if one exists" >&2
       litestream restore -if-replica-exists -config /etc/litestream.yml "'"$DB_PATH"'" || true
     fi
-    exec litestream replicate -config /etc/litestream.yml \
-      -exec "uv run --no-sync --package spiritolo-app uvicorn spiritolo.main:app --factory --host 0.0.0.0 --port ${PORT:-8000}"
+    exec litestream replicate -config /etc/litestream.yml -exec /usr/local/bin/run-app.sh
   else
     echo "entrypoint: LITESTREAM_REPLICA_URL not set; running without replication" >&2
-    exec uv run --no-sync --package spiritolo-app uvicorn spiritolo.main:app --factory --host 0.0.0.0 --port "${PORT:-8000}"
+    exec /usr/local/bin/run-app.sh
   fi
 '

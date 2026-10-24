@@ -277,11 +277,19 @@ async def import_stage(request: Request) -> dict[str, Any]:
     expected = request.headers.get("x-content-sha256")
     if not expected:
         raise HTTPException(400, "X-Content-SHA256 header required")
-    chunks: list[bytes] = []
-    async for chunk in request.stream():
-        chunks.append(chunk)
+    paths = _paths(st)
     try:
-        info = await run_in_threadpool(importdb.stage, _paths(st), chunks, expected)
+        importdb.check_digest_header(expected)
+        # Stream the body straight to the .part file: the database is hundreds
+        # of MB and must never be buffered in process memory.
+        sink = importdb.open_partial(paths)
+        try:
+            async for chunk in request.stream():
+                sink.write(chunk)
+        except BaseException:
+            sink.abort()
+            raise
+        info = await run_in_threadpool(importdb.finish_stage, paths, sink, expected)
     except importdb.ImportError_ as exc:
         raise HTTPException(422, str(exc)) from None
     return {"staged": info}

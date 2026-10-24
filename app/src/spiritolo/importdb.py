@@ -104,22 +104,73 @@ def inspect(path: Path) -> dict[str, Any]:
 
 def stage(paths: Paths, chunks: Iterable[bytes], expected_sha256: str) -> dict[str, Any]:
     """Write ``chunks`` to the staged path once the digest matches and the
-    file verifies. Returns the stored info record."""
+    file verifies. Returns the stored info record. (Synchronous convenience
+    over :func:`open_partial` + :func:`finish_stage`; the HTTP handler
+    streams the body straight to disk instead of holding it in memory.)"""
+    check_digest_header(expected_sha256)
+    with open_partial(paths) as sink:
+        for chunk in chunks:
+            sink.write(chunk)
+    return finish_stage(paths, sink, expected_sha256)
+
+
+def check_digest_header(expected_sha256: str) -> str:
     expected = expected_sha256.strip().lower()
     if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):
         raise ImportError_("X-Content-SHA256 must be a 64-char hex digest")
+    return expected
+
+
+class PartialSink:
+    """The ``.import.part`` file being written: hashes and counts as it goes,
+    so a multi-hundred-MB upload never has to sit in memory."""
+
+    def __init__(self, paths: Paths) -> None:
+        self.paths = paths
+        self._digest = hashlib.sha256()
+        self.size = 0
+        self._f = open(paths.partial, "wb")
+
+    def write(self, chunk: bytes) -> None:
+        self._f.write(chunk)
+        self._digest.update(chunk)
+        self.size += len(chunk)
+
+    def close(self) -> None:
+        if not self._f.closed:
+            self._f.close()
+
+    def abort(self) -> None:
+        self.close()
+        self.paths.partial.unlink(missing_ok=True)
+
+    @property
+    def hexdigest(self) -> str:
+        return self._digest.hexdigest()
+
+    def __enter__(self) -> "PartialSink":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+        if exc_type is not None:
+            self.paths.partial.unlink(missing_ok=True)
+
+
+def open_partial(paths: Paths) -> PartialSink:
     paths.live.parent.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha256()
-    size = 0
-    with open(paths.partial, "wb") as f:
-        for chunk in chunks:
-            f.write(chunk)
-            digest.update(chunk)
-            size += len(chunk)
+    return PartialSink(paths)
+
+
+def finish_stage(paths: Paths, sink: PartialSink, expected_sha256: str) -> dict[str, Any]:
+    """Verify the fully written partial file and promote it to the staged
+    path. Removes the partial file on any failure."""
+    sink.close()
+    expected = check_digest_header(expected_sha256)
     try:
-        if size == 0:
+        if sink.size == 0:
             raise ImportError_("empty upload")
-        actual = digest.hexdigest()
+        actual = sink.hexdigest
         if actual != expected:
             raise ImportError_(f"digest mismatch: body is {actual}, header says {expected}")
         info = inspect(paths.partial)
