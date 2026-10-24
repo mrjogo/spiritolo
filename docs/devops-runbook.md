@@ -62,7 +62,7 @@ service**, which injects the keys and endpoint as **reference variables**
 
 ## 3. 1Password vault
 
-One vault (`spiritolo-staging`) of **Password** items named after the env
+One vault (`spiritolo-prod`) of **Password** items named after the env
 var, field `password`, read by `secrets.env`:
 
 | Item | Holds |
