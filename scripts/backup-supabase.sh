@@ -83,6 +83,7 @@ TS=$(date -u +%Y%m%d-%H%M%SZ)
 NAME="spiritolo-staging-${TS}"
 [[ -n "$LABEL" ]] && NAME="${NAME}-${LABEL}"
 OUT="${DEST}/${NAME}.dump"
+META="${OUT}.meta.json"
 
 cleanup_partial() {
   local rc=$?
@@ -104,8 +105,6 @@ pg_dump \
   --no-privileges \
   --compress=9 \
   --file="$OUT"
-
-META="${OUT}.meta.json"
 
 # Snapshot reference time T — captured AFTER pg_dump so any row updated
 # during the snapshot window has updated_at <= T.

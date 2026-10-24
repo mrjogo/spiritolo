@@ -29,6 +29,8 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
+          # pg_wrapper resolves `pg_dump` to the distro default (16); put 17 first.
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
       - name: Run backup script
         env:
@@ -38,6 +40,7 @@ jobs:
             echo "SUPABASE_STAGING_DB_URL is not set" >&2
             exit 1
           fi
+          pg_dump --version
           ./scripts/backup-supabase.sh
 
       - name: Upload dump + sidecar as workflow artifact
