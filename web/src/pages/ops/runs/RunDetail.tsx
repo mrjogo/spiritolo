@@ -52,7 +52,7 @@ export function RunDetail() {
   };
   const pFilter = buildPFilter(filterState);
 
-  const { rows, total, facets } = useRunItems(jobId, pFilter, DEFAULT_SORT, page, PAGE_SIZE);
+  const { rows, total, facets, status: itemsStatus } = useRunItems(jobId, pFilter, DEFAULT_SORT, page, PAGE_SIZE);
 
   const setLlm = useSetRunLlm(jobId ?? 0);
   const startRun = useStartRun(jobId ?? 0);
@@ -171,6 +171,7 @@ export function RunDetail() {
         runState={run.state}
         items={rows}
         total={total}
+        loading={itemsStatus === 'loading'}
         statusFacets={facets.status ?? {}}
         activeStatus={activeStatus}
         onStatus={(s) => { setActiveStatus(s); setPage(1); }}

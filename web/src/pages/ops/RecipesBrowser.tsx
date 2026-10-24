@@ -90,7 +90,7 @@ export function RecipesBrowser() {
   return (
     <div className="ops-recipes">
       <FilterBar onChange={(v) => { setFilters(v.filters); setPage(1); }} />
-      <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="recipes" />
+      <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="recipes" loading={status === 'loading'} />
       <SplitView
         list={({ select }) => (
           <DataTable

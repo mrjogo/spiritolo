@@ -4,6 +4,13 @@ import userEvent from '@testing-library/user-event';
 import { Pager } from './Pager';
 
 describe('<Pager>', () => {
+  it('shows a loader instead of a zero count while loading', () => {
+    render(<Pager page={1} pageSize={50} total={0} onPage={() => {}} unit="entries" loading />);
+    expect(screen.getByText('Loading…')).toBeInTheDocument();
+    expect(screen.queryByText(/of 0 entries/)).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Next/ })).toBeDisabled();
+  });
+
   it('shows the range and disables Prev on the first page', () => {
     render(<Pager page={1} pageSize={50} total={120} onPage={() => {}} unit="recipes" />);
     expect(screen.getByText('1–50 of 120 recipes')).toBeInTheDocument();

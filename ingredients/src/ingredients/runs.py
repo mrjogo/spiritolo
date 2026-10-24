@@ -251,19 +251,20 @@ def _eligible_base_sql(stage: str, filt: dict[str, Any]) -> tuple[str, list[Any]
         select j.entity_id, j.title, j.source, j.status, j.code_version, j.last_run
         from (
             select u.entity_id, u.title, u.source,
-                   coalesce(l.status, 'never_run') as status,
+                   coalesce(l.state, 'never_run') as status,
                    coalesce(l.code_version, '') as code_version,
-                   l.last_run
+                   coalesce(l.finished_at, l.started_at) as last_run
             from ({universe}) u
-            left join (
-                select entity_id, state as status, code_version, last_run from (
-                    select i.entity_id, i.state, i.code_version,
-                           coalesce(i.finished_at, i.started_at) as last_run,
-                           row_number() over (partition by i.entity_id order by i.id desc) as rn
-                    from job_items i
-                    where i.stage = ? and i.state in ('applied', 'flagged', 'failed')
-                ) where rn = 1
-            ) l on l.entity_id = u.entity_id
+            -- Latest terminal item per entity as a correlated lookup on
+            -- job_items_latest_idx (stage, entity_id, id desc). A window-function
+            -- subquery here gets materialized and then rescanned once per
+            -- entity under GROUP BY (the facet counts), which is quadratic.
+            left join job_items l on l.id = (
+                select i.id from job_items i
+                where i.stage = ? and i.entity_id = u.entity_id
+                  and i.state in ('applied', 'flagged', 'failed')
+                order by i.id desc limit 1
+            )
         ) j
         where 1 = 1
     """
