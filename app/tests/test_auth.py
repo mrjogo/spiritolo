@@ -142,3 +142,39 @@ def test_expired_invite_is_rejected(client, admin, db):
     client.cookies.clear()
     assert client.get(f"/api/auth/invite/{inv['token']}").status_code == 410
     assert client.post("/api/auth/register/options", json={"invite": inv["token"]}).status_code == 410
+
+
+def test_operator_removes_an_old_passkey_but_never_the_last(client):
+    k1 = SoftPasskey("localhost", "http://localhost:5173")
+    register(client, k1)
+    only = client.get("/api/auth/passkeys").json()[0]["credential_id"]
+    assert client.delete(f"/api/auth/passkeys/{only}").status_code == 409
+
+    k2 = SoftPasskey("localhost", "http://localhost:5173")
+    opts = client.post("/api/auth/register/options", json={})
+    assert client.post("/api/auth/register/verify", json={"credential": k2.create(opts.json())}).status_code == 200
+    assert client.delete("/api/auth/passkeys/nope").status_code == 404
+    assert client.delete(f"/api/auth/passkeys/{only}").status_code == 200
+    left = client.get("/api/auth/passkeys").json()
+    assert len(left) == 1 and left[0]["credential_id"] != only
+
+    # The removed key can no longer sign in; the remaining one can.
+    client.post("/api/auth/logout")
+    assert client.delete(f"/api/auth/passkeys/{left[0]['credential_id']}").status_code == 401
+    opts = client.post("/api/auth/login/options").json()
+    assert client.post("/api/auth/login/verify", json={"credential": k1.get(opts)}).status_code == 401
+    opts = client.post("/api/auth/login/options").json()
+    assert client.post("/api/auth/login/verify", json={"credential": k2.get(opts)}).status_code == 200
+
+
+def test_cannot_remove_another_operators_passkey(app, client, db):
+    key = SoftPasskey("localhost", "http://localhost:5173")
+    register(client, key)
+    theirs = client.get("/api/auth/passkeys").json()[0]["credential_id"]
+    client.post("/api/auth/logout")
+    from conftest import make_operator
+    other = make_operator(db, "dana", is_admin=False)
+    db.execute("insert into passkeys (credential_id, operator_id, public_key) values ('k2', ?, x'00')", (other,))
+    db.execute("insert into passkeys (credential_id, operator_id, public_key) values ('k3', ?, x'00')", (other,))
+    client.cookies.set(SESSION_COOKIE, app.state.spiritolo.sessions.token(other))
+    assert client.delete(f"/api/auth/passkeys/{theirs}").status_code == 404

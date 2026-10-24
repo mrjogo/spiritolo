@@ -19,7 +19,16 @@ export interface InviteResult {
   operator_id: number;
 }
 
+export interface PasskeyRow {
+  credential_id: string;
+  label: string | null;
+  transports: string[];
+  created_at: string;
+  last_used_at: string | null;
+}
+
 export const operatorsKey = ['ops', 'operators'] as const;
+export const myPasskeysKey = ['auth', 'passkeys'] as const;
 
 export function inviteUrl(path: string, origin: string = window.location.origin): string {
   return `${origin}${path}`;
