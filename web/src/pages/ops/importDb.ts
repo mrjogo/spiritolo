@@ -20,7 +20,9 @@ export interface ImportStatus {
 export const importStatusKey = ['importDb'] as const;
 
 export async function sha256Hex(data: ArrayBuffer): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', data);
+  // Hash through a view built in this realm: Node 20's WebCrypto (the test
+  // runtime) rejects an ArrayBuffer created by jsdom's Blob as foreign.
+  const digest = await crypto.subtle.digest('SHA-256', new Uint8Array(data));
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('');
 }
 
