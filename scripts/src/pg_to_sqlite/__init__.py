@@ -1,7 +1,7 @@
 """One-time ETL: a staging Supabase ``pg_dump`` → the SQLite schema.
 
-The input is the custom-format archive ``scripts/backup-supabase.sh`` writes
-(and the *Backup staging database* GitHub Action uploads). The ETL never
+The input is the custom-format archive the (since removed)
+``scripts/backup-supabase.sh`` / *Backup staging database* GitHub Action wrote. The ETL never
 connects to Postgres: ``pg_restore --data-only -f -`` turns the archive into
 plain SQL whose ``COPY … FROM stdin`` blocks are parsed here, each row is
 coerced from Postgres' COPY text encoding into the SQLite column shapes

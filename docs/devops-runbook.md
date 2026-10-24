@@ -128,8 +128,8 @@ public removes both.
 
 ## 7. Data migration (one time)
 
-The staging Supabase data is exported with the *Backup staging database*
-GitHub Action, converted with `scripts/pg_to_sqlite`, and loaded through
+The staging Supabase data was exported (2026-10-24) with the since-removed
+*Backup staging database* GitHub Action, converted with `scripts/pg_to_sqlite`, and loaded through
 **/ops → Import**. Full steps in [migration.md](migration.md).
 
 ## 8. Smoke the loop

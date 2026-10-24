@@ -171,7 +171,7 @@ Taxonomy nodes are managed on the live service via the curation UI (`/ops → Ta
 
 **Getting data out / in:** Litestream replicates continuously to a bucket (restore: [docs/backups.md](docs/backups.md)); `scripts/snapshot-sqlite.sh` takes a `VACUUM INTO` copy; `/ops → Import` (`POST /api/ops/import-db`) replaces the live file with an uploaded one after verifying it (digest, `integrity_check`, migration ledger) — in the container that exits the process so the entrypoint swaps the file before Litestream starts.
 
-**One-time data migration (Supabase → SQLite)** — the *Backup staging database* Action dumps the legacy Postgres, `scripts/pg_to_sqlite` converts the dump offline, `/ops → Import` loads it: [docs/migration.md](docs/migration.md).
+**One-time data migration (Supabase → SQLite)** — done 2026-10-24: the (since removed) *Backup staging database* Action dumped the legacy Postgres, `scripts/pg_to_sqlite` converts the dump offline, `/ops → Import` loads it: [docs/migration.md](docs/migration.md).
 
 ## Hosting
 
@@ -185,7 +185,7 @@ One Railway service in project **spiritolo-neo** (environment `production`, serv
 
 **Auth:** passkeys only (WebAuthn via `py_webauthn` + `@simplewebauthn/browser`), signed HttpOnly session cookie. First-time setup is open while `operators` is empty; afterwards a passkey is added by its signed-in owner or via a **registration link** (`/ops → Operators` → `operator_invites`: single-use, 7-day token, redeemed at `/login?invite=<token>` with no session). Passkeys are bound to `PUBLIC_ORIGIN`'s hostname, so mint a link *before* changing the origin or every operator is locked out. `operators.is_admin` gates `/ops`.
 
-**CI (PR → main):** `python-ci.yml` (common, ingredients, app, scripts suites; SQLite, no services), `web-ci.yml` (Vitest), `workflows-ci.yml` (shape tests over the deploy artifacts). `backup-staging-db.yml` is the legacy-Postgres export for the one-time migration and goes away with the Supabase project.
+**CI (PR → main):** `python-ci.yml` (common, ingredients, app, scripts suites; SQLite, no services), `web-ci.yml` (Vitest), `workflows-ci.yml` (shape tests over the deploy artifacts).
 
 **RecipeGF** is a private git dependency (`mrjogo/RecipeGF@v0.4.0`): the image build and `python-ci.yml` take a `RECIPEGF_TOKEN` (build arg / repo secret) unless the repo is public. Cloud AI sessions cannot clone it; they work against a local stub and must restore the real `recipegf` blocks in `uv.lock` before committing.
 
