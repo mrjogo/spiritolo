@@ -18,6 +18,7 @@ from typing import Any, Callable, Mapping
 
 from common.db import Connection
 
+import ingredients.pipeline.stages  # noqa: F401 -- registers every stage_fn into STAGE_FNS
 from ingredients.worker import runner
 from ingredients.worker.dispatch import STAGE_FNS
 
