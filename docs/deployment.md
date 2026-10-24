@@ -1,8 +1,11 @@
 # Deployment
 
 One Railway service, one environment. The Railway project is **spiritolo-neo**
-(environment `staging`, service `spiritolo`); there is no separate production
-environment yet, so staging doubles as the live demo.
+(environment `production`, service `spiritolo`). There is deliberately no
+standing staging environment: pipeline runs are one-shot and their results are
+the real data, so a second file would only mean a second import. If a code
+change ever needs a rehearsal, fork a Railway environment and let the
+entrypoint restore it from a Litestream replica (see [backups.md](backups.md)).
 
 ## What runs
 

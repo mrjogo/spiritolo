@@ -175,7 +175,7 @@ Taxonomy nodes are managed on the live service via the curation UI (`/ops → Ta
 
 ## Hosting
 
-One Railway service in project **spiritolo-neo** (environment `staging`, service `spiritolo`, volume at `/data`, domain `https://spiritolo-staging.up.railway.app`). No separate production environment yet. Full picture: [docs/deployment.md](docs/deployment.md); zero-to-deployed steps: [docs/devops-runbook.md](docs/devops-runbook.md).
+One Railway service in project **spiritolo-neo** (environment `production`, service `spiritolo`, volume at `/data`, domain `https://spiritolo-staging.up.railway.app` until the custom hostname moves over). It is the only hosted environment — Ruddick's data runs are one-shot and belong in the real data, so there is no standing staging; fork one from a Litestream restore if a change ever needs it. Full picture: [docs/deployment.md](docs/deployment.md); zero-to-deployed steps: [docs/devops-runbook.md](docs/devops-runbook.md).
 
 **Branches:** `main` is the integration trunk; PRs from `claude/<topic>-<id>` branches land there. The Railway service deploys from the branch set in its Settings → Source (a UI setting; the API refuses it to a project token). During the Supabase → Railway changeover that is the work branch `claude/project-thread-0e8m4j`; afterwards `main`. The old `staging` promotion branch and Vercel are gone.
 

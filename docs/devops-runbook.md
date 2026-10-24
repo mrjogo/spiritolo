@@ -1,7 +1,7 @@
 # DevOps runbook — zero to a running service
 
 One Railway service (`spiritolo`, project `spiritolo-neo`, environment
-`staging`) running the FastAPI app + executor over a SQLite file on a volume,
+`production`) running the FastAPI app + executor over a SQLite file on a volume,
 replicated by Litestream to a Railway bucket, with secrets read from a
 1Password vault at boot. No Postgres, no separate frontend host, no worker daemon.
 
@@ -22,7 +22,7 @@ repo: the Railway resources, the vault, and the few plain variables.
 
 1. Dashboard → **New project** → **GitHub Repo** → `mrjogo/spiritolo`. Name the
    project `spiritolo-neo`, the service `spiritolo`, and rename the
-   environment to `staging`.
+   environment to `production`.
 2. Service → **Settings → Source**: set the **deploy branch** (during the
    changeover: `claude/project-thread-0e8m4j`; afterwards `main`). Leave
    build/start commands empty — `railway.json` declares the Dockerfile builder
