@@ -1,6 +1,6 @@
 # Web CI — the Vitest PR gate for the Vite/React SPA (which otherwise runs only
 # via local `npm test`). Guards web/ against silent regression on a PR to main;
-# Vercel handles the actual deploys natively.
+# the build ships inside the Railway image (see Dockerfile).
 
 name: Web CI
 

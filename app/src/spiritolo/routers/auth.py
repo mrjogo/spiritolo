@@ -107,3 +107,12 @@ def passkeys(c: Connection = Depends(conn), op: A.Operator | None = Depends(curr
     if op is None:
         return []
     return A.list_passkeys(c, op.id)
+
+
+@router.delete("/passkeys/{credential_id}")
+def delete_passkey(credential_id: str, c: Connection = Depends(conn),
+                   op: A.Operator | None = Depends(current_operator)) -> dict[str, Any]:
+    if op is None:
+        raise HTTPException(401, "sign in first")
+    A.delete_passkey(c, op.id, credential_id)
+    return {"ok": True}
