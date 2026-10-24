@@ -16,6 +16,7 @@ from ingredients.reviews import ops as reviews
 from ingredients.taxonomy import curate
 from ingredients.taxonomy.ops import TaxonomyError
 
+from .. import auth as A
 from .. import importdb
 from ..auth import Operator
 from ..deps import AppState, conn, require_admin, state
@@ -33,6 +34,35 @@ def _run_error(exc: R.RunError) -> HTTPException:
 @router.post("/query")
 def query(spec: dict[str, Any], c: Connection = Depends(conn)) -> dict[str, Any]:
     return run_query(c, spec)
+
+
+# -------------------------------------------------------------- operators
+
+@router.get("/operators")
+def operators(c: Connection = Depends(conn)) -> list[dict[str, Any]]:
+    return A.list_operators(c)
+
+
+@router.post("/operators")
+def create_operator(body: dict[str, Any], c: Connection = Depends(conn)) -> dict[str, Any]:
+    op = A.create_operator(c, handle=str(body.get("handle") or ""),
+                           display_name=str(body.get("display_name") or ""),
+                           is_admin=bool(body.get("is_admin", False)))
+    return op.public()
+
+
+@router.post("/operators/{operator_id}/invites")
+def create_invite(operator_id: int, c: Connection = Depends(conn),
+                  me: Operator = Depends(require_admin)) -> dict[str, Any]:
+    """A single-use registration link for ``operator_id``, valid 7 days. It
+    needs no session, so it also works on a hostname the operator has no
+    passkey for yet (the hostname-move case)."""
+    return A.create_invite(c, operator_id=operator_id, created_by=me.id)
+
+
+@router.delete("/operators/{operator_id}/invites")
+def revoke_invites(operator_id: int, c: Connection = Depends(conn)) -> dict[str, Any]:
+    return {"revoked": A.revoke_invites(c, operator_id)}
 
 
 # ------------------------------------------------------------------- runs

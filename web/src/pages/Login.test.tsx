@@ -96,4 +96,32 @@ describe('Login', () => {
     expect(apiMock).toHaveBeenCalledWith('/api/auth/register/options', { body: { handle: 'ruddick', display_name: 'Ruddick' } });
     expect(startRegistrationMock).toHaveBeenCalledWith({ optionsJSON: { challenge: 'reg' } });
   });
+
+  it('redeems a registration link: shows who it is for, registers, signs in', async () => {
+    const user = userEvent.setup();
+    apiMock.mockImplementation(async (path: string) => {
+      if (path === '/api/auth/invite/tok123') return { operator: { id: 7, handle: 'dana', display_name: 'Dana' }, expires_at: '2030-01-01T00:00:00Z' };
+      if (path === '/api/auth/register/options') return { challenge: 'inv' };
+      if (path === '/api/auth/register/verify') return { operator: { id: 7 } };
+      throw new Error(`unexpected ${path}`);
+    });
+    startRegistrationMock.mockResolvedValue({ id: 'inv-cred' });
+    renderAt('/login?invite=tok123');
+
+    expect(await screen.findByText(/register a passkey for/i)).toHaveTextContent('Dana');
+    await user.click(screen.getByRole('button', { name: /register passkey/i }));
+
+    await waitFor(() => expect(screen.getByText('recipes-page')).toBeInTheDocument());
+    expect(apiMock).toHaveBeenCalledWith('/api/auth/register/options', { body: { invite: 'tok123' } });
+    expect(startRegistrationMock).toHaveBeenCalledWith({ optionsJSON: { challenge: 'inv' } });
+    expect(refreshMock).toHaveBeenCalled();
+  });
+
+  it('explains a used or expired registration link instead of offering sign-in', async () => {
+    const { ApiError } = await import('../api');
+    apiMock.mockRejectedValue(new ApiError(410, 'gone'));
+    renderAt('/login?invite=old');
+    expect(await screen.findByRole('alert')).toHaveTextContent(/already been used or has expired/i);
+    expect(screen.queryByRole('button', { name: /register passkey/i })).not.toBeInTheDocument();
+  });
 });

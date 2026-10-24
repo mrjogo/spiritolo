@@ -28,6 +28,7 @@ def register_options(body: dict[str, Any], request: Request, c: Connection = Dep
     options_json, challenge, ctx = A.registration_options(
         c, st.settings, handle=str(body.get("handle") or ""),
         display_name=str(body.get("display_name") or ""), operator=op,
+        invite=(str(body["invite"]) if body.get("invite") else None),
     )
     resp = Response(content=options_json, media_type="application/json")
     st.sessions.set_challenge(resp, "register", challenge, ctx)
@@ -47,6 +48,16 @@ def _failed(st: AppState, exc: HTTPException) -> Response:
     resp = JSONResponse({"detail": exc.detail}, status_code=exc.status_code)
     st.sessions.clear_challenge(resp)
     return resp
+
+
+@router.get("/invite/{token}")
+def invite(token: str, c: Connection = Depends(conn)) -> dict[str, Any]:
+    """Who a registration link is for, so the login page can say so before
+    the passkey prompt. Unknown, used or expired links are 410."""
+    inv = A.load_invite(c, token)
+    if inv is None:
+        raise HTTPException(410, "this registration link is no longer valid")
+    return {"operator": inv["operator"], "expires_at": inv["expires_at"]}
 
 
 @router.post("/register/verify")

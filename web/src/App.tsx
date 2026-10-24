@@ -29,6 +29,9 @@ const OpsStageRunsBrowser = lazy(() =>
 const OpsImportDatabase = lazy(() =>
   import('./pages/ops/ImportDatabase').then((m) => ({ default: m.ImportDatabase })),
 );
+const OpsOperators = lazy(() =>
+  import('./pages/ops/Operators').then((m) => ({ default: m.Operators })),
+);
 const OpsAuditLogBrowser = lazy(() =>
   import('./pages/ops/AuditLogBrowser').then((m) => ({ default: m.AuditLogBrowser })),
 );
@@ -204,6 +207,14 @@ export default function App() {
                 element={
                   <Suspense fallback={<OpsChunkFallback />}>
                     <OpsImportDatabase />
+                  </Suspense>
+                }
+              />
+              <Route
+                path="operators"
+                element={
+                  <Suspense fallback={<OpsChunkFallback />}>
+                    <OpsOperators />
                   </Suspense>
                 }
               />

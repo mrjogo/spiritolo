@@ -75,10 +75,28 @@ with whatever the environment already has.
 
 Operators sign in with a **passkey** (WebAuthn). There is no email, magic link
 or self-signup. While the `operators` table is empty, `/login` offers a
-first-time setup form that registers the first passkey as an admin; after that,
-registration requires an existing signed-in operator. Sessions are a signed,
-HttpOnly cookie (`SESSION_SECRET` from the vault; a random per-process secret
-otherwise, which logs everyone out on restart).
+first-time setup form that registers the first passkey as an admin. After that
+there are two ways to add a passkey: a signed-in operator adds one to their own
+account, or an admin mints a **registration link** in `/ops → Operators`
+(`POST /api/ops/operators/{id}/invites`): a single-use URL, valid 7 days, that
+registers a passkey for that operator with no session (`/login?invite=<token>`).
+Create the `operators` row first for a new operator, then send them a link.
+Sessions are a signed, HttpOnly cookie (`SESSION_SECRET` from the vault; a
+random per-process secret otherwise, which logs everyone out on restart).
+
+### Moving to a new hostname
+
+Passkeys are bound to the domain they were created on (the WebAuthn relying
+party is `PUBLIC_ORIGIN`'s hostname), so changing the origin silently locks every
+operator out, and first-time setup is closed once an operator exists. The order
+that works:
+
+1. On the current hostname, `/ops → Operators` → **Registration link** for
+   yourself (and anyone else). Copy the path; it is the same on every hostname.
+2. Add the custom domain to the Railway service and set `PUBLIC_ORIGIN` to it;
+   redeploy.
+3. Open `https://<new host>/login?invite=<token>` and register a passkey there.
+4. Sign in on the new hostname; the old Railway domain can then be removed.
 
 ## Health and restarts
 

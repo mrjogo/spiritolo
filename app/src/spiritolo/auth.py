@@ -14,9 +14,11 @@ their own account.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import HTTPException, Request, Response
@@ -43,6 +45,7 @@ from .settings import Settings
 SESSION_COOKIE = "spiritolo_session"
 CHALLENGE_COOKIE = "spiritolo_challenge"
 CHALLENGE_MAX_AGE = 300
+INVITE_MAX_AGE = timedelta(days=7)
 
 
 @dataclass(frozen=True)
@@ -135,6 +138,91 @@ def operator_count(conn: Connection) -> int:
     return conn.execute("select count(*) from operators").fetchone()[0]
 
 
+def create_operator(conn: Connection, *, handle: str, display_name: str, is_admin: bool) -> Operator:
+    """A new operator with no passkey yet; a registration link (``create_invite``)
+    lets its owner add the first one."""
+    handle = handle.strip()
+    if not handle:
+        raise HTTPException(400, "handle required")
+    display_name = display_name.strip() or handle
+    if conn.execute("select 1 from operators where handle = ?", (handle,)).fetchone():
+        raise HTTPException(409, f"handle {handle!r} is taken")
+    with conn.transaction():
+        op_id = conn.execute(
+            "insert into operators (handle, display_name, is_admin) values (?, ?, ?) returning id",
+            (handle, display_name, 1 if is_admin else 0),
+        ).fetchone()[0]
+    op = load_operator(conn, op_id)
+    assert op is not None
+    return op
+
+
+def list_operators(conn: Connection) -> list[dict[str, Any]]:
+    rows = conn.execute(
+        """
+        select o.id, o.handle, o.display_name, o.is_admin, o.created_at, o.last_login_at,
+               (select count(*) from passkeys p where p.operator_id = o.id) as passkeys,
+               (select count(*) from operator_invites i
+                 where i.operator_id = o.id and i.used_at is null and i.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')) as pending_invites
+        from operators o order by o.id
+        """
+    ).fetchall()
+    return [{**r.asdict(), "is_admin": bool(r["is_admin"])} for r in rows]
+
+
+# ------------------------------------------------------------------- invites
+
+def _token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def _now_iso() -> str:
+    now = datetime.now(timezone.utc)
+    return now.strftime("%Y-%m-%dT%H:%M:%S.") + f"{now.microsecond // 1000:03d}Z"
+
+
+def create_invite(conn: Connection, *, operator_id: int, created_by: int | None) -> dict[str, Any]:
+    """Mint a single-use registration link for ``operator_id``. Returns the
+    token (shown once, never stored) and its expiry."""
+    if load_operator(conn, operator_id) is None:
+        raise HTTPException(404, "operator not found")
+    token = secrets.token_urlsafe(32)
+    expires = datetime.now(timezone.utc) + INVITE_MAX_AGE
+    expires_at = expires.strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    with conn.transaction():
+        conn.execute(
+            "insert into operator_invites (token_hash, operator_id, created_by, expires_at) values (?, ?, ?, ?)",
+            (_token_hash(token), operator_id, created_by, expires_at),
+        )
+    return {"token": token, "path": f"/login?invite={token}", "expires_at": expires_at, "operator_id": operator_id}
+
+
+def load_invite(conn: Connection, token: str) -> dict[str, Any] | None:
+    """The operator an unused, unexpired invite token belongs to, or None."""
+    if not token or len(token) > 128:
+        return None
+    row = conn.execute(
+        """
+        select i.token_hash, i.expires_at, o.id, o.handle, o.display_name
+        from operator_invites i join operators o on o.id = i.operator_id
+        where i.token_hash = ? and i.used_at is null and i.expires_at > ?
+        """,
+        (_token_hash(token), _now_iso()),
+    ).fetchone()
+    if row is None:
+        return None
+    return {"token_hash": row["token_hash"], "expires_at": row["expires_at"],
+            "operator": {"id": row["id"], "handle": row["handle"], "display_name": row["display_name"]}}
+
+
+def revoke_invites(conn: Connection, operator_id: int) -> int:
+    with conn.transaction():
+        cur = conn.execute(
+            "delete from operator_invites where operator_id = ? and used_at is null", (operator_id,)
+        )
+        return cur.rowcount
+
+
 def _passkeys_for(conn: Connection, operator_id: int) -> list[PublicKeyCredentialDescriptor]:
     rows = conn.execute(
         "select credential_id, transports from passkeys where operator_id = ?", (operator_id,)
@@ -146,10 +234,19 @@ def _passkeys_for(conn: Connection, operator_id: int) -> list[PublicKeyCredentia
 # -------------------------------------------------------------- registration
 
 def registration_options(conn: Connection, settings: Settings, *, handle: str,
-                         display_name: str, operator: Operator | None) -> tuple[str, bytes, dict[str, Any]]:
+                         display_name: str, operator: Operator | None,
+                         invite: str | None = None) -> tuple[str, bytes, dict[str, Any]]:
     """Options JSON for ``navigator.credentials.create`` plus the challenge
     and the context to carry to ``verify``. ``operator`` is the signed-in
-    account adding a passkey; ``None`` is the bootstrap path."""
+    account adding a passkey; ``invite`` is a registration-link token acting
+    for its operator without a session; ``None`` for both is the bootstrap
+    path, open only while no operator exists."""
+    inv: dict[str, Any] | None = None
+    if operator is None and invite:
+        inv = load_invite(conn, invite)
+        if inv is None:
+            raise HTTPException(410, "this registration link is no longer valid")
+        operator = load_operator(conn, inv["operator"]["id"])
     if operator is None:
         if operator_count(conn) > 0:
             raise HTTPException(403, "registration is closed; sign in to add a passkey")
@@ -166,6 +263,8 @@ def registration_options(conn: Connection, settings: Settings, *, handle: str,
         user_id = operator.id.to_bytes(8, "big")
         exclude = _passkeys_for(conn, operator.id)
         ctx = {"new": False, "op": operator.id}
+        if inv is not None:
+            ctx["inv"] = inv["token_hash"]
     opts = generate_registration_options(
         rp_id=settings.rp_id, rp_name=settings.rp_name, user_id=user_id,
         user_name=handle, user_display_name=display_name,
@@ -198,6 +297,16 @@ def complete_registration(conn: Connection, settings: Settings, *, credential: d
             ).fetchone()[0]
         else:
             op_id = int(ctx["op"])
+            if ctx.get("inv"):
+                # The invite is consumed in the same transaction as the passkey
+                # it authorised, so it can never be used twice.
+                used = conn.execute(
+                    "update operator_invites set used_at = ? where token_hash = ? and operator_id = ? "
+                    "and used_at is null and expires_at > ?",
+                    (_now_iso(), ctx["inv"], op_id, _now_iso()),
+                ).rowcount
+                if used != 1:
+                    raise HTTPException(410, "this registration link is no longer valid")
         conn.execute(
             "insert into passkeys (credential_id, operator_id, public_key, sign_count, transports, aaguid, label) "
             "values (?, ?, ?, ?, ?, ?, ?)",

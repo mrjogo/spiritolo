@@ -118,7 +118,10 @@ public removes both.
    then `GET https://<domain>/api/health` → `{"ok": true, "executor": {...}}`.
 2. Open `https://<domain>/login`. With no operators yet the page offers
    **first-time setup**: pick a handle, register a passkey → you are the admin.
-   From then on registration needs a signed-in operator.
+   From then on a passkey is added either by its signed-in owner or through a
+   **registration link** from `/ops → Operators` (single use, 7 days, no
+   session needed). Mint one for yourself *before* changing `PUBLIC_ORIGIN` to
+   a new hostname — see "Moving to a new hostname" in [deployment.md](deployment.md).
 3. Seal `OP_SERVICE_ACCOUNT_TOKEN` (if you deployed without it first) and
    redeploy; the logs should show `op run` resolving `secrets.env` and
    Litestream starting replication.
