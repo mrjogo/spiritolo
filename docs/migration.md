@@ -17,6 +17,10 @@ scripts/pg_to_sqlite  <dump>  spiritolo.db     # offline, pg_restore --data-only
 
 ## 1. Export
 
+> Done once, on 2026-10-24. The workflow and `scripts/backup-supabase.sh` have
+> since been removed; restore them from git history if a dump is ever needed
+> again.
+
 Actions tab → **Backup staging database** → *Run workflow* (pick the branch
 that carries the current `scripts/backup-supabase.sh`, which dumps the `audit`
 schema too). The run uploads `spiritolo-staging-dump-<run-id>` containing the
@@ -94,7 +98,8 @@ variables there. No re-crawl is needed.
 
 Once the import is verified: delete the Supabase project, the
 `SUPABASE_STAGING_DB_URL` secret, the backup workflow and
-`scripts/backup-supabase.sh`. Keep one copy of the final `.dump` cold.
+`scripts/backup-supabase.sh` (all done 2026-10-24, the project paused rather
+than deleted). Keep one copy of the final `.dump` cold.
 
 ---
 
