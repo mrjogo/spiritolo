@@ -82,13 +82,13 @@ describe('<AddTasks>', () => {
       throw new Error(`unexpected call ${path}`);
     });
     renderAt();
-    expect(await screen.findByText(/Loading…/)).toBeInTheDocument();
+    expect((await screen.findAllByText(/Loading…/)).length).toBeGreaterThan(0);
     expect(screen.queryByText(/of 0 matching/)).not.toBeInTheDocument();
     expect(apiMock.mock.calls.some(([p]) => String(p).startsWith('/api/ops/eligible-pool'))).toBe(false);
 
     releaseRun(RUN);
     expect(await screen.findByText('Oaxaca Old Fashioned')).toBeInTheDocument();
-    expect(screen.queryByText(/Loading…/)).not.toBeInTheDocument();
+    expect(screen.queryAllByText(/Loading…/)).toHaveLength(0);
     expect(screen.getByText(/of 1,139 matching/)).toBeInTheDocument();
   });
 

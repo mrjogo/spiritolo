@@ -9,6 +9,8 @@ interface Props {
   runState: RunState;
   items: RunItem[];
   total: number;
+  /** The first page of items hasn't arrived yet. */
+  loading?: boolean;
   /** status → count from run_items_facets, for the chip counts. */
   statusFacets: Record<string, number>;
   activeStatus: string | null;
@@ -31,7 +33,7 @@ const COLUMNS: DataTableColumn<RunItem>[] = [
 ];
 
 export function TasksTable({
-  runState, items, total, statusFacets, activeStatus, onStatus,
+  runState, items, total, loading = false, statusFacets, activeStatus, onStatus,
   search, onSearch, page, pageSize, onPage, selectedIds, onSelectionChange,
   onRemove,
 }: Props) {
@@ -98,13 +100,14 @@ export function TasksTable({
         <DataTable
           columns={COLUMNS}
           rows={items}
+          loading={loading}
           rowKey={(r) => r.item_id}
           selectable
           selectedIds={selectedIds as Set<string | number>}
           onSelectionChange={(ids) => onSelectionChange(ids.map(String))}
         />
       </div>
-      <Pager page={page} pageSize={pageSize} total={total} onPage={onPage} unit="tasks" />
+      <Pager page={page} pageSize={pageSize} total={total} onPage={onPage} unit="tasks" loading={loading} />
     </div>
   );
 }

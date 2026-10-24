@@ -262,9 +262,10 @@ export function AddTasks() {
             })}
           </tbody>
         </table>
-        {poolStatus === 'loaded' && (
-          <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="matching" />
-        )}
+        <Pager
+          page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="matching"
+          loading={poolStatus === 'loading'}
+        />
       </div>
 
       {selCount > 0 && (

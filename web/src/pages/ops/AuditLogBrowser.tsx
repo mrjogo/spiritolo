@@ -91,7 +91,7 @@ export function AuditLogBrowser() {
           onChange={(e) => setTableName(e.target.value)}
         />
       </div>
-      <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="entries" />
+      <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="entries" loading={status === 'loading'} />
       <SplitView
         list={({ select }) => (
           <DataTable
