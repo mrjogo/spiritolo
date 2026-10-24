@@ -39,6 +39,16 @@ run_with_secrets() {
 # 1–3 run under `op run` so TAILSCALE_AUTHKEY (a vault item) resolves too.
 run_with_secrets bash -c '
   set -euo pipefail
+  # Railway attaches a bucket to the service as BUCKET_* reference variables.
+  # Derive the Litestream settings from them unless set explicitly.
+  if [ -z "${LITESTREAM_REPLICA_URL:-}" ] && [ -n "${BUCKET_NAME:-}" ]; then
+    export LITESTREAM_REPLICA_URL="s3://${BUCKET_NAME}/spiritolo"
+    export LITESTREAM_ENDPOINT="${LITESTREAM_ENDPOINT:-${BUCKET_ENDPOINT:-}}"
+    export LITESTREAM_REGION="${LITESTREAM_REGION:-${BUCKET_REGION:-us-east-1}}"
+    export LITESTREAM_ACCESS_KEY_ID="${LITESTREAM_ACCESS_KEY_ID:-${BUCKET_ACCESS_KEY_ID:-}}"
+    export LITESTREAM_SECRET_ACCESS_KEY="${LITESTREAM_SECRET_ACCESS_KEY:-${BUCKET_SECRET_ACCESS_KEY:-}}"
+  fi
+  export LITESTREAM_REGION="${LITESTREAM_REGION:-us-east-1}"
   # 1. Tailscale (optional): only when an auth key is present.
   if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
     /usr/local/bin/tailscaled --tun=userspace-networking --socks5-server=localhost:1055 --state=mem: &

@@ -44,13 +44,12 @@ vault: attach each bucket to the service with **Bucket → Credentials → Add t
 service**, which injects the keys and endpoint as **reference variables**
 (auto-rotating, never visible to Claude).
 
-- **Litestream replica** — `spiritolo-litestream`. Litestream reads
-  `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY`,
-  `LITESTREAM_ENDPOINT` and `LITESTREAM_REPLICA_URL`
-  (`s3://spiritolo-litestream/spiritolo`). If the attach dialog only offers
-  the `AWS_*` naming style, attach it anyway and map the names with reference
-  variables (`LITESTREAM_ACCESS_KEY_ID=${{ … }}`), or ask Claude to adapt
-  `litestream.yml` to the names Railway created.
+- **Litestream replica** — `spiritolo-litestream`, attached in Railway's
+  default style, which injects `BUCKET_NAME`, `BUCKET_ENDPOINT`,
+  `BUCKET_REGION`, `BUCKET_ACCESS_KEY_ID`, `BUCKET_SECRET_ACCESS_KEY`. The
+  entrypoint derives the `LITESTREAM_*` settings from those (replica URL
+  `s3://$BUCKET_NAME/spiritolo`), so nothing else is needed; set any
+  `LITESTREAM_*` variable explicitly only to override.
 - **HTML corpus** — the existing `spiritolo-corpus` bucket lives in the old
   Railway project and cannot be referenced across projects. Create
   `spiritolo-corpus` in this project, attach it in the **AWS SDK (Generic)**
@@ -85,11 +84,10 @@ SPIRITOLO_DB=/data/spiritolo.db
 STATIC_DIR=/app/web/dist
 RUN_EXECUTOR=1
 LOG_LEVEL=INFO
-LITESTREAM_REPLICA_URL=s3://spiritolo-litestream/spiritolo
 ```
 
-Reference variables from the attached buckets (step 2): `LITESTREAM_ENDPOINT`,
-`LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY`, and the corpus
+Reference variables from the attached buckets (step 2): the Litestream
+bucket's `BUCKET_*` set (the entrypoint maps it to `LITESTREAM_*`), and the corpus
 bucket's `AWS_ENDPOINT_URL`, `AWS_S3_BUCKET_NAME`, `AWS_DEFAULT_REGION`,
 `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (+ `AWS_S3_URL_STYLE=path`).
 

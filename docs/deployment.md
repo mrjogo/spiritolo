@@ -56,8 +56,7 @@ Non-secret configuration is plain Railway variables on the service:
 | `STATIC_DIR` | `/app/web/dist` (image default) |
 | `RUN_EXECUTOR` | `1` |
 | `LOG_LEVEL` | `INFO` |
-| `LITESTREAM_REPLICA_URL` | `s3://spiritolo-litestream/spiritolo` |
-| `LITESTREAM_ENDPOINT`, `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY` | reference variables from the attached `spiritolo-litestream` bucket |
+| `BUCKET_NAME`, `BUCKET_ENDPOINT`, `BUCKET_REGION`, `BUCKET_ACCESS_KEY_ID`, `BUCKET_SECRET_ACCESS_KEY` | reference variables from the attached `spiritolo-litestream` bucket; the entrypoint derives `LITESTREAM_REPLICA_URL` (`s3://$BUCKET_NAME/spiritolo`), `LITESTREAM_ENDPOINT`, `LITESTREAM_REGION` and the keys from them (set a `LITESTREAM_*` variable only to override) |
 | `AWS_ENDPOINT_URL`, `AWS_S3_BUCKET_NAME`, `AWS_DEFAULT_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_S3_URL_STYLE` | reference variables from the attached `spiritolo-corpus` bucket (read by the extract stage) |
 | `OLLAMA_BASE_URL`, `TAILSCALE_AUTHKEY` | only if a tailnet Ollama is used |
 

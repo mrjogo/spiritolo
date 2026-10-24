@@ -105,6 +105,13 @@ def test_entrypoint_applies_staged_import_before_anything_opens_the_db():
     assert 'rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"' in sh
 
 
+def test_entrypoint_derives_litestream_settings_from_the_attached_bucket():
+    sh = _text("scripts/entrypoint.sh")
+    assert 'LITESTREAM_REPLICA_URL="s3://${BUCKET_NAME}/spiritolo"' in sh
+    for var in ("BUCKET_ENDPOINT", "BUCKET_REGION", "BUCKET_ACCESS_KEY_ID", "BUCKET_SECRET_ACCESS_KEY"):
+        assert var in sh
+
+
 def test_entrypoint_restores_then_replicates_with_uvicorn_as_child():
     sh = _text("scripts/entrypoint.sh")
     assert "litestream restore -if-replica-exists" in sh
@@ -135,7 +142,7 @@ def test_entrypoint_tailscale_is_optional_and_userspace():
 
 def test_litestream_config_reads_everything_from_env():
     cfg = _text("litestream.yml")
-    for var in ("SPIRITOLO_DB", "LITESTREAM_REPLICA_URL", "LITESTREAM_ENDPOINT",
+    for var in ("SPIRITOLO_DB", "LITESTREAM_REPLICA_URL", "LITESTREAM_ENDPOINT", "LITESTREAM_REGION",
                 "LITESTREAM_ACCESS_KEY_ID", "LITESTREAM_SECRET_ACCESS_KEY"):
         assert "${" + var + "}" in cfg, f"litestream.yml must read {var} from the environment"
     doc = yaml.safe_load(cfg)
@@ -233,8 +240,8 @@ def test_runbook_covers_all_steps():
     ):
         assert marker in lowered, f"runbook missing a section for {marker!r}"
     # The load-bearing variables an operator must not miss.
-    for var in ("OP_SERVICE_ACCOUNT_TOKEN", "PUBLIC_ORIGIN", "LITESTREAM_REPLICA_URL",
-                "LITESTREAM_ENDPOINT", "AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME"):
+    for var in ("OP_SERVICE_ACCOUNT_TOKEN", "PUBLIC_ORIGIN", "BUCKET_NAME",
+                "BUCKET_ACCESS_KEY_ID", "AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME"):
         assert var in md, f"runbook must name {var}"
     # Nothing from the Supabase era leaks back in.
     assert "supabase db push" not in lowered
