@@ -558,5 +558,159 @@
     padding: 10px 12px;
   }
   .runs-batchbar { flex-wrap: wrap; }
-  .runs-popover { left: 8px; right: 8px; width: auto; }
+  /* Filter dropdowns become a bottom-sheet — an absolutely-positioned dropdown
+     was clipped by the viewport on mobile. */
+  .runs-popover {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    width: auto;
+    max-height: 75vh;
+    overflow-y: auto;
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -14px 34px rgba(16, 21, 33, 0.22);
+    animation: runs-sheet-up 0.18s ease-out;
+  }
+  .runs-pfoot {
+    position: sticky;
+    bottom: 0;
+    background: var(--ops-surface);
+  }
+  /* The table header's select-all is hidden with the <thead> on mobile; show
+     the standalone control instead. */
+  .runs-mobile-selectall { display: flex; }
 }
+
+@keyframes runs-sheet-up {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+/* Standalone mobile select-all: hidden on desktop (the table header has it). */
+.runs-mobile-selectall {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 2px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--runs-slate);
+}
+
+/* --- Run states added with the cockpit (cancel lifecycle) --------------- */
+.runs-state--cancelling { background: var(--runs-amber-bg); color: var(--runs-amber); }
+.runs-state--cancelled  { background: var(--runs-slate-bg); color: var(--runs-slate); }
+
+/* --- Global worker-health banner (Runs list) --------------------------- */
+.runs-worker-banner {
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  margin-bottom: 14px;
+}
+.runs-worker-banner--ok   { background: var(--runs-green-bg); color: var(--runs-green); }
+.runs-worker-banner--warn { background: var(--runs-red-bg);   color: var(--runs-red); }
+
+/* --- Run cockpit (non-draft run detail) -------------------------------- */
+.runs-cockpit {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 14px 0 18px;
+}
+.runs-health {
+  border-radius: 8px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.runs-health--ok   { background: var(--runs-green-bg); color: var(--runs-green); }
+.runs-health--warn { background: var(--runs-red-bg);   color: var(--runs-red); }
+.runs-health__sub  { font-weight: 400; opacity: 0.8; }
+
+.runs-cockcard {
+  border: 1px solid var(--runs-slate-bg);
+  border-radius: 10px;
+  padding: 12px 14px;
+  background: #fff;
+}
+.runs-cockcard--error { border-color: var(--runs-red); background: var(--runs-red-bg); }
+.runs-cockcard__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  font-weight: 600;
+  color: var(--runs-slate);
+  margin-bottom: 8px;
+}
+.runs-errmsg {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  color: var(--runs-red);
+  word-break: break-word;
+}
+
+.runs-progress, .runs-meter {
+  height: 10px;
+  border-radius: 6px;
+  background: var(--runs-slate-bg);
+  overflow: hidden;
+}
+.runs-progress__bar { height: 100%; background: var(--ops-accent); transition: width 0.4s ease; }
+.runs-meter__fill   { height: 100%; background: var(--runs-amber); transition: width 0.4s ease; }
+.runs-progress__meta { font-size: 12px; color: var(--runs-slate); margin-top: 6px; }
+.runs-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+
+.runs-cockactions { display: flex; gap: 10px; }
+
+.runs-preflight {
+  background: var(--runs-amber-bg);
+  color: var(--runs-amber);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 13px;
+  font-weight: 500;
+  margin: 8px 0;
+}
+
+/* --- Runs list loading state ------------------------------------------- */
+.runs-loading {
+  padding: 28px 12px;
+  color: var(--runs-slate);
+  font-size: 14px;
+}
+
+/* --- Multidimensional sort control (FilterBar) -------------------------- */
+.runs-sortctl {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.runs-sortkey {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px 2px 8px;
+  border: 1px solid var(--ops-border);
+  border-radius: 999px;
+  font-size: 12.5px;
+  background: var(--ops-surface);
+}
+.runs-sortkey__lead { color: var(--ops-muted); font-size: 11px; }
+.runs-sortkey__label { font-weight: 500; }
+.ops .runs-sortkey__dir,
+.ops .runs-sortkey__rm {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  padding: 0 3px;
+  color: var(--runs-slate);
+  font-size: 12px;
+  line-height: 1;
+}
+.ops .runs-sortkey__rm:hover { color: var(--runs-red); }
+.runs-sortadd { height: 30px; }

@@ -1,4 +1,10 @@
-"""Ollama provider (sync). Calls the local /api/generate endpoint over HTTP."""
+"""Ollama provider (sync). Calls the local /api/generate endpoint over HTTP.
+
+Thinking is disabled (`think: false`): qwen3 (our default) ships with thinking
+mode ON by default, which burns tokens reasoning about structured-retrieval
+prompts that don't need it — and can wrap the JSON answer in a <think> preamble
+that breaks parsing. `think` is Ollama's per-request toggle for thinking-capable
+models."""
 
 from __future__ import annotations
 
@@ -49,6 +55,7 @@ class OllamaProvider:
                 "system": system_prompt,
                 "prompt": user_prompt,
                 "stream": False,
+                "think": False,  # disable qwen3's default-on thinking mode
             },
         )
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { FilterPopover, type FacetOption } from './FilterPopover';
+import { SortControl, type SortField } from './SortControl';
 import {
   setFilterValues,
   clearFilters,
@@ -15,18 +16,16 @@ export interface FilterDimension {
   options: FacetOption[];
 }
 
-export interface SortOption {
-  col: string;
-  label: string;
-}
+export type SortOption = SortField;
 
 interface Props {
   state: RunFilterState;
   dimensions: FilterDimension[];
-  sort: Sort;
+  /** Ordered multidimensional sort (primary key first). */
+  sort: Sort[];
   sortOptions: SortOption[];
   onChange: (state: RunFilterState) => void;
-  onSortChange: (sort: Sort) => void;
+  onSortChange: (sort: Sort[]) => void;
 }
 
 // The JIRA-style filter bar: one popover button per dimension (label + active
@@ -75,19 +74,7 @@ export function FilterBar({ state, dimensions, sort, sortOptions, onChange, onSo
           ＋ Add filter
         </button>
         <span className="runs-grow" />
-        <select
-          aria-label="sort"
-          value={`${sort.col}:${sort.asc ? 'asc' : 'desc'}`}
-          onChange={(e) => {
-            const [col, dir] = e.target.value.split(':');
-            onSortChange({ col, asc: dir === 'asc' });
-          }}
-        >
-          {sortOptions.flatMap((o) => [
-            <option key={`${o.col}:desc`} value={`${o.col}:desc`}>Sort: {o.label} ↓</option>,
-            <option key={`${o.col}:asc`} value={`${o.col}:asc`}>Sort: {o.label} ↑</option>,
-          ])}
-        </select>
+        <SortControl value={sort} fields={sortOptions} onChange={onSortChange} />
         <input
           type="search"
           aria-label="search title or ingredient"

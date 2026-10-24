@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import psycopg
 import pytest
 
 from ingredients.pipeline.stages.map import MAPPER_VERSION, map_stage_fn
@@ -27,29 +26,29 @@ class _FakeChain:
 
 
 @pytest.fixture()
-def conn(test_db_url: str):
-    with psycopg.connect(test_db_url, autocommit=True) as c:
+def conn(db_conn):
+    if (c := db_conn) is not None:
         for t in ("recipes", "job_items", "ingredient_resolutions", "taxonomy_nodes"):
-            c.execute(f"truncate {t} restart identity cascade")
+            c.execute(f"delete from {t}")
         nid = c.execute(
             "insert into taxonomy_nodes (slug, display_name, default_role) "
             "values ('bourbon', 'Bourbon', 'base_spirit') returning id"
         ).fetchone()[0]
-        c.execute("insert into taxonomy_aliases (node_id, alias) values (%s, 'bourbon')", (nid,))
+        c.execute("insert into taxonomy_aliases (node_id, alias) values (?, 'bourbon')", (nid,))
         yield c
         for t in ("recipes", "job_items", "ingredient_resolutions", "taxonomy_nodes"):
-            c.execute(f"truncate {t} restart identity cascade")
+            c.execute(f"delete from {t}")
 
 
 def _recipe(conn, url, ingredient_names):
     rid = conn.execute(
-        "insert into recipes (source_url, site, source) values (%s, 'ex', '{}'::jsonb) returning id",
+        "insert into recipes (source_url, site, source) values (?, 'ex', '{}') returning id",
         (url,),
     ).fetchone()[0]
     for pos, name in enumerate(ingredient_names):
         conn.execute(
             "insert into recipe_ingredients (recipe_id, position, name, raw_text) "
-            "values (%s, %s, %s, %s)",
+            "values (?, ?, ?, ?)",
             (rid, pos, name, f"{name} raw"),
         )
     return rid
@@ -73,7 +72,7 @@ def test_resolution_is_shared_across_recipes(conn):
 
     for rid in (a, b):
         outcome = conn.execute(
-            "select outcome from job_items where entity_id=%s and stage='map-ingredient'", (rid,)
+            "select outcome from job_items where entity_id=? and stage='map-ingredient'", (rid,)
         ).fetchone()[0]
         assert outcome == "resolved"
 
@@ -93,7 +92,7 @@ def test_unresolved_name_mints_provisional_node(conn):
     ).fetchone()
     assert node == (None, "provisional", False)
     outcome = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='map-ingredient'", (rid,)
+        "select outcome from job_items where entity_id=? and stage='map-ingredient'", (rid,)
     ).fetchone()[0]
     assert outcome == "resolved"
 
@@ -135,7 +134,7 @@ def test_chunk_boundary_matches_single_chunk(conn):
 
     outcomes = {
         rid: conn.execute(
-            "select outcome from job_items where entity_id=%s and stage='map-ingredient'", (rid,)
+            "select outcome from job_items where entity_id=? and stage='map-ingredient'", (rid,)
         ).fetchone()[0]
         for rid in rids
     }

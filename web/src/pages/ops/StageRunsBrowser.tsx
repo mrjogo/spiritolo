@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../../supabase';
+import { queryOne } from '../../api';
 import { DataTable, type DataTableColumn } from '../../ui/DataTable';
 import { SplitView, DetailPane } from '../../ui/SplitView';
 import { StatusPill } from '../../ui/StatusPill';
@@ -96,7 +96,7 @@ export function StageRunsBrowser() {
   if (outcome) filters.push({ col: 'outcome', op: 'eq', value: outcome });
   if (version) filters.push({ col: 'code_version', op: 'eq', value: version });
 
-  const { rows, total } = usePagedQuery<StageRunListRow>({
+  const { rows, total, status } = usePagedQuery<StageRunListRow>({
     table: 'job_items',
     select: LIST_SELECT,
     filters,
@@ -133,6 +133,7 @@ export function StageRunsBrowser() {
           <DataTable
             columns={COLUMNS}
             rows={rows}
+            loading={status === 'loading'}
             rowKey={(r) => r.id}
             onRowClick={(r) => select(String(r.id))}
           />
@@ -146,15 +147,7 @@ export function StageRunsBrowser() {
 function StageRunDetail({ id }: { id: string | null }) {
   const query = useQuery({
     queryKey: ['stageRunDetail', id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('job_items')
-        .select('*')
-        .eq('id', Number(id))
-        .maybeSingle();
-      if (error) throw error;
-      return data as StageRunDetailRow | null;
-    },
+    queryFn: () => queryOne<StageRunDetailRow>('job_items', [{ col: 'id', op: 'eq', value: Number(id) }]),
     enabled: id != null,
   });
 

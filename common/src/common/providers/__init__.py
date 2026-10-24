@@ -18,7 +18,6 @@ from .packing import (
     decode_response,
     encode_request,
     encode_response,
-    run_packed,
 )
 from .results import ChainResult, TierResult
 
@@ -35,5 +34,4 @@ __all__ = [
     "encode_request",
     "encode_response",
     "is_metered",
-    "run_packed",
 ]

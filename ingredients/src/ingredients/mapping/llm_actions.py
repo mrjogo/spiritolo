@@ -19,13 +19,13 @@ from __future__ import annotations
 
 from typing import Any
 
-import psycopg
+from common.db import Connection
 
 from ingredients.mapping.resolutions import write_abstain, write_resolution
 
 
 def apply_llm_action(
-    conn: psycopg.Connection,
+    conn: Connection,
     *,
     normalized_name: str,
     answer: Any,

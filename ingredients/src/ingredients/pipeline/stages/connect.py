@@ -7,7 +7,7 @@ judgment: for each surviving provisional node it asks the LLM tier which existin
 parent(s) the node belongs under, what its ``node_kind`` is (a manufacturer brand
 line → ``'brand'``, a specific SKU → ``'expression'``, or a plain
 substance/category → ``NULL``), and whether it is a cluster-identity node. The
-placement + promotion is the SQL ``connect_place`` action, which attaches the
+placement + promotion is the ``taxonomy.connect_place`` action, which attaches the
 parent edges, enforces the antichain invariant, and flips ``status`` to
 ``'live'``.
 
@@ -26,11 +26,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-import psycopg
-
+from common.db import Connection, jlist
 from common.providers.packing import Item
+from common.text import similarity
 from ingredients.pipeline.stages import base
 from ingredients.reviews.model import insert_review
+from ingredients.taxonomy import TaxonomyError, connect_place
 
 STAGE = "connect-nodes"
 CONNECT_VERSION = "v1"
@@ -86,48 +87,48 @@ def _tokens(name: str) -> list[str]:
     return [t for t in re.split(r"[^a-z0-9]+", (name or "").lower()) if len(t) >= 2]
 
 
+def _live_nodes(conn: Connection) -> list[dict[str, Any]]:
+    """Live nodes (id, slug, display_name) — the parent candidate universe."""
+    return [
+        {"id": r[0], "slug": r[1], "display_name": r[2]}
+        for r in conn.execute(
+            "select id, slug, display_name from taxonomy_nodes where status = 'live'"
+        ).fetchall()
+    ]
+
+
 def _candidate_parents(
-    conn: psycopg.Connection, *, node_id: int, name: str, slug: str
+    conn: Connection, *, node_id: int, name: str, slug: str,
+    live: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     """Deterministic shortlist of up to ``_CANDIDATE_LIMIT`` live nodes that could
     be a parent of ``node_id``.
 
     Cheap lexical signal: a live node whose display name or slug shares a token
     with the node's name (so provisional "lime juice" surfaces "lime", "juice"),
-    OR whose display name is trigram-similar (``pg_trgm``) to the node's name.
-    Token hits rank above pure similarity. Excludes the node itself and any
-    non-live node — connect only attaches under already-placed (live) parents.
+    OR whose display name is trigram-similar to the node's name. Token hits rank
+    above pure similarity. Excludes the node itself and any non-live node —
+    connect only attaches under already-placed (live) parents. ``live`` is an
+    optional pre-fetched snapshot of the live set.
     """
     query_text = name or slug.replace("-", " ")
-    rows = conn.execute(
-        """
-        select n.slug, n.display_name
-        from taxonomy_nodes n
-        where n.status = 'live'
-          and n.id <> %(nid)s
-          and (
-                %(tokens)s::text[] && regexp_split_to_array(lower(coalesce(n.display_name, '')), '[^a-z0-9]+')
-             or %(tokens)s::text[] && regexp_split_to_array(lower(n.slug), '[^a-z0-9]+')
-             or similarity(n.display_name, %(q)s) >= 0.35
-          )
-        order by
-          (%(tokens)s::text[] && regexp_split_to_array(lower(coalesce(n.display_name, '')), '[^a-z0-9]+')) desc,
-          similarity(n.display_name, %(q)s) desc,
-          n.slug
-        limit %(lim)s
-        """,
-        {
-            "nid": node_id,
-            "tokens": _tokens(name),
-            "q": query_text,
-            "lim": _CANDIDATE_LIMIT,
-        },
-    ).fetchall()
-    return [{"slug": r[0], "display_name": r[1]} for r in rows]
+    tokens = set(_tokens(name))
+    scored: list[tuple[int, float, str, dict[str, Any]]] = []
+    for n in live if live is not None else _live_nodes(conn):
+        if n["id"] == node_id:
+            continue
+        name_hit = bool(tokens and tokens & set(_tokens(n["display_name"])))
+        slug_hit = bool(tokens and tokens & set(_tokens(n["slug"])))
+        sim = similarity(n["display_name"], query_text)
+        if not (name_hit or slug_hit or sim >= 0.35):
+            continue
+        scored.append((0 if name_hit else 1, -sim, n["slug"], n))
+    scored.sort(key=lambda t: (t[0], t[1], t[2]))
+    return [{"slug": n["slug"], "display_name": n["display_name"]} for _, _, _, n in scored[:_CANDIDATE_LIMIT]]
 
 
 def _park(
-    conn: psycopg.Connection,
+    conn: Connection,
     *,
     node_id: int,
     candidates: list[dict[str, str]],
@@ -161,7 +162,7 @@ def _park(
 
 
 def _apply_answer(
-    conn: psycopg.Connection,
+    conn: Connection,
     *,
     node_id: int,
     answer: Any,
@@ -170,11 +171,11 @@ def _apply_answer(
 ) -> str:
     """Apply one node's LLM answer. Returns ``"connected"`` or ``"pending"``.
 
-    On a well-formed placement it calls ``connect_place`` inside a savepoint
-    (``with conn.transaction()``): the SQL attaches parent edges, enforces the
-    antichain invariant, and promotes the node to ``live``. If ``connect_place``
-    RAISES (unknown parent slug or antichain violation), the savepoint rolls back
-    — so no partial edge survives — and the node is parked for review. A missing
+    On a well-formed placement it calls ``taxonomy.connect_place``, which
+    attaches parent edges, enforces the antichain invariant, and promotes the
+    node to ``live`` inside its own savepoint. If it raises (unknown parent slug
+    or antichain violation), the savepoint rolls back — so no partial edge
+    survives — and the node is parked for review. A missing
     answer, an explicit ``uncertain``, or an empty parent set parks it too."""
     if not isinstance(answer, dict) or answer.get("action") == "uncertain":
         _park(
@@ -213,15 +214,11 @@ def _apply_answer(
         "is_cluster_node": is_cluster_node,
     }
     try:
-        # Savepoint: connect_place raises on an unknown parent slug or an
-        # antichain violation. Wrapping it keeps that RAISE from poisoning the
-        # rest of the chunk — the block rolls back and we fall through to review.
-        with conn.transaction():
-            conn.execute(
-                "select connect_place(%s, %s, %s, %s)",
-                (node_id, node_kind, parent_slugs, is_cluster_node),
-            )
-    except psycopg.Error:
+        # connect_place runs in its own savepoint and raises TaxonomyError on an
+        # unknown parent slug or an antichain violation, rolling back any edge it
+        # attached — so we fall through to review with nothing half-written.
+        connect_place(conn, node_id, node_kind, parent_slugs, is_cluster_node)
+    except TaxonomyError:
         _park(
             conn,
             node_id=node_id,
@@ -246,7 +243,7 @@ def _apply_answer(
 
 def connect_stage_fn(
     job: dict[str, Any],
-    conn: psycopg.Connection,
+    conn: Connection,
     providers: Any,
     *,
     chunk_size: int = base.CHUNK_SIZE,
@@ -274,18 +271,20 @@ def connect_stage_fn(
         meta = {
             r[0]: {"slug": r[1], "name": r[2]}
             for r in conn.execute(
-                "select id, slug, display_name from taxonomy_nodes where id = any(%s)",
-                (chunk,),
+                "select id, slug, display_name from taxonomy_nodes "
+                "where id in (select value from json_each(?))",
+                (jlist(chunk),),
             ).fetchall()
         }
         cand_by_node: dict[int, list[dict[str, str]]] = {}
         items: list[Item] = []
+        live = _live_nodes(conn)
         for nid in chunk:
             info = meta.get(nid)
             if info is None:
                 continue  # node vanished (e.g. absorbed by combine) — skip
             cands = _candidate_parents(
-                conn, node_id=nid, name=info["name"], slug=info["slug"]
+                conn, node_id=nid, name=info["name"], slug=info["slug"], live=live
             )
             cand_by_node[nid] = cands
             items.append(

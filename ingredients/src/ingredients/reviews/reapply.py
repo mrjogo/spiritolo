@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from common.db import SQL_NOW, jlist
+
 from ingredients.reviews import model
+from ingredients.reviews.apply import apply_review
 
 
 def reapply_overrides(conn, *, stage: str, ids: Iterable[str]) -> int:
@@ -22,7 +25,7 @@ def reapply_overrides(conn, *, stage: str, ids: Iterable[str]) -> int:
     """
     override_ids = model.resolved_override_ids(conn, stage=stage, ids=ids)
     for rid in override_ids:
-        conn.execute("select apply_review(%s)", (rid,))
+        apply_review(conn, rid)
     return len(override_ids)
 
 
@@ -33,15 +36,17 @@ def supersede_stale(conn, *, stage: str, ids: Iterable[str]) -> int:
     proposal is moot. Never touches `human_flag`s or already-resolved overrides.
     Returns the count dismissed.
     """
-    id_list = list(ids)
+    id_list = [str(i) for i in ids]
     if not id_list:
         return 0
     cur = conn.execute(
-        "update human_reviews "
-        "set state = 'dismissed', reviewed_by = 'system:superseded', reviewed_at = now() "
-        "where stage = %s and state = 'open' "
-        "and origin in ('machine_proposal', 'distance_gate') "
-        "and (entity_id = any(%s) or split_part(entity_id, ':', 1) = any(%s))",
-        (stage, id_list, id_list),
+        f"update human_reviews "
+        f"set state = 'dismissed', reviewed_by = 'system:superseded', "
+        f"reviewed_at = {SQL_NOW}, updated_at = {SQL_NOW} "
+        f"where stage = ? and state = 'open' "
+        f"and origin in ('machine_proposal', 'distance_gate') "
+        f"and (entity_id in (select value from json_each(?)) "
+        f"  or {model.ENTITY_PREFIX_SQL} in (select value from json_each(?)))",
+        (stage, jlist(id_list), jlist(id_list)),
     )
     return cur.rowcount

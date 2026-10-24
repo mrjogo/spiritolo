@@ -3,29 +3,14 @@ import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
-vi.mock('../../supabase', () => ({ supabase: { from: vi.fn() } }));
-import { supabase } from '../../supabase';
+const queryTableMock = vi.fn();
+vi.mock('../../api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api')>()),
+  queryTable: (...args: unknown[]) => queryTableMock(...args),
+}));
 import { usePagedQuery } from './usePagedQuery';
 
 type Row = { id: number; name: string };
-
-function makeChain(rows: Row[], count: number, error: unknown = null) {
-  const calls: { op: string; args: unknown[] }[] = [];
-  const range = vi.fn().mockImplementation((...args: unknown[]) => {
-    calls.push({ op: 'range', args });
-    return Promise.resolve({ data: rows, count, error });
-  });
-  const chain = {
-    eq: vi.fn((...args: unknown[]) => { calls.push({ op: 'eq', args }); return chain; }),
-    in: vi.fn((...args: unknown[]) => { calls.push({ op: 'in', args }); return chain; }),
-    lt: vi.fn((...args: unknown[]) => { calls.push({ op: 'lt', args }); return chain; }),
-    order: vi.fn((...args: unknown[]) => { calls.push({ op: 'order', args }); return chain; }),
-    range,
-  };
-  const select = vi.fn((...args: unknown[]) => { calls.push({ op: 'select', args }); return chain; });
-  (supabase.from as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ select });
-  return { select, chain, range, calls };
-}
 
 function wrapperWith(client: QueryClient) {
   return function Wrapper({ children }: { children: ReactNode }) {
@@ -38,89 +23,66 @@ function makeClient() {
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  queryTableMock.mockReset();
 });
 
 describe('usePagedQuery', () => {
-  it('requests select(sel, {count: exact}).order(...).range(from, to) and returns rows+total', async () => {
+  it('posts {table, select, filters, order, limit, offset} and returns rows+total', async () => {
     const rows: Row[] = [{ id: 1, name: 'a' }];
-    const { select, range, chain } = makeChain(rows, 1);
+    queryTableMock.mockResolvedValue({ rows, total: 1 });
 
     const { result } = renderHook(
       () =>
         usePagedQuery<Row>({
-          table: 'recipe_docs',
-          select: 'id, name',
-          order: { col: 'name' },
-          page: 1,
-          pageSize: 50,
+          table: 't', select: 'id, name', order: { col: 'name', asc: true }, page: 1, pageSize: 50,
         }),
       { wrapper: wrapperWith(makeClient()) },
     );
 
     await waitFor(() => expect(result.current.status).toBe('loaded'));
-    expect(select).toHaveBeenCalledWith('id, name', { count: 'exact' });
-    expect(chain.order).toHaveBeenCalledWith('name', { ascending: true });
-    expect(range).toHaveBeenCalledWith(0, 49);
+    expect(queryTableMock).toHaveBeenCalledWith({
+      table: 't', select: 'id, name', filters: [], order: { col: 'name', asc: true }, limit: 50, offset: 0,
+    });
     expect(result.current.rows).toEqual(rows);
     expect(result.current.total).toBe(1);
   });
 
-  it('requests the correct range for page 3', async () => {
-    const { range } = makeChain([], 0);
+  it('requests the correct offset for page 3', async () => {
+    queryTableMock.mockResolvedValue({ rows: [], total: 0 });
     const { result } = renderHook(
       () => usePagedQuery<Row>({ table: 't', select: '*', page: 3, pageSize: 50 }),
       { wrapper: wrapperWith(makeClient()) },
     );
     await waitFor(() => expect(result.current.status).toBe('loaded'));
-    expect(range).toHaveBeenCalledWith(100, 149);
+    expect(queryTableMock).toHaveBeenCalledWith(expect.objectContaining({ limit: 50, offset: 100 }));
   });
 
-  it('applies a PostgrestFilter[] as .eq/.in/.lt calls in order', async () => {
-    const { chain } = makeChain([], 0);
+  it('passes the filter list through in order', async () => {
+    queryTableMock.mockResolvedValue({ rows: [], total: 0 });
+    const filters = [
+      { col: 'site', op: 'eq' as const, value: 'punch' },
+      { col: 'state', op: 'in' as const, value: ['queued', 'running'] },
+      { col: 'confidence', op: 'lt' as const, value: 0.5 },
+    ];
     const { result } = renderHook(
-      () =>
-        usePagedQuery<Row>({
-          table: 't',
-          select: '*',
-          filters: [
-            { col: 'site', op: 'eq', value: 'punch' },
-            { col: 'state', op: 'in', value: ['queued', 'running'] },
-            { col: 'confidence', op: 'lt', value: 0.5 },
-          ],
-          page: 1,
-          pageSize: 50,
-        }),
+      () => usePagedQuery<Row>({ table: 't', select: '*', filters, page: 1, pageSize: 50 }),
       { wrapper: wrapperWith(makeClient()) },
     );
     await waitFor(() => expect(result.current.status).toBe('loaded'));
-    expect(chain.eq).toHaveBeenNthCalledWith(1, 'site', 'punch');
-    expect(chain.in).toHaveBeenNthCalledWith(1, 'state', ['queued', 'running']);
-    expect(chain.lt).toHaveBeenNthCalledWith(1, 'confidence', 0.5);
+    expect(queryTableMock).toHaveBeenCalledWith(expect.objectContaining({ filters }));
   });
 
   it('keeps previous rows visible (pending=true) while the next page is loading', async () => {
-    let resolveSecond!: (v: { data: Row[]; count: number; error: null }) => void;
-    const secondPromise = new Promise<{ data: Row[]; count: number; error: null }>((resolve) => {
+    let resolveSecond!: (v: { rows: Row[]; total: number }) => void;
+    const secondPromise = new Promise<{ rows: Row[]; total: number }>((resolve) => {
       resolveSecond = resolve;
     });
-    const range = vi
-      .fn()
-      .mockResolvedValueOnce({ data: [{ id: 1, name: 'a' }], count: 2, error: null })
+    queryTableMock
+      .mockResolvedValueOnce({ rows: [{ id: 1, name: 'a' }], total: 2 })
       .mockReturnValueOnce(secondPromise);
-    const chain = {
-      eq: vi.fn(() => chain),
-      in: vi.fn(() => chain),
-      lt: vi.fn(() => chain),
-      order: vi.fn(() => chain),
-      range,
-    };
-    const select = vi.fn(() => chain);
-    (supabase.from as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ select });
 
     const { result, rerender } = renderHook(
-      ({ page }: { page: number }) =>
-        usePagedQuery<Row>({ table: 't', select: '*', page, pageSize: 1 }),
+      ({ page }: { page: number }) => usePagedQuery<Row>({ table: 't', select: '*', page, pageSize: 1 }),
       { wrapper: wrapperWith(makeClient()), initialProps: { page: 1 } },
     );
 
@@ -130,11 +92,21 @@ describe('usePagedQuery', () => {
 
     rerender({ page: 2 });
     await waitFor(() => expect(result.current.pending).toBe(true));
-    // Previous page's rows are still visible while pending.
     expect(result.current.rows).toEqual([{ id: 1, name: 'a' }]);
+    expect(result.current.status).toBe('loaded');
 
-    resolveSecond({ data: [{ id: 2, name: 'b' }], count: 2, error: null });
+    resolveSecond({ rows: [{ id: 2, name: 'b' }], total: 2 });
     await waitFor(() => expect(result.current.pending).toBe(false));
     expect(result.current.rows).toEqual([{ id: 2, name: 'b' }]);
+  });
+
+  it('reports status=error when the request fails', async () => {
+    queryTableMock.mockRejectedValue(new Error('nope'));
+    const { result } = renderHook(
+      () => usePagedQuery<Row>({ table: 't', select: '*', page: 1, pageSize: 50 }),
+      { wrapper: wrapperWith(makeClient()) },
+    );
+    await waitFor(() => expect(result.current.status).toBe('error'));
+    expect(result.current.rows).toEqual([]);
   });
 });

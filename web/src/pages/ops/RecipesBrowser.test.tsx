@@ -5,8 +5,15 @@ import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 
-const fromMock = vi.fn();
-vi.mock('../../supabase', () => ({ supabase: { from: (table: string) => fromMock(table) } }));
+const queryTableMock = vi.fn();
+const queryOneMock = vi.fn();
+const queryAllMock = vi.fn();
+vi.mock('../../api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api')>()),
+  queryTable: (...args: unknown[]) => queryTableMock(...args),
+  queryOne: (...args: unknown[]) => queryOneMock(...args),
+  queryAll: (...args: unknown[]) => queryAllMock(...args),
+}));
 
 import { RecipesBrowser } from './RecipesBrowser';
 
@@ -18,32 +25,6 @@ interface RecipeListItem {
   cluster_id: string | null;
 }
 
-function mockList(rows: RecipeListItem[]) {
-  const range = vi.fn().mockResolvedValue({ data: rows, count: rows.length, error: null });
-  const chain: Record<string, unknown> = {};
-  chain.eq = vi.fn(() => chain);
-  chain.ilike = vi.fn(() => chain);
-  chain.order = vi.fn(() => ({ range }));
-  return chain;
-}
-
-function singleEq(row: unknown) {
-  const maybeSingle = vi.fn().mockResolvedValue({ data: row, error: null });
-  const eq = vi.fn(() => ({ maybeSingle }));
-  return { eq, maybeSingle };
-}
-
-function listByEq(rows: unknown[]) {
-  const order = vi.fn().mockResolvedValue({ data: rows, error: null });
-  const eq = vi.fn(() => ({ order }));
-  return { eq, order };
-}
-
-function listByIn(rows: unknown[]) {
-  const inFn = vi.fn().mockResolvedValue({ data: rows, error: null });
-  return { in: inFn };
-}
-
 interface MockConfig {
   listRows: RecipeListItem[];
   recipeDetail?: unknown;
@@ -53,37 +34,23 @@ interface MockConfig {
   exportRows?: unknown[];
 }
 
-function mockSupabase(cfg: MockConfig) {
-  const listChain = mockList(cfg.listRows);
-  const recipeDetail = singleEq(cfg.recipeDetail ?? null);
-  const ingredients = listByEq(cfg.ingredientRows ?? []);
-  const resolutions = listByIn(cfg.resolutionRows ?? []);
-  const cluster = singleEq(cfg.clusterRow ?? null);
-  const exports = listByEq(cfg.exportRows ?? []);
-
-  fromMock.mockImplementation((table: string) => {
-    if (table === 'recipes_public') {
-      return { select: vi.fn(() => listChain) };
-    }
-    if (table === 'recipes') {
-      return { select: vi.fn(() => ({ eq: recipeDetail.eq })) };
-    }
-    if (table === 'recipe_ingredients') {
-      return { select: vi.fn(() => ({ eq: ingredients.eq })) };
-    }
-    if (table === 'ingredient_resolutions') {
-      return { select: vi.fn(() => ({ in: resolutions.in })) };
-    }
-    if (table === 'recipe_clusters') {
-      return { select: vi.fn(() => ({ eq: cluster.eq })) };
-    }
-    if (table === 'recipe_exports') {
-      return { select: vi.fn(() => ({ eq: exports.eq })) };
-    }
-    throw new Error(`unexpected table ${table}`);
+// Dispatch the three API reads by table, mirroring what the browser asks for.
+function mockApi(cfg: MockConfig) {
+  queryTableMock.mockImplementation(async (spec: { table: string }) => {
+    if (spec.table === 'recipes_public') return { rows: cfg.listRows, total: cfg.listRows.length };
+    throw new Error(`unexpected paged table ${spec.table}`);
   });
-
-  return { listChain, recipeDetail, ingredients, resolutions, cluster, exports };
+  queryOneMock.mockImplementation(async (table: string) => {
+    if (table === 'recipes') return cfg.recipeDetail ?? null;
+    if (table === 'recipe_clusters') return cfg.clusterRow ?? null;
+    throw new Error(`unexpected single table ${table}`);
+  });
+  queryAllMock.mockImplementation(async (table: string) => {
+    if (table === 'recipe_ingredients') return cfg.ingredientRows ?? [];
+    if (table === 'ingredient_resolutions') return cfg.resolutionRows ?? [];
+    if (table === 'recipe_exports') return cfg.exportRows ?? [];
+    throw new Error(`unexpected list table ${table}`);
+  });
 }
 
 function renderBrowser(client: QueryClient) {
@@ -102,12 +69,14 @@ function makeClient() {
 }
 
 beforeEach(() => {
-  fromMock.mockReset();
+  queryTableMock.mockReset();
+  queryOneMock.mockReset();
+  queryAllMock.mockReset();
 });
 
 describe('<RecipesBrowser>', () => {
   it('lists recipes_public rows', async () => {
-    mockSupabase({
+    mockApi({
       listRows: [{ id: 1, source_url: 'https://ex.test/a', site: 'punch', name: 'Old Fashioned', cluster_id: null }],
     });
     renderBrowser(makeClient());
@@ -116,7 +85,7 @@ describe('<RecipesBrowser>', () => {
   });
 
   it('drills from raw source through parsed ingredients, resolution, cluster, and export', async () => {
-    mockSupabase({
+    mockApi({
       listRows: [{ id: 1, source_url: 'https://ex.test/a', site: 'punch', name: 'Old Fashioned', cluster_id: 'abc123' }],
       recipeDetail: {
         id: 1, source_url: 'https://ex.test/a', site: 'punch', title: 'Old Fashioned',
@@ -149,7 +118,7 @@ describe('<RecipesBrowser>', () => {
   });
 
   it('shows an honest not-yet-clustered / not-yet-exported state when those stages have not run', async () => {
-    mockSupabase({
+    mockApi({
       listRows: [{ id: 1, source_url: 'https://ex.test/a', site: 'punch', name: 'Old Fashioned', cluster_id: null }],
       recipeDetail: {
         id: 1, source_url: 'https://ex.test/a', site: 'punch', title: 'Old Fashioned',
@@ -166,9 +135,14 @@ describe('<RecipesBrowser>', () => {
   });
 
   it('filters the list by site and free text via FilterBar', async () => {
-    const { listChain } = mockSupabase({ listRows: [] });
+    mockApi({ listRows: [] });
     renderBrowser(makeClient());
     await userEvent.type(screen.getByLabelText('filter text'), 'negroni');
-    await waitFor(() => expect(listChain.ilike).toHaveBeenCalledWith('name', '%negroni%'));
+    await waitFor(() =>
+      expect(queryTableMock).toHaveBeenCalledWith(expect.objectContaining({
+        table: 'recipes_public',
+        filters: [{ col: 'name', op: 'ilike', value: '%negroni%' }],
+      })),
+    );
   });
 });

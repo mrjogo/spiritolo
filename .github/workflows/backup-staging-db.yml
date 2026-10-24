@@ -1,13 +1,15 @@
 name: Backup staging database
 
-# Manual-only for now. The artifact upload step at the bottom keeps dumps
-# for 7 days on GitHub's storage — fine for ad-hoc runs, not a backup of
-# record. Wire up durable storage (Backblaze B2, Cloudflare R2, S3, ...)
-# before enabling the schedule below.
+# The export side of the one-time Supabase → SQLite data migration
+# (docs/migration.md): dumps the legacy staging Postgres (public + audit
+# schemas) as a 7-day workflow artifact that scripts/pg_to_sqlite turns into
+# the SQLite file the Railway service imports. Manual-only; the dump never
+# touches this repo's code path otherwise. Delete this workflow, the
+# SUPABASE_STAGING_DB_URL secret and scripts/backup-supabase.sh once the
+# Supabase project is decommissioned. Ongoing backups of the live SQLite
+# database are Litestream's job (docs/backups.md).
 on:
   workflow_dispatch:
-  # schedule:
-  #   - cron: '0 2 * * *'   # daily at 02:00 UTC
 
 jobs:
   backup:
@@ -27,6 +29,8 @@ jobs:
             | sudo tee /etc/apt/sources.list.d/pgdg.list > /dev/null
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17
+          # pg_wrapper resolves `pg_dump` to the distro default (16); put 17 first.
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
 
       - name: Run backup script
         env:
@@ -36,6 +40,7 @@ jobs:
             echo "SUPABASE_STAGING_DB_URL is not set" >&2
             exit 1
           fi
+          pg_dump --version
           ./scripts/backup-supabase.sh
 
       - name: Upload dump + sidecar as workflow artifact

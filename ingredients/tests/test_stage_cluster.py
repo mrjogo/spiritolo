@@ -6,49 +6,49 @@ variant within one cluster; ice is off the key. Runs against TEST_DB_URL.
 
 from __future__ import annotations
 
-import psycopg
 import pytest
+from common.db import jlist
 
 from ingredients.dedup.version import DEDUP_VERSION
 from ingredients.pipeline.stages.cluster import cluster_stage_fn
 
 
 @pytest.fixture()
-def conn(test_db_url: str):
-    with psycopg.connect(test_db_url, autocommit=True) as c:
+def conn(db_conn):
+    if (c := db_conn) is not None:
         for t in ("recipes", "job_items", "ingredient_resolutions",
                   "recipe_clusters", "taxonomy_nodes", "cocktail_aliases"):
-            c.execute(f"truncate {t} restart identity cascade")
+            c.execute(f"delete from {t}")
         for slug, role in [("gin", "base_spirit"), ("campari", "modifier"),
                            ("sweet-vermouth", "modifier"), ("ice", "ice")]:
             c.execute(
                 "insert into taxonomy_nodes (slug, display_name, default_role, is_cluster_node) "
-                "values (%s, %s, %s, true)",
+                "values (?, ?, ?, true)",
                 (slug, slug, role),
             )
         for name, slug in [("gin", "gin"), ("campari", "campari"),
                            ("sweet vermouth", "sweet-vermouth"), ("ice", "ice")]:
             c.execute(
                 "insert into ingredient_resolutions (normalized_name, taxonomy_slug, method, version) "
-                "values (%s, %s, 'alias', 'v1')",
+                "values (?, ?, 'alias', 'v1')",
                 (name, slug),
             )
         yield c
         for t in ("recipes", "job_items", "ingredient_resolutions",
                   "recipe_clusters", "taxonomy_nodes", "cocktail_aliases"):
-            c.execute(f"truncate {t} restart identity cascade")
+            c.execute(f"delete from {t}")
 
 
 def _negroni(conn, url, site, ingredients):
     rid = conn.execute(
         "insert into recipes (source_url, site, source, title, canonical_name) "
-        "values (%s, %s, '{}'::jsonb, 'Negroni', 'negroni') returning id",
+        "values (?, ?, '{}', 'Negroni', 'negroni') returning id",
         (url, site),
     ).fetchone()[0]
     for pos, (name, amount) in enumerate(ingredients):
         conn.execute(
             "insert into recipe_ingredients (recipe_id, position, name, amount, unit, raw_text) "
-            "values (%s, %s, %s, %s, 'oz', 'x')",
+            "values (?, ?, ?, ?, 'oz', 'x')",
             (rid, pos, name, amount),
         )
     return rid
@@ -67,7 +67,7 @@ def test_identical_recipes_share_cluster_and_variant(conn):
     counts = cluster_stage_fn(_job(), conn, None)
     assert counts["clustered"] == 2
     rows = conn.execute(
-        "select cluster_id, variant_key from recipes where id in (%s,%s) order by id", (a, b)
+        "select cluster_id, variant_key from recipes where id in (?,?) order by id", (a, b)
     ).fetchall()
     assert rows[0] == rows[1]
     # One cluster row with recipe_count 2 across 2 sources.
@@ -82,7 +82,7 @@ def test_ratio_variants_split_within_one_cluster(conn):
     b = _negroni(conn, "https://ex.test/r2", "imbibe", [("gin", 1.5), ("campari", 1.0), ("sweet vermouth", 1.0)])
     cluster_stage_fn(_job(), conn, None)
     rows = conn.execute(
-        "select cluster_id, variant_key from recipes where id in (%s,%s) order by id", (a, b)
+        "select cluster_id, variant_key from recipes where id in (?,?) order by id", (a, b)
     ).fetchall()
     assert rows[0][0] == rows[1][0]      # same cluster
     assert rows[0][1] != rows[1][1]      # different variant
@@ -93,7 +93,7 @@ def test_ice_is_off_the_cluster_key(conn):
     b = _negroni(conn, "https://ex.test/i2", "imbibe", _BASE + [("ice", 1.0)])
     cluster_stage_fn(_job(), conn, None)
     rows = conn.execute(
-        "select cluster_id, variant_key from recipes where id in (%s,%s) order by id", (a, b)
+        "select cluster_id, variant_key from recipes where id in (?,?) order by id", (a, b)
     ).fetchall()
     assert rows[0] == rows[1]
 
@@ -112,7 +112,7 @@ def test_chunk_boundary_matches_single_chunk(conn):
 
     # All five collapse to one cluster + variant.
     rows = conn.execute(
-        "select cluster_id, variant_key from recipes where id = any(%s) order by id", (rids,)
+        "select cluster_id, variant_key from recipes where id in (select value from json_each(?)) order by id", (jlist(rids),)
     ).fetchall()
     assert len({r[0] for r in rows}) == 1
     assert len({r[1] for r in rows}) == 1
@@ -142,24 +142,24 @@ def test_cluster_skips_recipe_with_provisional_ingredient(conn):
     assert counts["clustered"] == 0
     assert conn.execute("select count(*) from recipe_clusters").fetchone()[0] == 0
     assert conn.execute(
-        "select cluster_id from recipes where id=%s", (rid,)
+        "select cluster_id from recipes where id=?", (rid,)
     ).fetchone()[0] is None
     outcome = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='cluster-recipes'", (rid,)
+        "select outcome from job_items where entity_id=? and stage='cluster-recipes'", (rid,)
     ).fetchone()[0]
     assert outcome == "pending"
 
     # Promote to live + requeue (clear the pending ledger row, as connect-nodes'
     # promotion + a re-run would) -> now clusters normally.
     conn.execute("update taxonomy_nodes set status='live' where slug='gin'")
-    conn.execute("delete from job_items where entity_id=%s and stage='cluster-recipes'", (rid,))
+    conn.execute("delete from job_items where entity_id=? and stage='cluster-recipes'", (rid,))
     counts2 = cluster_stage_fn(_job(), conn, None)
     assert counts2["clustered"] == 1
     assert conn.execute(
-        "select cluster_id from recipes where id=%s", (rid,)
+        "select cluster_id from recipes where id=?", (rid,)
     ).fetchone()[0] is not None
     outcome2 = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='cluster-recipes'", (rid,)
+        "select outcome from job_items where entity_id=? and stage='cluster-recipes'", (rid,)
     ).fetchone()[0]
     assert outcome2 == "resolved"
 

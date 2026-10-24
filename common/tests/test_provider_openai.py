@@ -31,9 +31,9 @@ def test_resolve_returns_provider_result_with_model_id():
     # against this budget; 256 isn't enough and produces empty content.
     assert kwargs["max_completion_tokens"] == 2048
     assert kwargs["response_format"] == {"type": "json_object"}
-    # gpt-5-family must pin reasoning_effort=minimal, otherwise the model
-    # burns the budget thinking about a structured-retrieval prompt.
-    assert kwargs["reasoning_effort"] == "minimal"
+    # gpt-5-family must pin reasoning_effort=none — reasoning off entirely for
+    # a structured-retrieval prompt, freeing the whole token budget for output.
+    assert kwargs["reasoning_effort"] == "none"
 
 
 def test_resolve_omits_reasoning_effort_for_non_gpt5_models():

@@ -11,7 +11,6 @@ from __future__ import annotations
 import gzip
 import hashlib
 
-import psycopg
 import pytest
 from recipegf import parse_recipe_id
 
@@ -44,9 +43,9 @@ class _FakeCorpus:
         return gzip.decompress(self._by_key[key]).decode()
 
 
-def _seed_taxonomy(conn: psycopg.Connection) -> None:
-    conn.execute("truncate taxonomy_nodes restart identity cascade")
-    conn.execute("truncate cocktail_aliases")
+def _seed_taxonomy(conn) -> None:
+    conn.execute("delete from taxonomy_nodes")
+    conn.execute("delete from cocktail_aliases")
     nodes = [
         ("bourbon", "Bourbon", "base_spirit"),
         ("simple-syrup", "Simple Syrup", "sweetener"),
@@ -56,7 +55,7 @@ def _seed_taxonomy(conn: psycopg.Connection) -> None:
     for slug, display, role in nodes:
         ids[slug] = conn.execute(
             "insert into taxonomy_nodes (slug, display_name, default_role, is_cluster_node) "
-            "values (%s, %s, %s, true) returning id",
+            "values (?, ?, ?, true) returning id",
             (slug, display, role),
         ).fetchone()[0]
     for slug, alias in [
@@ -65,23 +64,23 @@ def _seed_taxonomy(conn: psycopg.Connection) -> None:
         ("angostura-bitters", "angostura bitters"),
     ]:
         conn.execute(
-            "insert into taxonomy_aliases (node_id, alias) values (%s, %s)",
+            "insert into taxonomy_aliases (node_id, alias) values (?, ?)",
             (ids[slug], alias),
         )
 
 
 @pytest.fixture()
-def conn(test_db_url: str):
-    with psycopg.connect(test_db_url, autocommit=True) as c:
+def conn(db_conn):
+    if (c := db_conn) is not None:
         for t in ("recipes", "pages", "job_items", "ingredient_resolutions",
                   "recipe_clusters", "recipe_exports"):
-            c.execute(f"truncate {t} restart identity cascade")
+            c.execute(f"delete from {t}")
         _seed_taxonomy(c)
         url = "https://ex.test/old-fashioned"
         key = hashlib.sha256(url.encode()).hexdigest()
         c.execute(
             "insert into pages (url, site, corpus_key, content_type) "
-            "values (%s, 'ex', %s, 'likely_drink_recipe')",
+            "values (?, 'ex', ?, 'likely_drink_recipe')",
             (url, key),
         )
         extract.set_corpus_reader(_FakeCorpus({key: _HTML}))
@@ -121,7 +120,7 @@ def test_cold_build_produces_bundle_and_one_run_per_stage(conn):
     # Exactly one stage_run per content stage for this recipe/page.
     recipe_job_items = {
         r[0] for r in conn.execute(
-            "select stage from job_items where entity_type='recipe' and entity_id=%s",
+            "select stage from job_items where entity_type='recipe' and entity_id=?",
             (recipe[0],),
         ).fetchall()
     }

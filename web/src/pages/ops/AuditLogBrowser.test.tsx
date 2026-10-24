@@ -5,8 +5,15 @@ import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 
-const fromMock = vi.fn();
-vi.mock('../../supabase', () => ({ supabase: { from: (table: string) => fromMock(table) } }));
+const queryTableMock = vi.fn();
+const queryOneMock = vi.fn();
+const queryAllMock = vi.fn();
+vi.mock('../../api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api')>()),
+  queryTable: (...args: unknown[]) => queryTableMock(...args),
+  queryOne: (...args: unknown[]) => queryOneMock(...args),
+  queryAll: (...args: unknown[]) => queryAllMock(...args),
+}));
 
 import { AuditLogBrowser } from './AuditLogBrowser';
 
@@ -21,25 +28,20 @@ interface LogRow {
   source: string;
 }
 
-function mockSupabase(rows: LogRow[], detailRow: unknown = null) {
-  const listEqCalls: [string, unknown][] = [];
-  const range = vi.fn().mockResolvedValue({ data: rows, count: rows.length, error: null });
-  const listChain: Record<string, unknown> = {};
-  listChain.eq = vi.fn((col: string, value: unknown) => { listEqCalls.push([col, value]); return listChain; });
-  listChain.order = vi.fn(() => ({ range }));
-
-  const maybeSingle = vi.fn().mockResolvedValue({ data: detailRow, error: null });
-  const detailEq = vi.fn(() => ({ maybeSingle }));
-
-  fromMock.mockImplementation((table: string) => {
-    if (table !== 'audit_log_public') throw new Error(`unexpected table ${table}`);
-    return {
-      select: (_sel: string, opts?: { count?: string }) =>
-        (opts && opts.count ? listChain : { eq: detailEq }),
-    };
+function mockApi(rows: LogRow[], detailRow: unknown = null) {
+  const specs: { table: string; filters?: { col: string; value: unknown }[] }[] = [];
+  queryTableMock.mockImplementation(async (spec: { table: string; filters?: { col: string; value: unknown }[] }) => {
+    if (spec.table !== 'audit_log_public') throw new Error(`unexpected table ${spec.table}`);
+    specs.push(spec);
+    return { rows, total: rows.length };
   });
-
-  return { listEqCalls, detailEq };
+  queryOneMock.mockImplementation(async (table: string) => {
+    if (table !== 'audit_log_public') throw new Error(`unexpected table ${table}`);
+    return detailRow;
+  });
+  const listEqCalls = (): [string, unknown][] =>
+    specs.flatMap((s) => (s.filters ?? []).map((f) => [f.col, f.value] as [string, unknown]));
+  return { listEqCalls, detailEq: queryOneMock };
 }
 
 function renderBrowser(client: QueryClient) {
@@ -58,12 +60,14 @@ function makeClient() {
 }
 
 beforeEach(() => {
-  fromMock.mockReset();
+  queryTableMock.mockReset();
+  queryOneMock.mockReset();
+  queryAllMock.mockReset();
 });
 
 describe('<AuditLogBrowser>', () => {
   it('lists audit_log_public rows with actor legibility (kind + id)', async () => {
-    mockSupabase([
+    mockApi([
       { id: 1, ts: '2026-07-01T00:00:00Z', table_name: 'recipes', pk: '10', op: 'U', actor_kind: 'human', actor_id: 'abc-123', source: 'manual-ui-edit' },
       { id: 2, ts: '2026-07-01T00:00:01Z', table_name: 'recipes', pk: '11', op: 'I', actor_kind: 'worker', actor_id: '42', source: 'job:parse' },
     ]);
@@ -77,14 +81,14 @@ describe('<AuditLogBrowser>', () => {
   });
 
   it('filters by actor_kind', async () => {
-    const { listEqCalls } = mockSupabase([]);
+    const { listEqCalls } = mockApi([]);
     renderBrowser(makeClient());
     await userEvent.selectOptions(screen.getByLabelText('actor kind'), 'system');
-    await waitFor(() => expect(listEqCalls).toContainEqual(['actor_kind', 'system']));
+    await waitFor(() => expect(listEqCalls()).toContainEqual(['actor_kind', 'system']));
   });
 
   it('selecting a row shows the before/after diff and changed_keys', async () => {
-    const { detailEq } = mockSupabase(
+    const { detailEq } = mockApi(
       [{ id: 1, ts: '2026-07-01T00:00:00Z', table_name: 'recipes', pk: '10', op: 'U', actor_kind: 'human', actor_id: 'abc-123', source: 'manual-ui-edit' }],
       {
         id: 1, ts: '2026-07-01T00:00:00Z', table_name: 'recipes', pk: '10', op: 'U',
@@ -95,8 +99,62 @@ describe('<AuditLogBrowser>', () => {
     renderBrowser(makeClient());
     const row = await within(await screen.findByRole('table')).findByRole('button');
     await userEvent.click(row);
-    await waitFor(() => expect(detailEq).toHaveBeenCalledWith('id', 1));
+    await waitFor(() => expect(detailEq).toHaveBeenCalledWith('audit_log_public', [{ col: 'id', op: 'eq', value: 1 }]));
     expect(await screen.findByText('"New"')).toBeInTheDocument();
     expect(screen.getByText('"Old"')).toBeInTheDocument();
+  });
+
+  it('explains that insert rows store no payload', async () => {
+    const row = {
+      id: 7, ts: '2026-08-04T00:00:00Z', table_name: 'recipes', pk: '99',
+      op: 'I', actor_kind: 'worker', actor_id: '42', source: 'job:extract-recipe',
+    };
+    mockApi([row], { ...row, before: null, after: null, changed_keys: null });
+    renderBrowser(makeClient());
+
+    await userEvent.click(await within(await screen.findByRole('table')).findByRole('button'));
+
+    expect(await screen.findByText(/payload not stored/i)).toBeInTheDocument();
+    // The bare `before:`/`after:` leaves would imply a stored (null) image.
+    expect(screen.queryByText('before:')).not.toBeInTheDocument();
+    expect(screen.queryByText('after:')).not.toBeInTheDocument();
+  });
+
+  it('labels update images as the changed-key subset', async () => {
+    const row = {
+      id: 8, ts: '2026-08-04T00:00:00Z', table_name: 'recipes', pk: '99',
+      op: 'U', actor_kind: 'worker', actor_id: '42', source: 'job:extract-recipe',
+    };
+    mockApi([row], {
+      ...row,
+      before: { title: 'Old' },
+      after: { title: 'New' },
+      changed_keys: ['title'],
+    });
+    renderBrowser(makeClient());
+
+    await userEvent.click(await within(await screen.findByRole('table')).findByRole('button'));
+
+    expect(await screen.findByText('before (changed keys only):')).toBeInTheDocument();
+    expect(screen.getByText('after (changed keys only):')).toBeInTheDocument();
+  });
+
+  it('leaves the delete pre-image labelled as a full row', async () => {
+    const row = {
+      id: 9, ts: '2026-08-04T00:00:00Z', table_name: 'recipes', pk: '99',
+      op: 'D', actor_kind: 'system', actor_id: null, source: 'hand-sql',
+    };
+    mockApi([row], {
+      ...row,
+      before: { title: 'Gone' },
+      after: null,
+      changed_keys: null,
+    });
+    renderBrowser(makeClient());
+
+    await userEvent.click(await within(await screen.findByRole('table')).findByRole('button'));
+
+    expect(await screen.findByText('before:')).toBeInTheDocument();
+    expect(screen.queryByText('before (changed keys only):')).not.toBeInTheDocument();
   });
 });

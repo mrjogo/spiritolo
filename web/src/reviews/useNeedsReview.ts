@@ -1,9 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../supabase';
+import { queryAll } from '../api';
 
-// One row per open item surfaced by the committed `needs_review` view — the
-// union of human flags, machine proposals, and distance-gate misses across
-// every stage. Shape matches the view's columns exactly.
+// One row per open item surfaced by the `needs_review` view — the union of
+// human flags, machine proposals, and distance-gate misses across every stage.
 export interface NeedsReviewRow {
   entity_kind: string;
   entity_id: string;
@@ -11,14 +10,12 @@ export interface NeedsReviewRow {
   reason: string;
 }
 
-async function fetchNeedsReview(): Promise<NeedsReviewRow[]> {
-  const { data, error } = await supabase.from('needs_review').select('*');
-  if (error) throw error;
-  return (data ?? []) as NeedsReviewRow[];
+function fetchNeedsReview(): Promise<NeedsReviewRow[]> {
+  return queryAll<NeedsReviewRow>('needs_review');
 }
 
-// react-query hook mirroring useStageQueueCounts: identical concurrent callers
-// dedupe under this queryKey, so multiple consumers issue a single fetch.
+// react-query hook: identical concurrent callers dedupe under this queryKey,
+// so multiple consumers issue a single fetch.
 export function useNeedsReview(): { rows: NeedsReviewRow[]; status: string } {
   const query = useQuery({
     queryKey: ['needsReview'],

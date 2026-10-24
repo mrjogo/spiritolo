@@ -17,14 +17,14 @@ deterministic and needs no LLM, so it runs even in the CLI cold build where
 
 from __future__ import annotations
 
-import psycopg
+from common.db import Connection
 
 from ingredients.mapping.resolutions import write_resolution
 from ingredients.recipegf.slug import is_valid_slug, slugify
 
 
 def mint_provisional_node(
-    conn: psycopg.Connection,
+    conn: Connection,
     *,
     normalized_name: str,
     version: str,
@@ -36,33 +36,26 @@ def mint_provisional_node(
     (empty / punctuation-only) — the caller abstains rather than minting a bad
     node. Idempotent: the node insert, the provenance insert, and the resolution
     UPSERT all tolerate repeat calls, so re-running map over the same name is a
-    no-op. An ``on conflict (slug) do nothing`` get-or-create means a pre-existing
-    live node with this slug is left untouched and simply gains the resolution.
+    no-op. The ``insert or ignore`` get-or-create means a pre-existing live node
+    with this slug is left untouched and simply gains the resolution.
     """
     slug = slugify(normalized_name)
     if not slug or not is_valid_slug(slug):
         return None
 
-    row = conn.execute(
-        "insert into taxonomy_nodes (slug, display_name, status, node_kind, is_cluster_node) "
-        "values (%s, %s, 'provisional', null, false) "
-        "on conflict (slug) do nothing returning id",
+    conn.execute(
+        "insert or ignore into taxonomy_nodes (slug, display_name, status, node_kind, is_cluster_node) "
+        "values (?, ?, 'provisional', null, 0)",
         (slug, normalized_name),
-    ).fetchone()
-    if row is None:
-        node_id = conn.execute(
-            "select id from taxonomy_nodes where slug = %s", (slug,)
-        ).fetchone()[0]
-    else:
-        node_id = row[0]
+    )
+    node_id = conn.execute(
+        "select id from taxonomy_nodes where slug = ?", (slug,)
+    ).fetchone()[0]
 
     conn.execute(
-        """
-        insert into taxonomy_provenance
-            (node_id, source, mapper_version, raw_string, model_id)
-        values (%s, 'map-mint', %s, %s, %s)
-        on conflict (node_id) do nothing
-        """,
+        "insert or ignore into taxonomy_provenance "
+        "(node_id, source, mapper_version, raw_string, model_id) "
+        "values (?, 'map-mint', ?, ?, ?)",
         (node_id, version, normalized_name, model_id),
     )
     write_resolution(

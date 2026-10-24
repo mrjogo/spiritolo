@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import psycopg
 import pytest
 
 from ingredients.mapping.eval_fixture import seed
@@ -36,15 +35,15 @@ class _FakeChain:
 
 
 @pytest.fixture()
-def conn(test_db_url: str):
-    with psycopg.connect(test_db_url, autocommit=True) as c:
+def conn(db_conn):
+    if (c := db_conn) is not None:
         _truncate(c)
         ids = seed(c)  # citrus/lemon/gin/london-dry-gin/tanqueray/bourbon
         yield c, ids
         _truncate(c)
 
 
-def _truncate(c: psycopg.Connection) -> None:
+def _truncate(c) -> None:
     for t in (
         "recipes",
         "human_reviews",
@@ -55,18 +54,18 @@ def _truncate(c: psycopg.Connection) -> None:
         "taxonomy_edges",
         "taxonomy_nodes",
     ):
-        c.execute(f"truncate {t} restart identity cascade")
+        c.execute(f"delete from {t}")
 
 
 def _recipe(c, url, ingredient_names):
     rid = c.execute(
-        "insert into recipes (source_url, site, source) values (%s, 'ex', '{}'::jsonb) returning id",
+        "insert into recipes (source_url, site, source) values (?, 'ex', '{}') returning id",
         (url,),
     ).fetchone()[0]
     for pos, name in enumerate(ingredient_names):
         c.execute(
             "insert into recipe_ingredients (recipe_id, position, name, raw_text) "
-            "values (%s, %s, %s, %s)",
+            "values (?, ?, ?, ?)",
             (rid, pos, name, f"{name} raw"),
         )
     return rid

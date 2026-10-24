@@ -1,0 +1,34 @@
+[project]
+name = "spiritolo-app"
+version = "0.1.0"
+description = "The Spiritolo service: public API + ops API + static web build + in-process pipeline executor."
+requires-python = ">=3.11"
+dependencies = [
+    "spiritolo-common",
+    "spiritolo-ingredients",
+    "fastapi>=0.161",
+    "uvicorn[standard]>=0.54",
+    "itsdangerous>=2.2",
+    "webauthn>=3.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv.sources]
+spiritolo-common = { workspace = true }
+spiritolo-ingredients = { workspace = true }

@@ -19,9 +19,7 @@ import functools
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
-import psycopg
-from psycopg.types.json import Json
-
+from common.db import Connection, jdump, jlist
 from common.providers.packing import Item
 from ingredients.pipeline import corpus, ledger
 from ingredients.pipeline.stages import base
@@ -32,8 +30,8 @@ STAGE = "extract-recipe"
 EXTRACTOR_VERSION = "v1"
 
 # Page classification labels the extract queue accepts — the Zone-1 classifier's
-# recipe verdicts (mirrors scraper.db.EXTRACT_CONTENT_TYPES; ingredients doesn't
-# depend on scraper, so the values are duplicated rather than imported).
+# recipe verdicts. Duplicated here rather than imported: ingredients doesn't
+# depend on scraper.
 RECIPE_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink")
 
 # Corpus GETs are the extract bottleneck (one network round-trip per page), so
@@ -58,27 +56,27 @@ def _reader() -> corpus.CorpusReader:
 
 
 def _page_queue(
-    conn: psycopg.Connection, site: str | None, limit: int | None
+    conn: Connection, site: str | None, limit: int | None
 ) -> list[dict[str, Any]]:
     """Pages classified as recipes with a corpus key and no extract run at
     EXTRACTOR_VERSION."""
     clauses = [
-        "p.content_type = any(%s)",
+        "p.content_type in (select value from json_each(?))",
         "p.corpus_key is not null",
         """not exists (
             select 1 from job_items r
             where r.entity_type = 'page' and r.entity_id = p.id
-              and r.stage = %s and r.code_version = %s
+              and r.stage = ? and r.code_version = ?
         )""",
     ]
-    params: list[Any] = [list(RECIPE_CONTENT_TYPES), STAGE, EXTRACTOR_VERSION]
+    params: list[Any] = [jlist(RECIPE_CONTENT_TYPES), STAGE, EXTRACTOR_VERSION]
     if site is not None:
-        clauses.append("p.site = %s")
+        clauses.append("p.site = ?")
         params.append(site)
     sql = "select p.id, p.url, p.site, p.corpus_key from pages p where " + " and ".join(clauses)
     sql += " order by p.id"
     if limit is not None:
-        sql += " limit %s"
+        sql += " limit ?"
         params.append(limit)
     return [
         {"id": r[0], "url": r[1], "site": r[2], "corpus_key": r[3]}
@@ -86,34 +84,35 @@ def _page_queue(
     ]
 
 
-def _upsert_recipe(conn: psycopg.Connection, page: dict[str, Any], recipe: dict[str, Any]) -> None:
+def _upsert_recipe(conn: Connection, page: dict[str, Any], recipe: dict[str, Any]) -> None:
     conn.execute(
         """
         insert into recipes (source_url, site, source, title, author, image_url)
-        values (%s, %s, %s, %s, %s, %s)
+        values (?, ?, ?, ?, ?, ?)
         on conflict (source_url) do update set
-            site      = excluded.site,
-            source    = excluded.source,
-            title     = excluded.title,
-            author    = excluded.author,
-            image_url = excluded.image_url
+            site       = excluded.site,
+            source     = excluded.source,
+            title      = excluded.title,
+            author     = excluded.author,
+            image_url  = excluded.image_url,
+            updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
         """,
         (
-            page["url"], page["site"], Json(recipe),
+            page["url"], page["site"], jdump(recipe),
             jsonld.derive_name(recipe), jsonld.derive_author(recipe),
             jsonld.derive_image_url(recipe),
         ),
     )
 
 
-def _pages_by_ids(conn: psycopg.Connection, page_ids: list[int]) -> list[dict[str, Any]]:
+def _pages_by_ids(conn: Connection, page_ids: list[int]) -> list[dict[str, Any]]:
     """Load the explicit page members of a run (same row shape as _page_queue)."""
     if not page_ids:
         return []
     rows = conn.execute(
         "select p.id, p.url, p.site, p.corpus_key from pages p "
-        "where p.id = any(%s) order by p.id",
-        (page_ids,),
+        "where p.id in (select value from json_each(?)) order by p.id",
+        (jlist(page_ids),),
     ).fetchall()
     return [
         {"id": r[0], "url": r[1], "site": r[2], "corpus_key": r[3]} for r in rows
@@ -154,7 +153,7 @@ def _windows(seq: list[Any], size: int):
 
 def extract_stage_fn(
     job: dict[str, Any],
-    conn: psycopg.Connection,
+    conn: Connection,
     providers: Any,
     *,
     workers: int = _READ_WORKERS,
@@ -175,10 +174,15 @@ def extract_stage_fn(
     if not pages:
         return counts
 
+    should_stop = job.get("should_stop")
     fetch = functools.partial(_read_html, _reader())
     with ThreadPoolExecutor(max_workers=workers) as pool:
         for chunk in _windows(pages, window):
+            if should_stop is not None and should_stop():
+                break  # cancel requested: leave the rest pending for a re-run
             for page, html in pool.map(fetch, chunk):
+                if should_stop is not None and should_stop():
+                    break
                 if html is None:
                     counts["html_missing"] += 1
                     _record(conn, page["id"], outcome="failed", method="deterministic",

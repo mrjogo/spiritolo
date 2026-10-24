@@ -29,7 +29,16 @@ import type { FacetOption } from '../../../ui/runs/FilterPopover';
 import './runs.css';
 
 const PAGE_SIZE = 50;
-const DEFAULT_SORT: Sort = { col: 'last_run', asc: false };
+const DEFAULT_SORT: Sort[] = [{ col: 'last_run', asc: false }];
+
+// Clicking a column header promotes it to the PRIMARY sort key (toggling its
+// direction if it already is), keeping the remaining keys as tiebreakers.
+function promoteSort(sort: Sort[], col: string): Sort[] {
+  if (sort[0]?.col === col) {
+    return [{ col, asc: !sort[0].asc }, ...sort.slice(1)];
+  }
+  return [{ col, asc: false }, ...sort.filter((k) => k.col !== col)];
+}
 
 // The entity a run's items point at depends on its stage: the node
 // harmonization stages operate on taxonomy nodes, extract on pages, everything
@@ -42,7 +51,10 @@ function entityTypeForStage(stage: string): string {
 
 const SORT_OPTIONS = [
   { col: 'last_run', label: 'Last run' },
-  { col: 'title', label: 'Recipe' },
+  { col: 'title', label: 'Title' },
+  { col: 'source', label: 'Source' },
+  { col: 'status', label: 'Status' },
+  { col: 'code_version', label: 'Code version' },
 ];
 
 // Builds the popover option list for a dimension from its facet map, listing
@@ -70,13 +82,18 @@ export function AddTasks() {
   const entityType = entityTypeForStage(stage);
 
   const [filterState, setFilterState] = useState<RunFilterState>(emptyFilterState);
-  const [sort, setSort] = useState<Sort>(DEFAULT_SORT);
+  const [sort, setSort] = useState<Sort[]>(DEFAULT_SORT);
   const [page, setPage] = useState(1);
   const [selection, setSelection] = useState<Selection>(emptySelection);
   const [viewSelectionOnly, setViewSelectionOnly] = useState(false);
 
   const pFilter = useMemo(() => buildPFilter(filterState), [filterState]);
   const { rows, total, facets } = useEligiblePool(stage, pFilter, sort, page, PAGE_SIZE);
+
+  const onHeaderSort = (col: string) => {
+    setSort((s) => promoteSort(s, col));
+    setPage(1);
+  };
 
   const dimensions: FilterDimension[] = [
     { key: 'status', label: 'Status', options: facetOptions(facets.status) },
@@ -179,6 +196,19 @@ export function AddTasks() {
           </div>
         )}
 
+        {/* The table header (with its select-all) is hidden on mobile where rows
+            linearize into cards, so surface a select-all control that stays
+            visible there. */}
+        <label className="runs-mobile-selectall">
+          <input
+            type="checkbox"
+            aria-label="select all on page (mobile)"
+            checked={allVisibleSelected}
+            onChange={toggleAllVisible}
+          />
+          Select all on page
+        </label>
+
         <table className="data-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
             <tr>
@@ -190,10 +220,10 @@ export function AddTasks() {
                   onChange={toggleAllVisible}
                 />
               </th>
-              <SortableTh label="Recipe" col="title" sort={sort} onSort={setSort} />
-              <SortableTh label="Source" col="source" sort={sort} onSort={setSort} />
-              <SortableTh label="Status" col="status" sort={sort} onSort={setSort} />
-              <SortableTh label="Last run" col="last_run" sort={sort} onSort={setSort} />
+              <SortableTh label="Recipe" col="title" sort={sort} onSort={onHeaderSort} />
+              <SortableTh label="Source" col="source" sort={sort} onSort={onHeaderSort} />
+              <SortableTh label="Status" col="status" sort={sort} onSort={onHeaderSort} />
+              <SortableTh label="Last run" col="last_run" sort={sort} onSort={onHeaderSort} />
             </tr>
           </thead>
           <tbody>
@@ -250,9 +280,12 @@ export function AddTasks() {
   );
 }
 
-function sortIndicator(sort: Sort, col: string): string {
-  if (sort.col !== col) return '';
-  return sort.asc ? '↑' : '↓';
+function sortIndicator(sort: Sort[], col: string): string {
+  const idx = sort.findIndex((k) => k.col === col);
+  if (idx === -1) return '';
+  const arrow = sort[idx].asc ? '↑' : '↓';
+  // Show the level number when this isn't the only sort key.
+  return sort.length > 1 ? `${arrow}${idx + 1}` : arrow;
 }
 
 function SortableTh({
@@ -260,8 +293,8 @@ function SortableTh({
 }: {
   label: string;
   col: string;
-  sort: Sort;
-  onSort: (s: Sort) => void;
+  sort: Sort[];
+  onSort: (col: string) => void;
 }) {
   const indicator = sortIndicator(sort, col);
   return (
@@ -271,7 +304,7 @@ function SortableTh({
         className="runs-clearall"
         style={{ textTransform: 'uppercase', letterSpacing: '0.04em', fontWeight: 600 }}
         aria-label={`Sort by ${label}`}
-        onClick={() => onSort({ col, asc: sort.col === col ? !sort.asc : false })}
+        onClick={() => onSort(col)}
       >
         {label} {indicator && <span aria-hidden>{indicator}</span>}
       </button>

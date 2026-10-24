@@ -2,23 +2,24 @@
 
 Runs the stages left-to-right over the whole queue, so a fresh corpus builds all
 the way to frozen bundles in one call: extract-recipe (pages -> recipes) ->
-parse-ingredients -> map-ingredient -> convert-steps -> cluster-recipes ->
-export-recipegf. Each stage is idempotent over its
-`job_items` queue, so a re-run only touches what a prior run left undone.
+parse-ingredients -> map-ingredient -> combine-nodes -> connect-nodes ->
+convert-steps -> cluster-recipes -> export-recipegf. Each stage is idempotent
+over its `job_items` queue, so a re-run only touches what a prior run left
+undone.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import psycopg
+from common.db import Connection
 
 from ingredients.pipeline.stages import STAGE_ORDER
 from ingredients.worker import dispatch
 
 
 def run_cold_build(
-    conn: psycopg.Connection,
+    conn: Connection,
     *,
     site: str | None = None,
     limit: int | None = None,

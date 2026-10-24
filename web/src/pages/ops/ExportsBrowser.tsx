@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../../supabase';
+import { queryAll, queryOne } from '../../api';
 import { DataTable, type DataTableColumn } from '../../ui/DataTable';
 import { SplitView, DetailPane } from '../../ui/SplitView';
 import { JsonView } from '../../ui/JsonView';
@@ -44,7 +44,7 @@ const PAGE_SIZE = 50;
 
 export function ExportsBrowser() {
   const [page, setPage] = useState(1);
-  const { rows, total } = usePagedQuery<ExportListRow>({
+  const { rows, total, status } = usePagedQuery<ExportListRow>({
     table: 'recipe_exports',
     select: LIST_SELECT,
     order: { col: 'exported_at', asc: false },
@@ -60,6 +60,7 @@ export function ExportsBrowser() {
           <DataTable
             columns={COLUMNS}
             rows={rows}
+            loading={status === 'loading'}
             rowKey={(r) => r.id}
             onRowClick={(r) => select(String(r.id))}
           />
@@ -74,15 +75,7 @@ export function ExportsBrowser() {
 function ExportDetail({ id }: { id: string | null }) {
   const query = useQuery({
     queryKey: ['exportDetail', id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('recipe_exports')
-        .select('*')
-        .eq('id', Number(id))
-        .maybeSingle();
-      if (error) throw error;
-      return data as ExportDetailRow | null;
-    },
+    queryFn: () => queryOne<ExportDetailRow>('recipe_exports', [{ col: 'id', op: 'eq', value: Number(id) }]),
     enabled: id != null,
   });
 
@@ -103,29 +96,23 @@ function ExportDetail({ id }: { id: string | null }) {
 }
 
 async function fetchPreview(recipeId: number): Promise<BundlePreview | null> {
-  const { data: header, error: headerError } = await supabase
-    .from('recipes')
-    .select('id, title, canonical_name, recipe_slug, source_url, equipment')
-    .eq('id', recipeId)
-    .maybeSingle();
-  if (headerError) throw headerError;
+  const header = await queryOne<BundlePreviewHeaderInput>(
+    'recipes', [{ col: 'id', op: 'eq', value: recipeId }],
+    'id, title, canonical_name, recipe_slug, source_url, equipment',
+  );
   if (!header) return null;
 
-  const { data: ingredientRows, error: ingredientsError } = await supabase
-    .from('recipe_ingredients')
-    .select('name, amount, amount_max, unit')
-    .eq('recipe_id', recipeId)
-    .order('position', { ascending: true });
-  if (ingredientsError) throw ingredientsError;
+  const ingredients = await queryAll<BundlePreviewIngredientInput>('recipe_ingredients', {
+    select: 'name, amount, amount_max, unit',
+    filters: [{ col: 'recipe_id', op: 'eq', value: recipeId }],
+    order: { col: 'position', asc: true },
+  });
+  const steps = await queryAll<BundlePreviewStepInput>('recipe_steps', {
+    select: 'verb, roles, result, modifiers',
+    filters: [{ col: 'recipe_id', op: 'eq', value: recipeId }],
+    order: { col: 'step_index', asc: true },
+  });
 
-  const { data: stepRows, error: stepsError } = await supabase
-    .from('recipe_steps')
-    .select('verb, roles, result, modifiers')
-    .eq('recipe_id', recipeId)
-    .order('step_index', { ascending: true });
-  if (stepsError) throw stepsError;
-
-  const ingredients = (ingredientRows ?? []) as BundlePreviewIngredientInput[];
   const names = [
     ...new Set(
       ingredients
@@ -136,22 +123,14 @@ async function fetchPreview(recipeId: number): Promise<BundlePreview | null> {
   ];
   const resolutions = new Map<string, string | null>();
   if (names.length > 0) {
-    const { data: resolutionRows, error: resolutionsError } = await supabase
-      .from('ingredient_resolutions')
-      .select('normalized_name, taxonomy_slug')
-      .in('normalized_name', names);
-    if (resolutionsError) throw resolutionsError;
-    for (const r of (resolutionRows ?? []) as { normalized_name: string; taxonomy_slug: string | null }[]) {
-      resolutions.set(r.normalized_name, r.taxonomy_slug);
-    }
+    const resolutionRows = await queryAll<{ normalized_name: string; taxonomy_slug: string | null }>(
+      'ingredient_resolutions',
+      { select: 'normalized_name, taxonomy_slug', filters: [{ col: 'normalized_name', op: 'in', value: names }] },
+    );
+    for (const r of resolutionRows) resolutions.set(r.normalized_name, r.taxonomy_slug);
   }
 
-  return assembleBundlePreview({
-    header: header as BundlePreviewHeaderInput,
-    ingredients,
-    steps: (stepRows ?? []) as BundlePreviewStepInput[],
-    resolutions,
-  });
+  return assembleBundlePreview({ header, ingredients, steps, resolutions });
 }
 
 function PreviewPanel() {

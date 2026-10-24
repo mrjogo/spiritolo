@@ -1,20 +1,25 @@
-"""Phase 1, Layer 2 — pg_trgm similarity over taxonomy display names + aliases.
+"""Phase 1, Layer 2 — trigram similarity over taxonomy display names + aliases.
 
 Fail-closed thresholds: accept only when top-1 similarity clears
 LEXICAL_MIN_SIM AND is at least LEXICAL_RATIO times top-2. Anything
 ambiguous falls through to Pending so Phase 2 can decide.
 
-The SQL groups by node_id (not by node_id + matching text) so that a
-node matching via both its display_name and an alias contributes a
-single candidate. Otherwise the ratio guard mis-fires when the same
-node legitimately matches two ways at the same score.
+Scoring is pg_trgm-compatible (``common.text.similarity``) so the thresholds
+tuned against Postgres carry over unchanged. Candidates are grouped by node
+(not by node + matching text) so a node matching via both its display_name and
+an alias contributes a single candidate; otherwise the ratio guard mis-fires
+when the same node legitimately matches two ways at the same score.
+
+The index over the taxonomy is built from the connection on demand; a stage
+processing many names builds it once (``TaxonomyIndex.load``) and passes it in.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-import psycopg
+from common.db import Connection
+from common.text import TrigramIndex
 
 from .types import Pending, Phase1Result, Resolved
 
@@ -28,96 +33,64 @@ LEXICAL_RATIO = 1.5
 _CANDIDATE_LIMIT_DEFAULT = 20
 
 
-def _candidates_sql(limit: int) -> str:
-    return f"""
-        with hits as (
-            select n.id as node_id, n.display_name as display_name,
-                   similarity(n.display_name, %s) as sim
-            from taxonomy_nodes n
-            union all
-            select a.node_id, n.display_name,
-                   similarity(a.alias, %s) as sim
-            from taxonomy_aliases a
-            join taxonomy_nodes n on n.id = a.node_id
+class TaxonomyIndex:
+    """Trigram index over every taxonomy node's display name + aliases."""
+
+    def __init__(self, entries: list[tuple[int, str | None]], names: dict[int, str]) -> None:
+        self._index: TrigramIndex[int] = TrigramIndex(entries)
+        self.display_names = names
+
+    @classmethod
+    def load(cls, conn: Connection) -> "TaxonomyIndex":
+        names = {
+            r[0]: r[1] for r in conn.execute("select id, display_name from taxonomy_nodes").fetchall()
+        }
+        entries: list[tuple[int, str | None]] = list(names.items())
+        entries.extend(
+            (r[0], r[1])
+            for r in conn.execute("select node_id, alias from taxonomy_aliases").fetchall()
+            if r[0] in names
         )
-        select node_id, max(display_name) as display_name, max(sim) as sim
-        from hits
-        group by node_id
-        order by sim desc
-        limit {int(limit)}
-    """
+        return cls(entries, names)
+
+    def candidates(self, normalized_name: str, limit: int) -> list[dict[str, Any]]:
+        return [
+            {"node_id": node_id, "display_name": self.display_names.get(node_id), "similarity": sim}
+            for node_id, sim in self._index.top(normalized_name, limit)
+        ]
 
 
 def lexical_candidates(
-    conn: psycopg.Connection, normalized_name: str, *, limit: int = _CANDIDATE_LIMIT_DEFAULT,
+    conn: Connection, normalized_name: str, *,
+    limit: int = _CANDIDATE_LIMIT_DEFAULT, index: TaxonomyIndex | None = None,
 ) -> list[dict[str, Any]]:
+    """Top-``limit`` nodes by trigram similarity to ``normalized_name``
+    (one entry per node, scored by its best-matching name or alias)."""
     if not normalized_name:
         return []
-    rows = conn.execute(
-        _candidates_sql(limit), (normalized_name, normalized_name),
-    ).fetchall()
-    return [
-        {"node_id": r[0], "display_name": r[1], "similarity": float(r[2])}
-        for r in rows
-    ]
-
-
-def _bulk_candidates_sql(limit: int) -> str:
-    """Same scoring as _candidates_sql but evaluated for many input names in
-    one query via LATERAL JOIN. Pass `names` as a TEXT[] parameter."""
-    return f"""
-        with input as (
-            select name from unnest(%s::text[]) as t(name)
-        )
-        select input.name as input_name, c.node_id, c.display_name, c.sim
-        from input
-        cross join lateral (
-            select node_id, max(display_name) as display_name, max(sim) as sim
-            from (
-                select n.id as node_id, n.display_name,
-                       similarity(n.display_name, input.name) as sim
-                from taxonomy_nodes n
-                union all
-                select a.node_id, n.display_name,
-                       similarity(a.alias, input.name) as sim
-                from taxonomy_aliases a
-                join taxonomy_nodes n on n.id = a.node_id
-            ) per_input
-            group by node_id
-            order by sim desc
-            limit {int(limit)}
-        ) c
-    """
+    idx = index if index is not None else TaxonomyIndex.load(conn)
+    return idx.candidates(normalized_name, limit)
 
 
 def bulk_lexical_candidates(
-    conn: psycopg.Connection, names: list[str], *,
-    limit: int = _CANDIDATE_LIMIT_DEFAULT,
+    conn: Connection, names: list[str], *,
+    limit: int = _CANDIDATE_LIMIT_DEFAULT, index: TaxonomyIndex | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
-    """Run lexical_candidates against many names in one query. Returns a
-    dict keyed by input name (preserving the caller's normalization). Names
-    with no matches still appear with an empty list."""
+    """``lexical_candidates`` for many names against one index build. Returns a
+    dict keyed by input name; names with no matches appear with an empty list."""
     out: dict[str, list[dict[str, Any]]] = {n: [] for n in names if n}
     if not out:
         return out
-    rows = conn.execute(
-        _bulk_candidates_sql(limit), (list(out.keys()),),
-    ).fetchall()
-    for input_name, node_id, display_name, sim in rows:
-        out[input_name].append({
-            "node_id": node_id,
-            "display_name": display_name,
-            "similarity": float(sim),
-        })
-    # Postgres returns rows in cross-join order — sort each name's list by
-    # similarity descending to match the per-name path.
+    idx = index if index is not None else TaxonomyIndex.load(conn)
     for n in out:
-        out[n].sort(key=lambda c: c["similarity"], reverse=True)
+        out[n] = idx.candidates(n, limit)
     return out
 
 
-def resolve_lexical(conn: psycopg.Connection, normalized_name: str) -> Phase1Result:
-    cands = lexical_candidates(conn, normalized_name, limit=2)
+def resolve_lexical(
+    conn: Connection, normalized_name: str, *, index: TaxonomyIndex | None = None
+) -> Phase1Result:
+    cands = lexical_candidates(conn, normalized_name, limit=2, index=index)
     if not cands or cands[0]["similarity"] < LEXICAL_MIN_SIM:
         return Pending()
     if len(cands) >= 2:

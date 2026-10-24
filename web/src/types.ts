@@ -34,8 +34,10 @@ export type InstructionStep =
   | { kind: 'step'; text: string }
   | { kind: 'section'; heading: string; steps: string[] };
 
-// One parsed ingredient line from recipe_ingredients, joined to taxonomy_nodes
-// via PostgREST embed. taxonomy node fields are null when taxonomy_node_id is null.
+// One parsed ingredient line from GET /api/recipes/:id/ingredients: the
+// recipe_ingredients row joined (through the shared name-keyed
+// ingredient_resolutions) to the taxonomy node it resolved to, or null.
+// A null `name` means the parser abstained on that line.
 export type RecipeIngredientRow = {
   id: number;
   position: number;
@@ -44,12 +46,6 @@ export type RecipeIngredientRow = {
   amount_max: number | null;
   unit: string | null;
   name: string | null;
-  modifier: string | null;
-  role:
-    | 'base_spirit' | 'modifier' | 'citrus' | 'sweetener'
-    | 'bitters' | 'dilution' | 'ice' | 'garnish' | 'wash' | 'other'
-    | null;
-  parse_status: 'parsed' | 'unparseable';
-  taxonomy_node_id: number | null;
-  taxonomy_nodes: { slug: string; display_name: string } | null;
+  modifiers: string[];
+  taxonomy_node: { id: number; slug: string; display_name: string; status: 'live' | 'provisional' } | null;
 };

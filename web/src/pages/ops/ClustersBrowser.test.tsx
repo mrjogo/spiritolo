@@ -5,8 +5,15 @@ import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router-dom';
 
-const fromMock = vi.fn();
-vi.mock('../../supabase', () => ({ supabase: { from: (table: string) => fromMock(table) } }));
+const queryTableMock = vi.fn();
+const queryOneMock = vi.fn();
+const queryAllMock = vi.fn();
+vi.mock('../../api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api')>()),
+  queryTable: (...args: unknown[]) => queryTableMock(...args),
+  queryOne: (...args: unknown[]) => queryOneMock(...args),
+  queryAll: (...args: unknown[]) => queryAllMock(...args),
+}));
 
 import { ClustersBrowser } from './ClustersBrowser';
 
@@ -17,44 +24,26 @@ interface ClusterRow {
   source_count: number;
 }
 
-function mockSupabase(
+function mockApi(
   clusterRows: ClusterRow[],
   detailRow: unknown = null,
   memberRows: { id: number; name: string | null; site: string }[] = [],
 ) {
-  const listEqCalls: [string, unknown][] = [];
-  const range = vi.fn().mockResolvedValue({ data: clusterRows, count: clusterRows.length, error: null });
-  const listChain: Record<string, unknown> = {};
-  listChain.eq = vi.fn((col: string, value: unknown) => { listEqCalls.push([col, value]); return listChain; });
-  listChain.order = vi.fn(() => ({ range }));
-
-  const maybeSingle = vi.fn().mockResolvedValue({ data: detailRow, error: null });
-  const detailEq = vi.fn(() => ({ maybeSingle }));
-
-  const membersEqCalls: [string, unknown][] = [];
-  const members = vi.fn().mockResolvedValue({ data: memberRows, error: null });
-
-  fromMock.mockImplementation((table: string) => {
-    if (table === 'recipe_clusters') {
-      return {
-        select: (_sel: string, opts?: { count?: string }) =>
-          (opts && opts.count ? listChain : { eq: detailEq }),
-      };
-    }
-    if (table === 'recipes_public') {
-      return {
-        select: () => ({
-          eq: (col: string, value: unknown) => {
-            membersEqCalls.push([col, value]);
-            return members();
-          },
-        }),
-      };
-    }
-    throw new Error(`unexpected table ${table}`);
+  queryTableMock.mockImplementation(async (spec: { table: string }) => {
+    if (spec.table !== 'recipe_clusters') throw new Error(`unexpected table ${spec.table}`);
+    return { rows: clusterRows, total: clusterRows.length };
   });
-
-  return { listEqCalls, detailEq, membersEqCalls };
+  queryOneMock.mockImplementation(async (table: string) => {
+    if (table !== 'recipe_clusters') throw new Error(`unexpected table ${table}`);
+    return detailRow;
+  });
+  const membersEqCalls: [string, unknown][] = [];
+  queryAllMock.mockImplementation(async (table: string, opts: { filters?: { col: string; value: unknown }[] }) => {
+    if (table !== 'recipes_public') throw new Error(`unexpected table ${table}`);
+    for (const f of opts.filters ?? []) membersEqCalls.push([f.col, f.value]);
+    return memberRows;
+  });
+  return { detailEq: queryOneMock, membersEqCalls };
 }
 
 function renderBrowser(client: QueryClient) {
@@ -73,12 +62,14 @@ function makeClient() {
 }
 
 beforeEach(() => {
-  fromMock.mockReset();
+  queryTableMock.mockReset();
+  queryOneMock.mockReset();
+  queryAllMock.mockReset();
 });
 
 describe('<ClustersBrowser>', () => {
   it('lists recipe_clusters rows with recipe/source counts', async () => {
-    mockSupabase([
+    mockApi([
       { cluster_key: 'abc123', canonical_name: 'Old Fashioned', recipe_count: 4, source_count: 3 },
     ]);
     renderBrowser(makeClient());
@@ -88,7 +79,7 @@ describe('<ClustersBrowser>', () => {
   });
 
   it('selecting a cluster shows its ingredient_set and member recipes', async () => {
-    const { detailEq, membersEqCalls } = mockSupabase(
+    const { detailEq, membersEqCalls } = mockApi(
       [{ cluster_key: 'abc123', canonical_name: 'Old Fashioned', recipe_count: 2, source_count: 2 }],
       { cluster_key: 'abc123', canonical_name: 'Old Fashioned', recipe_count: 2, source_count: 2, ingredient_set: [{ slug: 'bourbon', role: 'spirit' }] },
       [{ id: 10, name: 'The Old Fashioned', site: 'punch' }],
@@ -96,7 +87,7 @@ describe('<ClustersBrowser>', () => {
     renderBrowser(makeClient());
     const row = await within(await screen.findByRole('table')).findByRole('button');
     await userEvent.click(row);
-    await waitFor(() => expect(detailEq).toHaveBeenCalledWith('cluster_key', 'abc123'));
+    await waitFor(() => expect(detailEq).toHaveBeenCalledWith('recipe_clusters', [{ col: 'cluster_key', op: 'eq', value: 'abc123' }]));
     expect(await screen.findByText('"bourbon"')).toBeInTheDocument();
     expect(await screen.findByText(/The Old Fashioned/)).toBeInTheDocument();
     expect(membersEqCalls).toContainEqual(['cluster_id', 'abc123']);

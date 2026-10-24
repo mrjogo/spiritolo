@@ -2,9 +2,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 
-vi.mock('../supabase', () => ({ supabase: { from: vi.fn() } }));
+const apiMock = vi.fn();
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api')>()),
+  api: (...args: unknown[]) => apiMock(...args),
+}));
 vi.mock('../components/taxonomy/ForceCanvas', () => ({ ForceCanvas: () => null }));
-import { supabase } from '../supabase';
 import { Taxonomy } from './Taxonomy';
 
 type Row = {
@@ -21,10 +24,10 @@ type Row = {
   recipe_count: number;
 };
 
-function mockTaxonomyResponse(rows: Row[], error: unknown = null) {
-  const select = vi.fn().mockResolvedValue({ data: rows, error });
-  (supabase.from as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ select });
-  return { select };
+function mockTaxonomyResponse(rows: Row[], error: { message: string } | null = null) {
+  if (error) apiMock.mockRejectedValue(new Error(error.message));
+  else apiMock.mockResolvedValue(rows);
+  return { api: apiMock };
 }
 
 function row(slug: string, overrides: Partial<Row> = {}): Row {

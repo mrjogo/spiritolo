@@ -4,7 +4,16 @@ import { usePagedQuery } from '../../../ui/hooks/usePagedQuery';
 import { Pager } from '../../../ui/Pager';
 import { PIPELINE_STAGES } from '../../../ui/pipelineStages';
 import { useCreateRun, type RunState } from '../../../ui/runs/useRun';
+import { useWorkerHealth } from '../../../ui/runs/useWorkerHealth';
 import './runs.css';
+
+// Humanized "N ago" for the worker-health banner.
+function ago(iso: string): string {
+  const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return `${Math.round(s)}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  return `${Math.round(s / 3600)}h ago`;
+}
 
 const PAGE_SIZE = 25;
 
@@ -37,6 +46,7 @@ export function RunsList() {
   });
 
   const createRun = useCreateRun();
+  const worker = useWorkerHealth();
 
   async function handleCreate() {
     const jobId = await createRun.mutateAsync({ stage: newStage });
@@ -47,6 +57,14 @@ export function RunsList() {
 
   return (
     <div className="ops-runs-list">
+      {!worker.loading && (
+        <div className={`runs-worker-banner ${worker.stale ? 'runs-worker-banner--warn' : 'runs-worker-banner--ok'}`}>
+          {worker.stale
+            ? `⚠ No worker is reporting${worker.freshest ? ` (last seen ${ago(worker.freshest.last_seen)})` : ''} — queued runs won't progress until one starts.`
+            : `✓ Worker active${worker.freshest ? ` · seen ${ago(worker.freshest.last_seen)}` : ''}${worker.liveProviders.length ? ` · can run: ${worker.liveProviders.join(', ')}` : ''}`}
+        </div>
+      )}
+
       <div className="runs-head">
         <h1 className="runs-title">Runs</h1>
         {!creating ? (
@@ -81,7 +99,11 @@ export function RunsList() {
         </div>
       )}
 
-      {isEmpty ? (
+      {status === 'loading' ? (
+        <div className="runs-loading" aria-busy="true">
+          <span className="ops-spinner" aria-hidden="true" /> Loading runs…
+        </div>
+      ) : isEmpty ? (
         <div className="runs-empty">
           <h3>No runs yet</h3>
           <p>

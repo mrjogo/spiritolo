@@ -6,12 +6,16 @@ dependencies = [
     "psycopg[binary]>=3.2",
     "python-dotenv>=1.0",
     "boto3>=1.43.46",
+    "spiritolo-common",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
 ]
+
+[tool.uv.sources]
+spiritolo-common = { workspace = true }
 
 [build-system]
 requires = ["setuptools>=68.0"]

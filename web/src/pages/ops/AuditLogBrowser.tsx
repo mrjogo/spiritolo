@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../../supabase';
+import { queryOne } from '../../api';
 import { DataTable, type DataTableColumn } from '../../ui/DataTable';
 import { SplitView, DetailPane } from '../../ui/SplitView';
 import { StatusPill } from '../../ui/StatusPill';
@@ -53,7 +53,9 @@ const COLUMNS: DataTableColumn<AuditLogListRow>[] = [
 
 // The audit_log_public browser: actor legibility is the point (human vs
 // worker vs system, and the source that triggered the write), plus a
-// before/after diff on drill-down.
+// before/after diff on drill-down. Updates store only the changed-key
+// subset; inserts store no payload at all (it is derivable) — so the detail
+// pane labels each shape rather than implying a full row image.
 export function AuditLogBrowser() {
   const [actorKind, setActorKind] = useState('');
   const [tableName, setTableName] = useState('');
@@ -64,7 +66,7 @@ export function AuditLogBrowser() {
   if (actorKind) filters.push({ col: 'actor_kind', op: 'eq', value: actorKind });
   if (tableName) filters.push({ col: 'table_name', op: 'eq', value: tableName });
 
-  const { rows, total } = usePagedQuery<AuditLogListRow>({
+  const { rows, total, status } = usePagedQuery<AuditLogListRow>({
     table: 'audit_log_public',
     select: LIST_SELECT,
     filters,
@@ -95,6 +97,7 @@ export function AuditLogBrowser() {
           <DataTable
             columns={COLUMNS}
             rows={rows}
+            loading={status === 'loading'}
             rowKey={(r) => r.id}
             onRowClick={(r) => select(String(r.id))}
           />
@@ -108,15 +111,7 @@ export function AuditLogBrowser() {
 function AuditLogDetail({ id }: { id: string | null }) {
   const query = useQuery({
     queryKey: ['auditLogDetail', id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('audit_log_public')
-        .select('*')
-        .eq('id', Number(id))
-        .maybeSingle();
-      if (error) throw error;
-      return data as AuditLogDetailRow | null;
-    },
+    queryFn: () => queryOne<AuditLogDetailRow>('audit_log_public', [{ col: 'id', op: 'eq', value: Number(id) }]),
     enabled: id != null,
   });
 
@@ -151,8 +146,23 @@ function AuditLogDetail({ id }: { id: string | null }) {
           changed: {row.changed_keys.join(', ')}
         </p>
       )}
-      <JsonView value={row.before} name="before" />
-      <JsonView value={row.after} name="after" />
+      {row.op === 'I' ? (
+        <p style={{ fontSize: 12, opacity: 0.7 }}>
+          Row created — payload not stored. It is derivable from the current row by
+          reverse-applying later updates.
+        </p>
+      ) : (
+        <>
+          <JsonView
+            value={row.before}
+            name={row.op === 'U' ? 'before (changed keys only)' : 'before'}
+          />
+          <JsonView
+            value={row.after}
+            name={row.op === 'U' ? 'after (changed keys only)' : 'after'}
+          />
+        </>
+      )}
     </DetailPane>
   );
 }

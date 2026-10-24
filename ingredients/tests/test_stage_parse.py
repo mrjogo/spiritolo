@@ -7,27 +7,26 @@ from __future__ import annotations
 
 import json
 
-import psycopg
 import pytest
-from psycopg.types.json import Json
+from common.db import jdump as Json
 
 from ingredients.parser import PARSER_VERSION
 from ingredients.pipeline.stages.parse import parse_stage_fn
 
 
 @pytest.fixture()
-def conn(test_db_url: str):
-    with psycopg.connect(test_db_url, autocommit=True) as c:
-        c.execute("truncate recipes restart identity cascade")
-        c.execute("truncate job_items restart identity cascade")
+def conn(db_conn):
+    if (c := db_conn) is not None:
+        c.execute("delete from recipes")
+        c.execute("delete from job_items")
         yield c
-        c.execute("truncate recipes restart identity cascade")
-        c.execute("truncate job_items restart identity cascade")
+        c.execute("delete from recipes")
+        c.execute("delete from job_items")
 
 
 def _seed_recipe(conn, url, ingredients):
     return conn.execute(
-        "insert into recipes (source_url, site, source) values (%s, 'punch', %s) returning id",
+        "insert into recipes (source_url, site, source) values (?, 'punch', ?) returning id",
         (url, Json({"recipeIngredient": ingredients})),
     ).fetchone()[0]
 
@@ -43,7 +42,7 @@ def test_parse_writes_recipe_ingredients(conn):
 
     rows = conn.execute(
         "select position, name, amount, unit from recipe_ingredients "
-        "where recipe_id = %s order by position",
+        "where recipe_id = ? order by position",
         (rid,),
     ).fetchall()
     assert rows[0] == (0, "gin", 2, "oz")
@@ -51,7 +50,7 @@ def test_parse_writes_recipe_ingredients(conn):
 
     run = conn.execute(
         "select stage, code_version, outcome, method from job_items "
-        "where entity_type='recipe' and entity_id=%s and stage='parse-ingredients'",
+        "where entity_type='recipe' and entity_id=? and stage='parse-ingredients'",
         (rid,),
     ).fetchone()
     assert run == ("parse-ingredients", PARSER_VERSION, "resolved", "deterministic")
@@ -72,11 +71,11 @@ def test_parse_stores_unparseable_row_but_abstains(conn):
     assert counts["empty"] == 1
     # The raw text is preserved even though nothing structured out of it.
     row = conn.execute(
-        "select name, raw_text from recipe_ingredients where recipe_id=%s", (rid,)
+        "select name, raw_text from recipe_ingredients where recipe_id=?", (rid,)
     ).fetchone()
     assert row[0] is None and row[1] == "???"
     outcome = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='parse-ingredients'", (rid,)
+        "select outcome from job_items where entity_id=? and stage='parse-ingredients'", (rid,)
     ).fetchone()[0]
     assert outcome == "abstain"
 
@@ -100,7 +99,7 @@ def test_parse_batches_across_chunk_boundary(conn):
     # Every recipe got its ingredient rows and exactly one job_items row.
     for rid, (_, ings) in zip(rids, specs):
         n_rows = conn.execute(
-            "select count(*) from recipe_ingredients where recipe_id=%s", (rid,)
+            "select count(*) from recipe_ingredients where recipe_id=?", (rid,)
         ).fetchone()[0]
         assert n_rows == len(ings)
     total_runs = conn.execute(
@@ -111,12 +110,12 @@ def test_parse_batches_across_chunk_boundary(conn):
     # Spot-check one structured row and one abstain outcome survived batching.
     row = conn.execute(
         "select name, amount, unit from recipe_ingredients "
-        "where recipe_id=%s order by position",
+        "where recipe_id=? order by position",
         (rids[3],),
     ).fetchall()
     assert row[0] == ("vodka", 1.5, "oz")
     abstain = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='parse-ingredients'",
+        "select outcome from job_items where entity_id=? and stage='parse-ingredients'",
         (rids[2],),
     ).fetchone()[0]
     assert abstain == "abstain"
@@ -124,7 +123,7 @@ def test_parse_batches_across_chunk_boundary(conn):
 
 def test_parse_scopes_by_site(conn):
     a = _seed_recipe(conn, "https://ex.test/d", ["1 oz gin"])
-    conn.execute("update recipes set site='other' where id=%s", (a,))
+    conn.execute("update recipes set site='other' where id=?", (a,))
     _seed_recipe(conn, "https://ex.test/e", ["1 oz vodka"])
     parse_stage_fn(_job(site="punch"), conn, None)
     # Only the punch recipe was parsed.

@@ -1,0 +1,13 @@
+.git
+.venv
+**/__pycache__
+**/*.pyc
+**/node_modules
+web/dist
+data
+.env
+.env.*
+.mockups
+.playwright-mcp
+.devcontainer
+docs

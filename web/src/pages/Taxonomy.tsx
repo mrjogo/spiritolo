@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTaxonomyUrlState } from '../components/taxonomy/useTaxonomyUrlState';
-import { supabase } from '../supabase';
+import { api } from '../api';
 import {
   ForceCanvas,
   type DagMode,
@@ -51,26 +51,19 @@ type State =
   | { status: 'error'; message: string }
   | { status: 'loaded'; rows: TaxonomyViewRow[] };
 
-const COLUMNS =
-  'id, slug, display_name, node_kind, default_role, ' +
-  'is_cluster_node, is_defining_garnish, ' +
-  'parent_ids, child_ids, aliases, recipe_count';
-
 export function Taxonomy() {
   const [state, setState] = useState<State>({ status: 'loading' });
 
   useEffect(() => {
     let cancelled = false;
-    supabase
-      .from('taxonomy_public')
-      .select(COLUMNS)
-      .then(({ data, error }) => {
+    api<TaxonomyViewRow[]>('/api/taxonomy')
+      .then((rows) => {
         if (cancelled) return;
-        if (error) {
-          setState({ status: 'error', message: error.message });
-          return;
-        }
-        setState({ status: 'loaded', rows: (data ?? []) as unknown as TaxonomyViewRow[] });
+        setState({ status: 'loaded', rows });
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setState({ status: 'error', message: err instanceof Error ? err.message : String(err) });
       });
     return () => { cancelled = true; };
   }, []);
