@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import psycopg
 import pytest
 
 from ingredients.pipeline.stages.convert import convert_stage_fn
@@ -10,36 +9,36 @@ from ingredients.recipegf.version import CONVERTER_VERSION
 
 
 @pytest.fixture()
-def conn(test_db_url: str):
-    with psycopg.connect(test_db_url, autocommit=True) as c:
+def conn(db_conn):
+    if (c := db_conn) is not None:
         for t in ("recipes", "job_items", "ingredient_resolutions",
                   "taxonomy_nodes", "cocktail_aliases"):
-            c.execute(f"truncate {t} restart identity cascade")
+            c.execute(f"delete from {t}")
         for slug, role in [("bourbon", "base_spirit"), ("simple-syrup", "sweetener"),
                            ("angostura-bitters", "bitters")]:
             c.execute(
-                "insert into taxonomy_nodes (slug, display_name, default_role) values (%s,%s,%s)",
+                "insert into taxonomy_nodes (slug, display_name, default_role) values (?,?,?)",
                 (slug, slug, role),
             )
         for name, slug in [("bourbon", "bourbon"), ("simple syrup", "simple-syrup"),
                            ("angostura bitters", "angostura-bitters")]:
             c.execute(
                 "insert into ingredient_resolutions (normalized_name, taxonomy_slug, method, version) "
-                "values (%s,%s,'alias','v1')",
+                "values (?,?,'alias','v1')",
                 (name, slug),
             )
         yield c
         for t in ("recipes", "job_items", "ingredient_resolutions",
                   "taxonomy_nodes", "cocktail_aliases"):
-            c.execute(f"truncate {t} restart identity cascade")
+            c.execute(f"delete from {t}")
 
 
 def _old_fashioned(conn, resolve_all=True, url="https://ex.test/of"):
     rid = conn.execute(
         """
         insert into recipes (source_url, site, source, title, canonical_name)
-        values (%s, 'ex',
-                '{"recipeInstructions":"Stir with ice and strain into a rocks glass."}'::jsonb,
+        values (?, 'ex',
+                '{"recipeInstructions":"Stir with ice and strain into a rocks glass."}',
                 'Old Fashioned', 'old fashioned')
         returning id
         """,
@@ -50,7 +49,7 @@ def _old_fashioned(conn, resolve_all=True, url="https://ex.test/of"):
     for pos, (name, amt, unit) in enumerate(ings):
         conn.execute(
             "insert into recipe_ingredients (recipe_id, position, name, amount, unit, raw_text) "
-            "values (%s,%s,%s,%s,%s,%s)",
+            "values (?,?,?,?,?,?)",
             (rid, pos, name, amt, unit, f"{name} raw"),
         )
     if not resolve_all:
@@ -68,15 +67,15 @@ def test_convert_writes_steps_and_equipment(conn):
     assert counts["converted"] == 1
 
     steps = conn.execute(
-        "select verb from recipe_steps where recipe_id=%s order by step_index", (rid,)
+        "select verb from recipe_steps where recipe_id=? order by step_index", (rid,)
     ).fetchall()
     assert [s[0] for s in steps] == ["add", "stir", "strain"]
-    equipment = conn.execute("select equipment, recipe_slug from recipes where id=%s", (rid,)).fetchone()
+    equipment = conn.execute("select equipment, recipe_slug from recipes where id=?", (rid,)).fetchone()
     assert "mixing_glass" in equipment[0]
     assert equipment[1] == "old-fashioned"
 
     run = conn.execute(
-        "select outcome, code_version from job_items where entity_id=%s and stage='convert-steps'", (rid,)
+        "select outcome, code_version from job_items where entity_id=? and stage='convert-steps'", (rid,)
     ).fetchone()
     assert run == ("resolved", CONVERTER_VERSION)
 
@@ -92,16 +91,16 @@ def test_convert_batches_across_chunk_boundary(conn):
 
     for rid in rids:
         verbs = conn.execute(
-            "select verb from recipe_steps where recipe_id=%s order by step_index", (rid,)
+            "select verb from recipe_steps where recipe_id=? order by step_index", (rid,)
         ).fetchall()
         assert [v[0] for v in verbs] == ["add", "stir", "strain"]
         equip = conn.execute(
-            "select equipment, recipe_slug from recipes where id=%s", (rid,)
+            "select equipment, recipe_slug from recipes where id=?", (rid,)
         ).fetchone()
         assert "mixing_glass" in equip[0]
         assert equip[1] == "old-fashioned"
         assert conn.execute(
-            "select outcome from job_items where entity_id=%s and stage='convert-steps'", (rid,)
+            "select outcome from job_items where entity_id=? and stage='convert-steps'", (rid,)
         ).fetchone()[0] == "resolved"
 
 
@@ -116,24 +115,24 @@ def test_convert_skips_recipe_with_provisional_ingredient(conn):
     assert counts["pending"] == 1
     assert counts["converted"] == 0
     assert conn.execute(
-        "select count(*) from recipe_steps where recipe_id=%s", (rid,)
+        "select count(*) from recipe_steps where recipe_id=?", (rid,)
     ).fetchone()[0] == 0
     outcome = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='convert-steps'", (rid,)
+        "select outcome from job_items where entity_id=? and stage='convert-steps'", (rid,)
     ).fetchone()[0]
     assert outcome == "pending"
 
     # Promote + requeue -> converts normally.
     conn.execute("update taxonomy_nodes set status='live' where slug='bourbon'")
-    conn.execute("delete from job_items where entity_id=%s and stage='convert-steps'", (rid,))
+    conn.execute("delete from job_items where entity_id=? and stage='convert-steps'", (rid,))
     counts2 = convert_stage_fn(_job(), conn, None)
     assert counts2["converted"] == 1
     verbs = conn.execute(
-        "select verb from recipe_steps where recipe_id=%s order by step_index", (rid,)
+        "select verb from recipe_steps where recipe_id=? order by step_index", (rid,)
     ).fetchall()
     assert [v[0] for v in verbs] == ["add", "stir", "strain"]
     outcome2 = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='convert-steps'", (rid,)
+        "select outcome from job_items where entity_id=? and stage='convert-steps'", (rid,)
     ).fetchone()[0]
     assert outcome2 == "resolved"
 
@@ -142,8 +141,8 @@ def test_convert_pending_when_ingredient_unresolved(conn):
     rid = _old_fashioned(conn, resolve_all=False)
     counts = convert_stage_fn(_job(), conn, None)
     assert counts["pending"] == 1
-    assert conn.execute("select count(*) from recipe_steps where recipe_id=%s", (rid,)).fetchone()[0] == 0
+    assert conn.execute("select count(*) from recipe_steps where recipe_id=?", (rid,)).fetchone()[0] == 0
     outcome = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='convert-steps'", (rid,)
+        "select outcome from job_items where entity_id=? and stage='convert-steps'", (rid,)
     ).fetchone()[0]
     assert outcome == "pending"

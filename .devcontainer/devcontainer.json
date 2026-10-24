@@ -43,10 +43,9 @@
     "ghcr.io/devcontainers/features/github-cli:1": {},
     // Node.js + npm for the web/ SPA (Vite + React + TS).
     "ghcr.io/devcontainers/features/node:1": { "version": "lts" },
-    // Docker socket forwarding so `supabase status` and other CLI commands
-    // can inspect the host's Supabase containers. `supabase start` itself
-    // still must run on the Mac host. moby=false because Debian trixie
-    // ships docker-ce-cli, not moby-cli.
+    // Docker socket forwarding so the container can drive the host's Docker
+    // (e.g. build the service image locally). moby=false because Debian
+    // trixie ships docker-ce-cli, not moby-cli.
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {
       "moby": false
     }

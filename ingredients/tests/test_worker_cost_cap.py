@@ -11,8 +11,7 @@ Fake providers only; the abort test drives one loop tick against TEST_DB_URL.
 """
 from __future__ import annotations
 
-import psycopg
-from psycopg.types.json import Json
+from common.db import jdump as Json
 
 from dataclasses import dataclass
 from typing import Any
@@ -22,7 +21,7 @@ from common.providers import FakeProvider, Item
 
 from ingredients.pipeline.ledger import record_run
 from ingredients.worker.cost import CostMeter
-from ingredients.worker.loop import tick
+from ingredients.worker.runner import run_next as tick
 from ingredients.worker.providers import ProviderChain
 
 
@@ -53,9 +52,9 @@ def test_free_stage_no_cap_check():
     assert meter.consultations == 0, "a free chain must never consult the cap"
 
 
-def test_aborts_past_max_cost(test_db_url, db_conn):
-    db_conn.execute("truncate table jobs restart identity cascade")
-    db_conn.execute("truncate table job_items restart identity cascade")
+def test_aborts_past_max_cost(conn_factory, db_conn):
+    db_conn.execute("delete from jobs")
+    db_conn.execute("delete from job_items")
 
     # Metered fake: 2c per call, pack_size 1 -> 2c per item. Budget is 5c, so
     # item #3 (which would reach 6c) must abort.
@@ -70,7 +69,7 @@ def test_aborts_past_max_cost(test_db_url, db_conn):
     }
     jid = db_conn.execute(
         "insert into jobs (stage, payload, state, max_cost_cents) values "
-        "('metered', %s, 'queued', 5) returning id",
+        "('metered', ?, 'queued', 5) returning id",
         (Json(payload),),
     ).fetchone()[0]
     # The four members pre-exist (as add_run_items would create them); the
@@ -80,7 +79,7 @@ def test_aborts_past_max_cost(test_db_url, db_conn):
         db_conn.execute(
             "insert into job_items (entity_type, entity_id, stage, code_version, "
             "outcome, method, state, job_id) "
-            "values ('recipe', %s, 'metered', '', 'pending', 'deterministic', 'pending', %s)",
+            "values ('recipe', ?, 'metered', '', 'pending', 'deterministic', 'pending', ?)",
             (eid, jid),
         )
 
@@ -105,14 +104,12 @@ def test_aborts_past_max_cost(test_db_url, db_conn):
             meter=CostMeter(job.get("max_cost_cents")),
         )
 
-    conn = psycopg.connect(test_db_url)
-    try:
+    conn = conn_factory()
+    if True:
         ran = tick(
             conn, stage_fns={"metered": metered_fn},
             providers_builder=build_metered_chain,
         )
-    finally:
-        conn.close()
 
     assert ran is True
     # Only the paid-for members were UPDATEd to a terminal state; the abort left
@@ -125,7 +122,7 @@ def test_aborts_past_max_cost(test_db_url, db_conn):
     assert sum(int(r[1]) for r in processed) == 4
 
     state, error_code, cost_actual = db_conn.execute(
-        "select state, error_code, cost_actual_cents from jobs where id=%s", (jid,)
+        "select state, error_code, cost_actual_cents from jobs where id=?", (jid,)
     ).fetchone()
     assert state == "failed"
     assert error_code == "cost_cap_exceeded"

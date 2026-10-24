@@ -1,21 +1,19 @@
-"""Worker daemon runtime.
+"""Pipeline run runtime: the stage registry, the provider chain and the cost
+meter.
 
-A single always-on process that claims jobs off the Postgres-as-queue, dispatches
-each to a registered ``stage_fn`` over the run's chosen provider chain (built from
-``jobs.llm_provider`` / ``jobs.llm_model``), heartbeats while running, writes
-results as idempotent ``job_items`` UPSERTs,
-rolls up cost, and hard-aborts past ``max_cost_cents``.
-
-This package owns the *runtime* + the seam contracts; the pipeline stages
-register their ``stage_fn`` bodies into ``dispatch.STAGE_FNS``. Everything here
-is exercised with fake providers / fake stage_fns — never a live model.
+The always-on polling worker is gone — runs execute in-process inside the app
+(see ``spiritolo.executor``), which claims a ``queued`` job, builds its
+``ProviderChain`` from the job's ``llm_provider`` / ``llm_model``, dispatches to
+the registered ``stage_fn``, and finalizes the job. This package owns the seams
+that executor composes; the pipeline stages register their ``stage_fn`` bodies
+into ``dispatch.STAGE_FNS``. Everything here is exercised with fake providers /
+fake stage_fns — never a live model.
 """
 
 from __future__ import annotations
 
 from ingredients.worker.cost import CostCapExceeded, CostMeter
 from ingredients.worker.dispatch import STAGE_FNS, UnknownStage, register, run
-from ingredients.worker.loop import boot, serve, tick
 from ingredients.worker.providers import ProviderChain
 
 __all__ = [
@@ -24,9 +22,6 @@ __all__ = [
     "ProviderChain",
     "STAGE_FNS",
     "UnknownStage",
-    "boot",
     "register",
     "run",
-    "serve",
-    "tick",
 ]

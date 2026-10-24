@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../../supabase';
+import { queryOne } from '../../api';
 import { DataTable, type DataTableColumn } from '../../ui/DataTable';
 import { SplitView, DetailPane } from '../../ui/SplitView';
 import { StatusPill } from '../../ui/StatusPill';
@@ -111,15 +111,7 @@ export function AuditLogBrowser() {
 function AuditLogDetail({ id }: { id: string | null }) {
   const query = useQuery({
     queryKey: ['auditLogDetail', id],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('audit_log_public')
-        .select('*')
-        .eq('id', Number(id))
-        .maybeSingle();
-      if (error) throw error;
-      return data as AuditLogDetailRow | null;
-    },
+    queryFn: () => queryOne<AuditLogDetailRow>('audit_log_public', [{ col: 'id', op: 'eq', value: Number(id) }]),
     enabled: id != null,
   });
 

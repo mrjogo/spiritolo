@@ -138,7 +138,7 @@ def build_provider_for_run(
             http_client=build_openai_http_client(client_factory=client_factory, env=env),
             **model_kwargs,
         )
-    if provider_id == "claude" and e.get("ANTHROPIC_API_KEY"):
+    if provider_id in ("claude", "anthropic") and e.get("ANTHROPIC_API_KEY"):
         return ClaudeProvider.from_env(
             api_key=e["ANTHROPIC_API_KEY"],
             http_client=build_claude_http_client(client_factory=client_factory, env=env),

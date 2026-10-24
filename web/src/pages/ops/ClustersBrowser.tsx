@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../../supabase';
+import { queryAll, queryOne } from '../../api';
 import { DataTable, type DataTableColumn } from '../../ui/DataTable';
 import { SplitView, DetailPane } from '../../ui/SplitView';
 import { JsonView } from '../../ui/JsonView';
@@ -73,29 +73,18 @@ export function ClustersBrowser() {
 function ClusterDetail({ clusterKey }: { clusterKey: string | null }) {
   const detailQuery = useQuery({
     queryKey: ['clusterDetail', clusterKey],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('recipe_clusters')
-        .select('*')
-        .eq('cluster_key', clusterKey)
-        .maybeSingle();
-      if (error) throw error;
-      return data as ClusterDetailRow | null;
-    },
+    queryFn: () => queryOne<ClusterDetailRow>('recipe_clusters', [{ col: 'cluster_key', op: 'eq', value: clusterKey }]),
     enabled: clusterKey != null,
   });
 
   const membersQuery = useQuery({
     queryKey: ['clusterMembers', clusterKey],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('recipes_public')
-        .select('id, name, site')
-        .eq('cluster_id', clusterKey);
-      if (error) throw error;
-      return ((data ?? []) as { id: number; name: string | null; site: string }[]).map((r) => ({
-        id: r.id, title: r.name, site: r.site,
-      })) as MemberRecipe[];
+      const rows = await queryAll<{ id: number; name: string | null; site: string }>('recipes_public', {
+        select: 'id, name, site',
+        filters: [{ col: 'cluster_id', op: 'eq', value: clusterKey }],
+      });
+      return rows.map((r) => ({ id: r.id, title: r.name, site: r.site })) as MemberRecipe[];
     },
     enabled: clusterKey != null,
   });

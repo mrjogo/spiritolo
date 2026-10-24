@@ -4,10 +4,6 @@ import userEvent from '@testing-library/user-event';
 import { RunCockpit } from './RunCockpit';
 import { isActiveRun, isFinishedRun, type RunHeader } from './useRun';
 
-// RunCockpit -> useRun -> supabase.ts, which throws at import if the Vite env
-// vars are absent (they are in CI). RunCockpit never touches supabase at
-// runtime, so a stub is enough — matches how the other /ops tests mock it.
-vi.mock('../../supabase', () => ({ supabase: {} }));
 
 vi.mock('./useWorkerHealth', () => ({
   useWorkerHealth: () => ({

@@ -8,13 +8,13 @@ real depth is 3-5).
 
 from __future__ import annotations
 
-import psycopg
+from common.db import Connection
 
 _SQL = """
     with recursive ancestors(id, depth) as (
         select n.id, 0
         from taxonomy_nodes n
-        where n.id = %s
+        where n.id = ?
 
         union all
 
@@ -31,11 +31,11 @@ _SQL = """
         order by a.depth
         limit 1
     )
-    select coalesce((select id from matches), %s)
+    select coalesce((select id from matches), ?)
 """
 
 
-def roll_up_to_antichain(conn: psycopg.Connection, node_id: int) -> int:
+def roll_up_to_antichain(conn: Connection, node_id: int) -> int:
     """Return the antichain ancestor of node_id (or node_id itself).
 
     Behaviour:

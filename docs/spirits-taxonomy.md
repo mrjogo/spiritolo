@@ -10,7 +10,7 @@ The taxonomy exists to do three things vectors are bad at: (1) deterministic ali
 
 ## Schema
 
-Three tables, vanilla Postgres, no extensions. Works on Supabase as-is.
+Three tables, vanilla SQL (SQLite in the service; the DDL below is portable).
 
 ```sql
 -- One row per concept: a category, a brand, an expression, a fresh ingredient.

@@ -1,7 +1,21 @@
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '../../supabase';
+import { api } from '../../api';
 
-// One row of the worker_status table — a worker's liveness + what it can run.
+// GET /api/ops/executor — the in-process executor's liveness and what it can run.
+export interface ExecutorHealth {
+  alive: boolean;
+  disabled?: boolean;
+  worker_id?: string;
+  current_job_id?: number | null;
+  last_tick_age_seconds?: number | null;
+  jobs_run?: number;
+  last_error?: string | null;
+  providers?: string[];
+  stages?: string[];
+}
+
+// The shape the runs UI consumes. Kept from the worker_status days: "freshest"
+// is now simply the executor thread of the process serving this page.
 export interface WorkerRow {
   worker_id: string;
   last_seen: string;
@@ -10,53 +24,38 @@ export interface WorkerRow {
 }
 
 export interface WorkerHealth {
-  /** The most-recently-seen worker, or null if none has ever reported. */
   freshest: WorkerRow | null;
-  /** Seconds since the freshest worker was seen (Infinity if none). */
+  /** Seconds since the executor last ticked (Infinity if it is not running). */
   ageSeconds: number;
-  /** True when no worker has reported within the staleness window. */
+  /** True when the executor thread is not alive (or the health probe failed). */
   stale: boolean;
-  /** Providers any *currently-alive* worker can service (for Start pre-flight). */
+  /** Providers the executor can build a client for (for Start pre-flight). */
   liveProviders: string[];
   loading: boolean;
 }
 
 const POLL_MS = 5000;
-// A healthy worker refreshes every loop pass (~2s idle); 30s of silence means
-// it's down/stuck — this is the signal the run-#7 black hole lacked.
-const STALE_AFTER_S = 30;
 
-function ageSecondsOf(iso: string): number {
-  return Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
-}
-
-// Reads worker_status for the /ops health signal: is any worker alive, how long
-// ago was it seen, and which providers can it service right now.
 export function useWorkerHealth(): WorkerHealth {
   const query = useQuery({
-    queryKey: ['worker_status'],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('worker_status')
-        .select('worker_id, last_seen, providers, stages')
-        .order('last_seen', { ascending: false });
-      if (error) throw error;
-      return (data ?? []) as WorkerRow[];
-    },
+    queryKey: ['executorHealth'],
+    queryFn: () => api<ExecutorHealth>('/api/ops/executor'),
     refetchInterval: POLL_MS,
+    staleTime: 0,
   });
 
-  const rows = query.data ?? [];
-  const freshest = rows[0] ?? null;
-  const ageSeconds = freshest ? ageSecondsOf(freshest.last_seen) : Infinity;
-  const stale = ageSeconds > STALE_AFTER_S;
-  const liveProviders = Array.from(
-    new Set(
-      rows
-        .filter((r) => ageSecondsOf(r.last_seen) <= STALE_AFTER_S)
-        .flatMap((r) => r.providers ?? []),
-    ),
-  );
-
-  return { freshest, ageSeconds, stale, liveProviders, loading: query.isPending };
+  const h = query.data;
+  if (!h || !h.alive) {
+    return { freshest: null, ageSeconds: Infinity, stale: true, liveProviders: [], loading: query.isPending };
+  }
+  const ageSeconds = h.last_tick_age_seconds ?? 0;
+  // Anchor "last seen" on when the probe result arrived (query state, so the
+  // render stays pure) rather than on the wall clock at render time.
+  const freshest: WorkerRow = {
+    worker_id: h.worker_id ?? 'executor',
+    last_seen: new Date(query.dataUpdatedAt - ageSeconds * 1000).toISOString(),
+    providers: h.providers ?? [],
+    stages: h.stages ?? [],
+  };
+  return { freshest, ageSeconds, stale: false, liveProviders: freshest.providers, loading: false };
 }

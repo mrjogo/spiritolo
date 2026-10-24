@@ -10,7 +10,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import psycopg
 import pytest
 
 from ingredients.pipeline.stages.combine import (
@@ -37,23 +36,23 @@ class _FakeChain:
 
 
 @pytest.fixture()
-def conn(test_db_url: str):
-    with psycopg.connect(test_db_url, autocommit=True) as c:
+def conn(db_conn):
+    if (c := db_conn) is not None:
         for t in ("job_items", "human_reviews", "ingredient_resolutions",
                   "taxonomy_aliases", "taxonomy_edges", "taxonomy_provenance",
                   "taxonomy_nodes"):
-            c.execute(f"truncate {t} restart identity cascade")
+            c.execute(f"delete from {t}")
         yield c
         for t in ("job_items", "human_reviews", "ingredient_resolutions",
                   "taxonomy_aliases", "taxonomy_edges", "taxonomy_provenance",
                   "taxonomy_nodes"):
-            c.execute(f"truncate {t} restart identity cascade")
+            c.execute(f"delete from {t}")
 
 
 def _node(conn, slug, display_name, status):
     return conn.execute(
         "insert into taxonomy_nodes (slug, display_name, status) "
-        "values (%s, %s, %s) returning id",
+        "values (?, ?, ?) returning id",
         (slug, display_name, status),
     ).fetchone()[0]
 
@@ -61,7 +60,7 @@ def _node(conn, slug, display_name, status):
 def _resolution(conn, name, slug):
     conn.execute(
         "insert into ingredient_resolutions (normalized_name, taxonomy_slug, method, version) "
-        "values (%s, %s, 'provisional', %s)",
+        "values (?, ?, 'provisional', ?)",
         (name, slug, COMBINE_VERSION),
     )
 
@@ -73,7 +72,7 @@ def _job():
 def _job_item(conn, node_id):
     row = conn.execute(
         "select outcome, state from job_items "
-        "where entity_type = 'taxonomy_node' and entity_id = %s and stage = 'combine-nodes'",
+        "where entity_type = 'taxonomy_node' and entity_id = ? and stage = 'combine-nodes'",
         (node_id,),
     ).fetchone()
     return row  # (outcome, state) or None
@@ -94,7 +93,7 @@ def test_merge_absorbs_provisional_into_live(conn):
         "select count(*) from taxonomy_nodes where slug = 'juice-of-1-lime'"
     ).fetchone()[0] == 0
     assert conn.execute(
-        "select count(*) from taxonomy_nodes where id = %s", (live,)
+        "select count(*) from taxonomy_nodes where id = ?", (live,)
     ).fetchone()[0] == 1
     # Resolution repointed from absorbed slug to survivor slug.
     assert conn.execute(
@@ -116,7 +115,7 @@ def test_distinct_keeps_node(conn):
     assert counts == {"merged": 0, "distinct": 1, "pending": 0}
     # Node kept.
     assert conn.execute(
-        "select count(*) from taxonomy_nodes where id = %s", (prov,)
+        "select count(*) from taxonomy_nodes where id = ?", (prov,)
     ).fetchone()[0] == 1
     assert _job_item(conn, prov) == ("resolved", "applied")
     # No review opened.
@@ -134,12 +133,12 @@ def test_no_llm_opens_review(conn):
     # Parked: flagged terminal state, pending outcome, node untouched.
     assert _job_item(conn, prov) == ("pending", "flagged")
     assert conn.execute(
-        "select count(*) from taxonomy_nodes where id = %s", (prov,)
+        "select count(*) from taxonomy_nodes where id = ?", (prov,)
     ).fetchone()[0] == 1
     # A combine-nodes machine_proposal review is open, keyed by the node id.
     review = conn.execute(
         "select origin, state, payload from human_reviews "
-        "where stage = 'combine-nodes' and entity_kind = 'taxonomy_node' and entity_id = %s",
+        "where stage = 'combine-nodes' and entity_kind = 'taxonomy_node' and entity_id = ?",
         (str(prov),),
     ).fetchone()
     assert review is not None
@@ -161,7 +160,7 @@ def test_no_candidates_resolved_without_llm_call(conn):
     assert _job_item(conn, prov) == ("resolved", "applied")
     assert conn.execute("select count(*) from human_reviews").fetchone()[0] == 0
     method = conn.execute(
-        "select method from job_items where entity_id = %s and stage = 'combine-nodes'",
+        "select method from job_items where entity_id = ? and stage = 'combine-nodes'",
         (prov,),
     ).fetchone()[0]
     assert method == "deterministic"

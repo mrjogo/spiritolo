@@ -2,20 +2,30 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
-vi.mock('../supabase', () => ({ supabase: { from: vi.fn() } }));
-import { supabase } from '../supabase';
+const apiMock = vi.fn();
+vi.mock('../api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../api')>()),
+  api: (...args: unknown[]) => apiMock(...args),
+}));
+import { ApiError } from '../api';
 
 const useIsAdminMock = vi.fn();
 vi.mock('../auth/useIsAdmin', () => ({ useIsAdmin: () => useIsAdminMock() }));
 
 import { RecipeDetail } from './RecipeDetail';
 
+// The recipe fetch resolves with `data`, or rejects with `error` (an ApiError
+// for an HTTP failure). Any other call (the parsed-ingredients fetch) resolves
+// to an empty list unless a test overrides it.
 function mockSingleResponse(data: unknown, error: unknown = null) {
-  const single = vi.fn().mockResolvedValue({ data, error });
-  const eq = vi.fn(() => ({ single }));
-  const select = vi.fn(() => ({ eq }));
-  (supabase.from as unknown as ReturnType<typeof vi.fn>).mockReturnValue({ select });
-  return { single, eq, select };
+  apiMock.mockImplementation(async (path: string) => {
+    if (/^\/api\/recipes\/\d+$/.test(path)) {
+      if (error) throw error;
+      return data;
+    }
+    return [];
+  });
+  return { api: apiMock };
 }
 
 function renderAt(id: string) {
@@ -61,13 +71,13 @@ describe('<RecipeDetail>', () => {
   });
 
   it('renders ErrorPage when the recipe is missing', async () => {
-    mockSingleResponse(null, { code: 'PGRST116', message: 'no rows' });
+    mockSingleResponse(null, new ApiError(404, 'recipe not found'));
     renderAt('999');
     expect(await screen.findByRole('heading', { name: /recipe not found/i })).toBeInTheDocument();
   });
 
   it('renders ErrorPage on other fetch failures', async () => {
-    mockSingleResponse(null, { code: 'OTHER', message: 'boom' });
+    mockSingleResponse(null, new ApiError(500, 'boom'));
     renderAt('1');
     expect(await screen.findByRole('heading', { name: /couldn't load/i })).toBeInTheDocument();
     expect(screen.getByText(/boom/i)).toBeInTheDocument();
@@ -146,13 +156,13 @@ describe('<RecipeDetail>', () => {
     expect(container.querySelector('.recipe-detail__steps')).toBeNull();
   });
 
-  it('short-circuits to not-found for a non-numeric id without hitting Supabase', async () => {
-    const { select } = mockSingleResponse(null);
+  it('short-circuits to not-found for a non-numeric id without calling the API', async () => {
+    mockSingleResponse(null);
     renderAt('abc');
     expect(
       await screen.findByRole('heading', { name: /recipe not found/i }),
     ).toBeInTheDocument();
-    expect(select).not.toHaveBeenCalled();
+    expect(apiMock).not.toHaveBeenCalled();
   });
 
   it('renders raw ingredient lines for a non-admin (no fetch of recipe_ingredients)', async () => {
@@ -167,9 +177,9 @@ describe('<RecipeDetail>', () => {
     renderAt('1');
     expect(await screen.findByText('2 oz gin')).toBeInTheDocument();
     expect(screen.getByText('1 oz lime')).toBeInTheDocument();
-    // recipe_ingredients should not be fetched in non-admin mode.
-    expect(supabase.from).toHaveBeenCalledTimes(1);
-    expect(supabase.from).toHaveBeenCalledWith('recipes_public');
+    // The parsed-ingredients endpoint is not called in non-admin mode.
+    expect(apiMock).toHaveBeenCalledTimes(1);
+    expect(apiMock).toHaveBeenCalledWith('/api/recipes/1');
   });
 
   it('fetches and renders parsed ingredients for an admin', async () => {
@@ -179,30 +189,24 @@ describe('<RecipeDetail>', () => {
       author: null, image_url: null,
       jsonld: { name: 'Test', recipeIngredient: ['2 oz gin'] },
     });
-    // Second call: recipe_ingredients fetch
-    const order = vi.fn().mockResolvedValue({
-      data: [{
-        id: 17, position: 0, raw_text: '2 oz gin',
-        amount: 2, amount_max: null, unit: 'oz',
-        name: 'gin', modifier: null,
-        role: 'base_spirit', parse_status: 'parsed',
-        taxonomy_node_id: 5,
-        taxonomy_nodes: { slug: 'gin', display_name: 'Gin' },
-      }],
-      error: null,
-    });
-    const eq = vi.fn(() => ({ order }));
-    const select = vi.fn(() => ({ eq }));
-    (supabase.from as unknown as ReturnType<typeof vi.fn>)
-      .mockImplementationOnce(() => ({ select: vi.fn(() => ({ eq: vi.fn(() => ({ single: vi.fn().mockResolvedValue({
-        data: {
+    apiMock.mockImplementation(async (path: string) => {
+      if (path === '/api/recipes/1') {
+        return {
           id: 1, source_url: 'https://x.test/r', site: 'x.test', name: 'Test',
           author: null, image_url: null,
           jsonld: { name: 'Test', recipeIngredient: ['2 oz gin'] },
-        },
-        error: null,
-      }) })) })) }))
-      .mockImplementationOnce(() => ({ select }));
+        };
+      }
+      if (path === '/api/recipes/1/ingredients') {
+        return [{
+          id: 17, position: 0, raw_text: '2 oz gin',
+          amount: 2, amount_max: null, unit: 'oz',
+          name: 'gin', modifiers: [],
+          taxonomy_node: { id: 5, slug: 'gin', display_name: 'Gin', status: 'live' },
+        }];
+      }
+      throw new Error(`unexpected ${path}`);
+    });
 
     renderAt('1');
     expect(await screen.findByRole('link', { name: /gin/i })).toHaveAttribute(

@@ -10,11 +10,11 @@ place.
 
 from __future__ import annotations
 
-import psycopg
+from common.db import SQL_NOW, Connection
 
 
 def write_resolution(
-    conn: psycopg.Connection,
+    conn: Connection,
     *,
     normalized_name: str,
     taxonomy_slug: str | None,
@@ -25,24 +25,24 @@ def write_resolution(
 ) -> None:
     """UPSERT the resolution for `normalized_name` to `taxonomy_slug`."""
     conn.execute(
-        """
+        f"""
         insert into ingredient_resolutions
             (normalized_name, taxonomy_slug, method, version, model_id, confidence)
-        values (%s, %s, %s, %s, %s, %s)
+        values (?, ?, ?, ?, ?, ?)
         on conflict (normalized_name) do update set
             taxonomy_slug = excluded.taxonomy_slug,
             method        = excluded.method,
             version       = excluded.version,
             model_id      = excluded.model_id,
             confidence    = excluded.confidence,
-            updated_at    = now()
+            updated_at    = {SQL_NOW}
         """,
         (normalized_name, taxonomy_slug, method, version, model_id, confidence),
     )
 
 
 def write_abstain(
-    conn: psycopg.Connection, *, normalized_name: str, version: str
+    conn: Connection, *, normalized_name: str, version: str
 ) -> None:
     """Record that a name was seen but no confident node was found."""
     write_resolution(

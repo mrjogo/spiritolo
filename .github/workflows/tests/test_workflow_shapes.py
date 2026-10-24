@@ -1,10 +1,11 @@
-"""Shape tests for the deploy artifacts — CI YAML, railway.json, the worker
-Dockerfile + entrypoint, and the setup runbook.
+"""Shape tests for the deploy artifacts — CI YAML, railway.json, the service
+Dockerfile + entrypoint, litestream.yml, secrets.env, and the setup runbook.
 
 These parse the committed files as text / YAML / JSON and assert the wiring that
-makes the fully-cloud topology deploy correctly: the migration validate gate,
-the web Vitest gate, the Railway worker deploy, the userspace-Tailscale image,
-and a runbook that takes an operator zero-to-deployed. No processes are run.
+makes the one-service Railway topology deploy correctly: the Python and web PR
+gates, the Dockerfile builder, the Litestream-wrapped entrypoint, 1Password
+secrets by reference only, and a runbook that takes an operator zero-to-deployed.
+No processes are run.
 
 Run from the ingredients uv env (which carries PyYAML + pytest)::
 
@@ -15,8 +16,8 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 
-import pytest
 import yaml
 
 REPO = pathlib.Path(__file__).resolve().parents[3]
@@ -38,114 +39,177 @@ def _on(doc: dict) -> dict:
     return doc.get("on", doc.get(True))
 
 
-# --------------------------------------------------------------------------- #
-# worker.Dockerfile — userspace Tailscale, no privileged networking            #
-# --------------------------------------------------------------------------- #
-
-def test_dockerfile_userspace_no_privileged():
-    df = _text("worker.Dockerfile")
-    # Static Tailscale binaries copied from the official image.
-    assert "tailscale/tailscale:stable" in df
-    assert "/usr/local/bin/tailscaled" in df
-    assert "/usr/local/bin/tailscale" in df
-    # Userspace pattern: no privileged networking anywhere.
-    assert "NET_ADMIN" not in df
-    assert "/dev/net/tun" not in df
-    assert "--privileged" not in df
-    # Frozen install of the worker package.
-    assert "uv sync --frozen" in df
-    assert "--package spiritolo-ingredients" in df
-    # RECIPEGF_TOKEN is a build ARG, never a runtime ENV.
-    assert "ARG RECIPEGF_TOKEN" in df
-    assert "ENV RECIPEGF_TOKEN" not in df
-    assert "python:3.11-slim" in df
-
-
-# --------------------------------------------------------------------------- #
-# scripts/worker-entrypoint.sh — tailscaled userspace + ephemeral join + exec  #
-# --------------------------------------------------------------------------- #
-
-def test_entrypoint_starts_tailscaled_userspace():
-    sh = _text("scripts/worker-entrypoint.sh")
-    assert "tailscaled" in sh
-    assert "--tun=userspace-networking" in sh
-    assert "--socks5-server=localhost:1055" in sh
-    assert "--state=mem:" in sh
-
-
-def test_entrypoint_joins_ephemeral_authkey():
-    sh = _text("scripts/worker-entrypoint.sh")
-    assert "set -euo pipefail" in sh, "needs set -u so the :? guard fires"
-    assert "tailscale up" in sh
-    assert "TAILSCALE_AUTHKEY" in sh
-    assert ":?" in sh, "required-var guard on TAILSCALE_AUTHKEY"
-    assert "--hostname=" in sh and "spiritolo-worker" in sh
-
-
-def test_entrypoint_execs_worker():
-    sh = _text("scripts/worker-entrypoint.sh")
-    lines = [ln.strip() for ln in sh.splitlines() if ln.strip() and not ln.strip().startswith("#")]
-    assert lines[-1] == (
-        "exec uv run --package spiritolo-ingredients python -m ingredients.worker"
-    ), "final line must exec the worker (PID-1 handoff)"
-
-
-def test_entrypoint_no_global_proxy_export():
-    # Only TS_LOCAL_PROXY is exported; a global ALL_PROXY/HTTPS_PROXY would
-    # tunnel hosted APIs through barbot's uplink.
-    sh = _text("scripts/worker-entrypoint.sh")
-    assert "export TS_LOCAL_PROXY=" in sh
-    assert "export ALL_PROXY" not in sh
-    assert "export HTTPS_PROXY" not in sh
-
-
-# --------------------------------------------------------------------------- #
-# deploy-migrations.yml — the PR-to-main validate gate                          #
-# --------------------------------------------------------------------------- #
-
 def _all_run_scripts(job: dict) -> str:
     return "\n".join(
         step.get("run", "") for step in job.get("steps", []) if isinstance(step, dict)
     )
 
 
-def test_deploy_migrations_has_validate_job():
-    doc = _yaml(".github/workflows/deploy-migrations.yml")
+# --------------------------------------------------------------------------- #
+# Dockerfile — web build + python runtime, secrets never baked in              #
+# --------------------------------------------------------------------------- #
+
+def test_dockerfile_builds_web_and_runtime():
+    df = _text("Dockerfile")
+    assert "FROM node:20-slim AS web" in df
+    assert "npm run build" in df
+    assert "python:3.11-slim" in df
+    assert "COPY --from=web /web/dist /app/web/dist" in df
+    # Frozen install of the service package.
+    assert "uv sync --frozen" in df
+    assert "--package spiritolo-app" in df
+
+
+def test_dockerfile_ships_litestream_op_and_userspace_tailscale():
+    df = _text("Dockerfile")
+    assert "litestream/litestream:" in df
+    assert "1password/op:" in df
+    assert "tailscale/tailscale:stable" in df
+    # Userspace pattern: no privileged networking anywhere.
+    assert "NET_ADMIN" not in df
+    assert "/dev/net/tun" not in df
+    assert "--privileged" not in df
+
+
+def test_dockerfile_bakes_no_secrets():
+    df = _text("Dockerfile")
+    # RECIPEGF_TOKEN is a build ARG, never a runtime ENV.
+    assert "ARG RECIPEGF_TOKEN" in df
+    assert "ENV RECIPEGF_TOKEN" not in df
+    for name in ("OP_SERVICE_ACCOUNT_TOKEN", "SESSION_SECRET", "LITESTREAM_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+        assert name not in df, f"{name} must come from the vault at boot, not the image"
+    # The entrypoint and the secrets template are copied in; the runtime env
+    # points at the volume and turns on restart-mode import.
+    assert "COPY secrets.env /app/secrets.env" in df
+    assert "COPY scripts/entrypoint.sh scripts/run-app.sh" in df
+    assert "SPIRITOLO_DB=/data/spiritolo.db" in df
+    assert "IMPORT_RESTART=1" in df
+
+
+# --------------------------------------------------------------------------- #
+# scripts/entrypoint.sh — staged import, op run, litestream restore + replicate #
+# --------------------------------------------------------------------------- #
+
+def test_entrypoint_runs_under_op_when_token_present():
+    sh = _text("scripts/entrypoint.sh")
+    assert "set -euo pipefail" in sh
+    assert "OP_SERVICE_ACCOUNT_TOKEN" in sh
+    assert "op run --env-file /app/secrets.env" in sh
+
+
+def test_entrypoint_applies_staged_import_before_anything_opens_the_db():
+    sh = _text("scripts/entrypoint.sh")
+    swap = sh.index('"$DB_PATH.import"')
+    assert swap < sh.index("litestream restore"), "the import swap must precede the Litestream restore"
+    assert swap < sh.index("litestream replicate")
+    assert 'rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"' in sh
+
+
+def test_entrypoint_derives_litestream_settings_from_the_attached_bucket():
+    sh = _text("scripts/entrypoint.sh")
+    assert 'LITESTREAM_REPLICA_URL="s3://${BUCKET_NAME}/spiritolo"' in sh
+    for var in ("BUCKET_ENDPOINT", "BUCKET_REGION", "BUCKET_ACCESS_KEY_ID", "BUCKET_SECRET_ACCESS_KEY"):
+        assert var in sh
+
+
+def test_entrypoint_restores_then_replicates_with_uvicorn_as_child():
+    sh = _text("scripts/entrypoint.sh")
+    assert "litestream restore -if-replica-exists" in sh
+    assert "litestream replicate -config /etc/litestream.yml" in sh
+    assert "-exec /usr/local/bin/run-app.sh" in sh
+    # Without a replica URL it still boots (local docker runs).
+    assert "LITESTREAM_REPLICA_URL" in sh
+    assert sh.count("/usr/local/bin/run-app.sh") == 2
+
+
+def test_run_app_wrapper_forwards_sigterm_and_exits_clean():
+    sh = _text("scripts/run-app.sh")
+    assert "uvicorn spiritolo.main:app --factory" in sh
+    assert "--host 0.0.0.0" in sh
+    assert "trap forward TERM INT" in sh
+    # SIGTERM from a redeploy is a clean shutdown, not a crash...
+    assert '-eq 143' in sh
+    # ...but the import feature's restart code must pass through untouched.
+    assert "exit \"$rc\"" in sh
+    df = _text("Dockerfile")
+    assert "scripts/run-app.sh" in df
+
+
+def test_entrypoint_tailscale_is_optional_and_userspace():
+    sh = _text("scripts/entrypoint.sh")
+    assert 'if [ -n "${TAILSCALE_AUTHKEY:-}" ]' in sh
+    assert "--tun=userspace-networking" in sh
+    assert "--socks5-server=localhost:1055" in sh
+    assert "--state=mem:" in sh
+    # Only TS_LOCAL_PROXY is exported; a global ALL_PROXY/HTTPS_PROXY would
+    # tunnel hosted APIs through the tailnet uplink.
+    assert "export TS_LOCAL_PROXY=" in sh
+    assert "export ALL_PROXY" not in sh
+    assert "export HTTPS_PROXY" not in sh
+
+
+# --------------------------------------------------------------------------- #
+# litestream.yml + secrets.env — everything by reference, nothing literal      #
+# --------------------------------------------------------------------------- #
+
+def test_litestream_config_reads_everything_from_env():
+    cfg = _text("litestream.yml")
+    for var in ("SPIRITOLO_DB", "LITESTREAM_REPLICA_URL", "LITESTREAM_ENDPOINT", "LITESTREAM_REGION",
+                "LITESTREAM_ACCESS_KEY_ID", "LITESTREAM_SECRET_ACCESS_KEY"):
+        assert "${" + var + "}" in cfg, f"litestream.yml must read {var} from the environment"
+    doc = yaml.safe_load(cfg)
+    replica = doc["dbs"][0]["replicas"][0]
+    assert replica["type"] == "s3" and replica["force-path-style"] is True
+    assert "retention" in replica and "snapshot-interval" in replica
+
+
+def test_secrets_env_holds_only_op_references():
+    env = _text("secrets.env")
+    for line in env.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, _, value = line.partition("=")
+        assert re.fullmatch(r"[A-Z0-9_]+", name), f"odd variable name {name!r}"
+        assert value.startswith("op://"), f"{name} must be an op:// reference, got {value!r}"
+    names = {ln.partition("=")[0] for ln in env.splitlines() if ln and not ln.startswith("#")}
+    assert "SESSION_SECRET" in names
+    # Bucket credentials are Railway reference variables, never vault items.
+    for name in ("LITESTREAM_ACCESS_KEY_ID", "LITESTREAM_SECRET_ACCESS_KEY",
+                 "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+        assert name not in names, f"{name} must come from the attached Railway bucket, not the vault"
+
+
+# --------------------------------------------------------------------------- #
+# railway.json — declarative Dockerfile builder, health-checked single replica #
+# --------------------------------------------------------------------------- #
+
+def test_railway_json_dockerfile_builder():
+    cfg = json.loads(_text("railway.json"))
+    assert cfg["build"]["builder"] == "DOCKERFILE"
+    assert cfg["build"]["dockerfilePath"] == "Dockerfile"
+    assert cfg["deploy"]["numReplicas"] == 1
+    assert cfg["deploy"]["restartPolicyType"] == "ON_FAILURE"
+    assert cfg["deploy"]["healthcheckPath"] == "/api/health"
+
+
+# --------------------------------------------------------------------------- #
+# python-ci.yml / web-ci.yml — the PR gates                                     #
+# --------------------------------------------------------------------------- #
+
+def test_python_ci_runs_every_suite_without_a_database_service():
+    doc = _yaml(".github/workflows/python-ci.yml")
     on = _on(doc)
-    pr = on["pull_request"]
-    assert "main" in pr["branches"]
-    assert "supabase/migrations/**" in pr["paths"]
+    assert "main" in on["pull_request"]["branches"]
+    paths = set(on["pull_request"]["paths"])
+    assert {"app/**", "common/**", "ingredients/**", "scripts/**", "uv.lock"} <= paths
+    job = next(iter(doc["jobs"].values()))
+    assert "services" not in job, "SQLite suites need no database service"
+    script = _all_run_scripts(job)
+    assert "uv sync --frozen --all-packages --all-extras" in script
+    for member in ("common", "ingredients", "app", "scripts"):
+        assert f"cd {member} && uv run --no-sync pytest" in script
 
-    # A job that runs a postgres:16 service and forward-applies every migration
-    # with ON_ERROR_STOP.
-    validate = next(
-        (
-            j for j in doc["jobs"].values()
-            if isinstance(j.get("services"), dict)
-            and any(
-                str(svc.get("image", "")).startswith("postgres:16")
-                for svc in j["services"].values()
-            )
-        ),
-        None,
-    )
-    assert validate is not None, "no validate job with a postgres:16 service"
-    script = _all_run_scripts(validate)
-    assert "ON_ERROR_STOP=1" in script
-    assert "supabase/migrations/*.sql" in script
-    assert "psql" in script
-
-
-def test_deploy_migrations_no_rebuild_projections():
-    # The single-DB topology gives main a validation gate only; no projection
-    # rebuild step is wired here.
-    doc = _text(".github/workflows/deploy-migrations.yml")
-    assert "rebuild_projections" not in doc
-
-
-# --------------------------------------------------------------------------- #
-# web-ci.yml — the Vitest PR gate for the SPA                                   #
-# --------------------------------------------------------------------------- #
 
 def test_web_ci_runs_vitest():
     doc = _yaml(".github/workflows/web-ci.yml")
@@ -161,16 +225,10 @@ def test_web_ci_runs_vitest():
     assert "npm test" in script
 
 
-# --------------------------------------------------------------------------- #
-# railway.json — declarative Dockerfile builder, single replica                 #
-# --------------------------------------------------------------------------- #
-
-def test_railway_json_dockerfile_builder():
-    cfg = json.loads(_text("railway.json"))
-    assert cfg["build"]["builder"] == "DOCKERFILE"
-    assert cfg["build"]["dockerfilePath"] == "worker.Dockerfile"
-    assert cfg["deploy"]["numReplicas"] == 1
-    assert cfg["deploy"]["restartPolicyType"] == "ON_FAILURE"
+def test_no_supabase_deploy_workflows_remain():
+    names = {p.name for p in WORKFLOWS.glob("*.yml")}
+    assert "deploy-migrations.yml" not in names
+    assert "keepalive.yml" not in names
 
 
 # --------------------------------------------------------------------------- #
@@ -181,24 +239,25 @@ def test_runbook_covers_all_steps():
     md = _text("docs/devops-runbook.md")
     lowered = md.lower()
     for marker in (
-        "supabase pro",
-        "repo secrets",
-        "storage bucket",
-        "tailscale",
         "railway",
-        "vercel",
+        "volume",
+        "bucket",
+        "1password",
+        "litestream",
+        "passkey",
+        "deploy branch",
         "recipegf",
         "smoke",
-        "promote",
+        "import",
     ):
         assert marker in lowered, f"runbook missing a section for {marker!r}"
-    # The load-bearing secrets/artifacts an operator must not miss.
-    assert "RECIPEGF_TOKEN" in md
-    assert "TAILSCALE_AUTHKEY" in md
-    assert "S3_" in md
-    assert "v0.4.0" in md
-    # No projection-rebuild step leaks into the runbook either.
-    assert "rebuild_projections" not in md
+    # The load-bearing variables an operator must not miss.
+    for var in ("OP_SERVICE_ACCOUNT_TOKEN", "PUBLIC_ORIGIN", "BUCKET_NAME",
+                "BUCKET_ACCESS_KEY_ID", "AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME"):
+        assert var in md, f"runbook must name {var}"
+    # Nothing from the Supabase era leaks back in.
+    assert "supabase db push" not in lowered
+    assert "vercel" not in lowered
 
 
 # --------------------------------------------------------------------------- #
@@ -211,7 +270,8 @@ def test_shape_tests_gated_in_ci():
     assert "main" in on["pull_request"]["branches"]
     # It must re-run when any artifact it inspects — or the test itself — changes.
     paths = set(on["pull_request"]["paths"])
-    assert ".github/workflows/**" in paths
+    assert {".github/workflows/**", "Dockerfile", "scripts/entrypoint.sh", "railway.json",
+            "litestream.yml", "secrets.env", "docs/devops-runbook.md"} <= paths
 
     job = next(iter(doc["jobs"].values()))
     script = _all_run_scripts(job)

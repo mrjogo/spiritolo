@@ -1,88 +1,106 @@
-# Data migration — local → hosted
+# Data migration — Supabase Postgres → the Railway SQLite service
 
-Move the two durable inputs into their hosted homes, then regenerate everything.
-Infra standup first: [devops-runbook.md](devops-runbook.md).
+Moves everything the pipeline produced on staging Supabase (`recipes`,
+`recipe_ingredients`, `recipe_steps`, `ingredient_resolutions`, the taxonomy,
+clusters, exports, runs + `job_items`, `human_reviews`, the audit log, and the
+Zone-1 `pages` table) into the new service's SQLite file. The path is
+**secrets-blind**: nobody needs the Postgres password; the GitHub Action that
+holds it produces a dump artifact, and everything after that is a file.
 
-- **Move:** HTML corpus (`data/html/`) → object store · `pages` state (URLs + `content_type`) → Postgres.
-- **Regenerate:** recipes / ingredients / steps / clusters / exports (re-run the pipeline).
-- **Keep:** taxonomy + `cocktail_aliases` (migrations don't drop them). **Don't recreate the Supabase project.**
-
-**Fill in once:**
-
-```bash
-export SUPABASE_DB_URL="postgresql://postgres.atvlzbgrquiseczzeczn:<pw>@aws-1-us-east-2.pooler.supabase.com:5432/postgres"
-export SUPABASE_STAGING_DB_URL="$SUPABASE_DB_URL"     # same DB (single env); used by the backup
-
-railway link                          # link to the worker's project (§4 of the runbook)
-export $(railway bucket credentials --bucket spiritolo-corpus | grep '^AWS_' | xargs)   # AWS_ENDPOINT_URL / _ACCESS_KEY_ID / _SECRET_ACCESS_KEY / _S3_BUCKET_NAME / _DEFAULT_REGION — the loader reads these directly. NOTE: unquoted + grep on purpose — quoting `"$(…)"` jams every pair into AWS_ENDPOINT_URL.
+```
+GitHub Action "Backup staging database"  →  spiritolo-staging-<ts>.dump (artifact, 7 days)
+        ↓ download
+scripts/pg_to_sqlite  <dump>  spiritolo.db     # offline, pg_restore --data-only → parse → SQLite
+        ↓
+/ops → Import: stage (upload + verify) → apply (service restarts on the new file)
 ```
 
-Prereqs: infra up (devops-runbook), local `data/scraper.db` + `data/html/`
-present. Every step is idempotent — safe to re-run.
+## 1. Export
+
+Actions tab → **Backup staging database** → *Run workflow* (pick the branch
+that carries the current `scripts/backup-supabase.sh`, which dumps the `audit`
+schema too). The run uploads `spiritolo-staging-dump-<run-id>` containing the
+`.dump` and a `.meta.json` sidecar. It needs the `SUPABASE_STAGING_DB_URL`
+repo secret to be the session-pooler URL (`postgres.<ref>@…pooler…:5432`).
+
+## 2. Convert
+
+Needs `pg_restore` on PATH (any major ≥ the dump's server; no Postgres
+*server* is involved):
+
+```bash
+cd scripts && uv run python -m pg_to_sqlite ~/Downloads/spiritolo-staging-*.dump ../out/spiritolo.db
+# → pages=N taxonomy_nodes=N recipes=N … audit_log=N skipped:public.profiles=N
+```
+
+What the ETL does (`scripts/src/pg_to_sqlite/__init__.py`):
+
+- streams `pg_restore --data-only` and parses the `COPY … FROM stdin` blocks;
+- maps every column into the SQLite schema built from
+  `common/db/migrations/`: `jsonb`/`text[]` → JSON text, `bool` → 0/1,
+  `timestamptz` → ISO-8601 UTC millis, numerics → REAL;
+- folds retired `jobs.state` values (`awaiting_approval`/`claimed` → `queued`,
+  `succeeded` → `done`) and drops the approval columns;
+- copies `audit.log` → `audit_log`, keeping the diff shape;
+- leaves `profiles` and `worker_status` behind (passkey operators replace
+  profiles; there is no worker daemon);
+- finishes with `pragma foreign_key_check`, `VACUUM`, and exits 2 if anything
+  dangles or an unknown table appeared.
+
+Sanity-check the result:
+
+```bash
+sqlite3 out/spiritolo.db 'select count(*) from recipes; select count(*) from recipe_exports; pragma integrity_check;'
+```
+
+## 3. Load
+
+Sign in to `/ops` as an admin → **Import**:
+
+1. **Upload and verify** the file. The browser computes its SHA-256; the
+   server checks the digest, opens the file read-only, runs
+   `integrity_check`, confirms the migration ledger matches this build, and
+   shows row counts. Because the ETL output has no `operators`, the live
+   operators and passkeys are copied into the staged file, so your session
+   survives the swap. Nothing live changes yet; the file sits at
+   `/data/spiritolo.db.import`.
+2. **Apply**. In the container the process exits (code 3) and Railway
+   restarts it; the entrypoint sees the staged file, removes the old database
+   (+ `-wal`/`-shm`), renames the staged file into place, and Litestream
+   starts a new generation for it. The page polls `/api/health` until the
+   service is back. (Locally, with `IMPORT_RESTART` unset, the swap happens
+   in-process instead.)
+
+**Discard** removes a staged file without applying it.
+
+## 4. Verify
+
+```bash
+curl -s https://spiritolo-staging.up.railway.app/api/recipes?page_size=1 | head -c 400
+```
+
+and in `/ops`: Recipes / Exports / Audit log browsers show the migrated rows;
+Runs lists the historical runs with their items.
+
+## 5. The HTML corpus
+
+Pages' HTML lives in the `spiritolo-corpus` bucket and is referenced by
+`pages.corpus_key`, which the ETL carries over unchanged. Either keep reading
+that bucket (its credentials in the vault, its endpoint/name as `AWS_*`
+variables) or copy the objects to a bucket in the new project and point the
+variables there. No re-crawl is needed.
+
+## 6. Decommission
+
+Once the import is verified: delete the Supabase project, the
+`SUPABASE_STAGING_DB_URL` secret, the backup workflow and
+`scripts/backup-supabase.sh`. Keep one copy of the final `.dump` cold.
 
 ---
 
-## 1. Back up staging (rollback insurance)
+### Legacy: `corpus_loader`
 
-```bash
-scripts/backup-supabase.sh --dest /tmp/premigrate
-```
-
-- CI's `validate` job already proves the migrations apply from scratch. The drops in `20260720120000_content_relational_model.sql` are `drop … if exists` on the regenerable content tables only; `taxonomy_*` / `cocktail_aliases` are untouched.
-
-## 2. Promote the schema
-
-```bash
-gh pr create --base staging --head main --title "Promote main → staging" --body "Rebuild schema + pipeline"
-```
-
-- Merge with a **merge commit — never squash**. CI drops the old content tables and creates the new relational schema + the `pages` table.
-
-## 3. Import pages (SQLite → Postgres)
-
-```bash
-cd scripts && uv run python -m corpus_loader import-pages --sqlite ../data/scraper.db
-# → read=N extractable=N denylisted=N
-```
-
-## 4. Load the corpus (local HTML → object store)
-
-```bash
-cd scripts && uv run python -m corpus_loader load-corpus --sqlite ../data/scraper.db --html-dir ../data/html
-# → uploaded=N skipped_existing=N missing=N corpus_key_set=N not_in_pg=N
-```
-
-- `missing` ≈ 0 (a large value → wrong `--html-dir`). `not_in_pg` = 0 (if >0, step 3 was skipped — run it, then re-run this).
-
-## 5. Regenerate content
-
-Deterministic pass (free, fast; anything only an LLM can resolve parks as `pending`):
-
-```bash
-cd ingredients && uv run python -m ingredients.cli cold-build
-```
-
-Drain the parked LLM work on the worker (resolves against the kept taxonomy, so mostly alias/lexical; free `barbot` for the rest):
-
-1. `/ops` → for each stage still showing queue depth, click **Trigger → whole queue**.
-2. Approve any metered cost prompt.
-3. Watch `railway logs` / `/ops` until every depth hits 0.
-
-## 6. Verify
-
-```bash
-psql "$SUPABASE_DB_URL" -c "
-  select
-    (select count(*) from pages) as pages,
-    (select count(*) from pages
-       where content_type in ('likely_drink_recipe','confirmed_drink')
-         and corpus_key is not null) as extractable,
-    (select count(*) from recipes) as recipes,
-    (select count(*) from recipe_exports) as exports;"
-```
-
-- `extractable` ≈ `recipes` ≈ `exports` once drained. `/ops` dashboard depths at 0; `/ops → Exports → preview` spot-checks a bundle.
-
-## 7. Decommission local
-
-- Archive `data/scraper.db` + `data/html/` cold. The bucket has no versioning, so this is the corpus's only other copy — keep it, don't delete.
+`scripts/src/corpus_loader` (`import-pages`, `load-corpus`) was the earlier
+one-time move of the local scraper SQLite + `data/html/` into Postgres + the
+bucket. It still targets Postgres via `SUPABASE_DB_URL` and is kept only as a
+reference for a future scraper → service page import.

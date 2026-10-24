@@ -13,7 +13,7 @@ A worldwide compendium of cocktail recipes — every recipe ever published onlin
 - **Search** — full-text over recipe name + ingredients.
 - **Spirits taxonomy** — canonical hierarchy of spirit type → category → brand (e.g., whiskey → bourbon → Buffalo Trace), with free-text ingredient strings mapped to canonical IDs.
 - **Deduplication** — fuzzy matching across sources (same cocktail, different recipes) via normalized name + sorted ingredient-set hash.
-- **Recipe graph / "similar drinks"** — interpretable ingredient-overlap similarity as a baseline, then embeddings via Supabase pgvector over structured features (ingredients + technique tokens), not raw recipe text.
+- **Recipe graph / "similar drinks"** — interpretable ingredient-overlap similarity as a baseline, then embeddings (sqlite-vec or an external index) over structured features (ingredients + technique tokens), not raw recipe text.
 - **AI substitutions** — given a recipe and available ingredients, suggest substitutions.
 - **Completeness tracking** — how many known cocktails are covered, what's missing.
 - **Data source for RecipeGF** (`/Users/ruddick/code-projects/RecipeGF`) — spiritolo provides structured cocktail recipe data that RecipeGF consumes.

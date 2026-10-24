@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 
-import psycopg
 import pytest
 from recipegf import parse_recipe_id
 
@@ -16,25 +15,25 @@ from ingredients.recipegf.version import CONVERTER_VERSION
 
 
 @pytest.fixture()
-def conn(test_db_url: str):
-    with psycopg.connect(test_db_url, autocommit=True) as c:
-        c.execute("truncate recipes restart identity cascade")
-        c.execute("truncate ingredient_resolutions restart identity cascade")
-        c.execute("truncate job_items restart identity cascade")
-        c.execute("truncate recipe_exports restart identity cascade")
-        c.execute("truncate taxonomy_nodes restart identity cascade")
+def conn(db_conn):
+    if (c := db_conn) is not None:
+        c.execute("delete from recipes")
+        c.execute("delete from ingredient_resolutions")
+        c.execute("delete from job_items")
+        c.execute("delete from recipe_exports")
+        c.execute("delete from taxonomy_nodes")
         yield c
-        c.execute("truncate recipes restart identity cascade")
-        c.execute("truncate ingredient_resolutions restart identity cascade")
-        c.execute("truncate job_items restart identity cascade")
-        c.execute("truncate recipe_exports restart identity cascade")
-        c.execute("truncate taxonomy_nodes restart identity cascade")
+        c.execute("delete from recipes")
+        c.execute("delete from ingredient_resolutions")
+        c.execute("delete from job_items")
+        c.execute("delete from recipe_exports")
+        c.execute("delete from taxonomy_nodes")
 
 
 def _resolve(conn, name, slug):
     conn.execute(
         "insert into ingredient_resolutions (normalized_name, taxonomy_slug, method, version) "
-        "values (%s, %s, 'alias', 'v1') on conflict (normalized_name) do nothing",
+        "values (?, ?, 'alias', 'v1') on conflict (normalized_name) do nothing",
         (name, slug),
     )
 
@@ -44,8 +43,8 @@ def _seed_ready_recipe(conn, suffix: str = "") -> int:
         """
         insert into recipes (source_url, site, source, title, canonical_name,
                              equipment)
-        values (%s, 'ex', '{}'::jsonb, 'Old Fashioned',
-                'old fashioned', array['mixing_glass','bar_spoon','rocks_glass'])
+        values (?, 'ex', '{}', 'Old Fashioned',
+                'old fashioned', '["mixing_glass","bar_spoon","rocks_glass"]')
         returning id
         """,
         (f"https://ex.test/of{suffix}",),
@@ -58,7 +57,7 @@ def _seed_ready_recipe(conn, suffix: str = "") -> int:
     for pos, name, amt, unit, slug in ings:
         conn.execute(
             "insert into recipe_ingredients (recipe_id, position, name, amount, unit, raw_text) "
-            "values (%s,%s,%s,%s,%s,%s)",
+            "values (?,?,?,?,?,?)",
             (rid, pos, name, amt, unit, f"{name} raw"),
         )
         _resolve(conn, name.lower(), slug)
@@ -71,7 +70,7 @@ def _seed_ready_recipe(conn, suffix: str = "") -> int:
     for idx, verb, roles, result in steps:
         conn.execute(
             "insert into recipe_steps (recipe_id, step_index, verb, roles, result) "
-            "values (%s,%s,%s,%s::jsonb,%s)",
+            "values (?,?,?,?,?)",
             (rid, idx, verb, json.dumps(roles), result),
         )
     return rid
@@ -88,7 +87,7 @@ def test_export_freezes_bundle_and_records_resolved(conn):
 
     exp = conn.execute(
         "select recipe_slug, recipe_ref, converter_version, bundle from recipe_exports "
-        "where recipe_id=%s",
+        "where recipe_id=?",
         (rid,),
     ).fetchone()
     assert exp[0] == "old-fashioned"
@@ -97,10 +96,10 @@ def test_export_freezes_bundle_and_records_resolved(conn):
     assert exp[3]["meta"]["slug"] == "old-fashioned"
 
     # Slug pinned back onto the recipe.
-    assert conn.execute("select recipe_slug from recipes where id=%s", (rid,)).fetchone()[0] == "old-fashioned"
+    assert conn.execute("select recipe_slug from recipes where id=?", (rid,)).fetchone()[0] == "old-fashioned"
 
     outcome = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='export-recipegf'", (rid,)
+        "select outcome from job_items where entity_id=? and stage='export-recipegf'", (rid,)
     ).fetchone()[0]
     assert outcome == "resolved"
 
@@ -113,7 +112,7 @@ def test_export_pending_when_ingredient_unresolved(conn):
     assert counts["pending"] == 1
     assert conn.execute("select count(*) from recipe_exports").fetchone()[0] == 0
     outcome = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='export-recipegf'", (rid,)
+        "select outcome from job_items where entity_id=? and stage='export-recipegf'", (rid,)
     ).fetchone()[0]
     assert outcome == "pending"
 
@@ -132,20 +131,20 @@ def test_export_skips_recipe_with_provisional_ingredient(conn):
     assert counts["exported"] == 0
     assert conn.execute("select count(*) from recipe_exports").fetchone()[0] == 0
     outcome = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='export-recipegf'", (rid,)
+        "select outcome from job_items where entity_id=? and stage='export-recipegf'", (rid,)
     ).fetchone()[0]
     assert outcome == "pending"
 
     # Promote + requeue -> freezes normally.
     conn.execute("update taxonomy_nodes set status='live' where slug='bourbon'")
-    conn.execute("delete from job_items where entity_id=%s and stage='export-recipegf'", (rid,))
+    conn.execute("delete from job_items where entity_id=? and stage='export-recipegf'", (rid,))
     counts2 = export_stage_fn(_job(), conn, None)
     assert counts2["exported"] == 1
     assert conn.execute(
-        "select count(*) from recipe_exports where recipe_id=%s", (rid,)
+        "select count(*) from recipe_exports where recipe_id=?", (rid,)
     ).fetchone()[0] == 1
     outcome2 = conn.execute(
-        "select outcome from job_items where entity_id=%s and stage='export-recipegf'", (rid,)
+        "select outcome from job_items where entity_id=? and stage='export-recipegf'", (rid,)
     ).fetchone()[0]
     assert outcome2 == "resolved"
 
@@ -171,16 +170,16 @@ def test_export_batches_across_chunk_boundary(conn):
     assert conn.execute("select count(*) from recipe_exports").fetchone()[0] == 5
     for rid in rids:
         exp = conn.execute(
-            "select recipe_slug, converter_version from recipe_exports where recipe_id=%s",
+            "select recipe_slug, converter_version from recipe_exports where recipe_id=?",
             (rid,),
         ).fetchone()
         assert exp[0] == "old-fashioned"
         assert exp[1] == CONVERTER_VERSION
         assert (
-            conn.execute("select recipe_slug from recipes where id=%s", (rid,)).fetchone()[0]
+            conn.execute("select recipe_slug from recipes where id=?", (rid,)).fetchone()[0]
             == "old-fashioned"
         )
         outcome = conn.execute(
-            "select outcome from job_items where entity_id=%s and stage='export-recipegf'", (rid,)
+            "select outcome from job_items where entity_id=? and stage='export-recipegf'", (rid,)
         ).fetchone()[0]
         assert outcome == "resolved"

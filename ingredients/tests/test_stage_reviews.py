@@ -5,13 +5,10 @@ from __future__ import annotations
 
 import os
 
-import psycopg
 import pytest
-from psycopg.types.json import Json
+from common.db import IntegrityError, jdump as Json
 
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("TEST_DB_URL"), reason="no TEST_DB_URL"
-)
+from ingredients.reviews.apply import apply_review
 
 _TABLES = (
     "human_reviews", "job_items", "recipe_ingredients", "recipe_steps",
@@ -22,20 +19,20 @@ _TABLES = (
 @pytest.fixture
 def clean(db_conn):
     for t in _TABLES:
-        db_conn.execute(f"truncate table {t} restart identity cascade")
+        db_conn.execute(f"delete from {t}")
     return db_conn
 
 
 def _recipe(conn, url="u1"):
     return conn.execute(
-        "insert into recipes (source_url, site) values (%s, 't') returning id", (url,)
+        "insert into recipes (source_url, site) values (?, 't') returning id", (url,)
     ).fetchone()[0]
 
 
 def _review(conn, **kw):
     kw.setdefault("origin", "human_flag")
     cols = ", ".join(kw)
-    vals = ", ".join(["%s"] * len(kw))
+    vals = ", ".join(["?"] * len(kw))
     return conn.execute(
         f"insert into human_reviews ({cols}) values ({vals}) returning id",
         tuple(kw.values()),
@@ -46,7 +43,7 @@ def _review(conn, **kw):
 
 def test_one_open_review_per_entity_stage(clean):
     _review(clean, entity_kind="ingredient_name", entity_id="lime", stage="map-ingredient")
-    with pytest.raises(psycopg.errors.UniqueViolation):
+    with pytest.raises(IntegrityError):
         _review(clean, entity_kind="ingredient_name", entity_id="lime", stage="map-ingredient",
                 origin="machine_proposal")
 
@@ -67,7 +64,7 @@ def test_ledger_appends_versions(clean):
     ledger.record_run(clean, entity_type="recipe", entity_id=rid, stage="map-ingredient",
                       version="v2", outcome="resolved", method="deterministic")
     n = clean.execute(
-        "select count(*) from job_items where entity_id=%s and stage='map-ingredient'", (rid,)
+        "select count(*) from job_items where entity_id=? and stage='map-ingredient'", (rid,)
     ).fetchone()[0]
     assert n == 2
 
@@ -80,7 +77,7 @@ def test_same_version_rerun_overwrites(clean):
     ledger.record_run(clean, entity_type="recipe", entity_id=rid, stage="map-ingredient",
                       version="v1", outcome="resolved", method="deterministic")
     rows = clean.execute(
-        "select outcome from job_items where entity_id=%s and stage='map-ingredient'", (rid,)
+        "select outcome from job_items where entity_id=? and stage='map-ingredient'", (rid,)
     ).fetchall()
     assert rows == [("resolved",)]
 
@@ -90,7 +87,7 @@ def test_same_version_rerun_overwrites(clean):
 def test_apply_review_map(clean):
     rid = _review(clean, entity_kind="ingredient_name", entity_id="fresh lime juice",
                   stage="map-ingredient", state="resolved", payload=Json({"slug": "lime-juice"}))
-    clean.execute("select apply_review(%s)", (rid,))
+    apply_review(clean, rid)
     row = clean.execute(
         "select taxonomy_slug, method from ingredient_resolutions "
         "where normalized_name='fresh lime juice'"
@@ -102,14 +99,14 @@ def test_apply_review_parse_by_position(clean):
     r = _recipe(clean)
     clean.execute(
         "insert into recipe_ingredients(recipe_id,position,raw_text,name,unit) "
-        "values (%s,0,'1 oz gin','gin','oz')", (r,)
+        "values (?,0,'1 oz gin','gin','oz')", (r,)
     )
     rid = _review(clean, entity_kind="recipe_ingredient", entity_id=f"{r}:0",
                   stage="parse-ingredients", state="resolved",
                   payload=Json({"name": "London gin", "unit": "ml"}))
-    clean.execute("select apply_review(%s)", (rid,))
+    apply_review(clean, rid)
     row = clean.execute(
-        "select name, unit from recipe_ingredients where recipe_id=%s and position=0", (r,)
+        "select name, unit from recipe_ingredients where recipe_id=? and position=0", (r,)
     ).fetchone()
     assert row == ("London gin", "ml")
 
@@ -117,7 +114,7 @@ def test_apply_review_parse_by_position(clean):
 def test_apply_review_convert_replaces_steps(clean):
     r = _recipe(clean)
     clean.execute(
-        "insert into recipe_steps(recipe_id,step_index,verb,result) values (%s,0,'old','x')",
+        "insert into recipe_steps(recipe_id,step_index,verb,result) values (?,0,'old','x')",
         (r,)
     )
     payload = {"steps": [
@@ -127,10 +124,10 @@ def test_apply_review_convert_replaces_steps(clean):
     ]}
     rid = _review(clean, entity_kind="recipe", entity_id=str(r), stage="convert-steps",
                   state="resolved", payload=Json(payload))
-    clean.execute("select apply_review(%s)", (rid,))
+    apply_review(clean, rid)
     rows = clean.execute(
         "select step_index, verb, result, modifiers from recipe_steps "
-        "where recipe_id=%s order by step_index", (r,)
+        "where recipe_id=? order by step_index", (r,)
     ).fetchall()
     assert [x[1] for x in rows] == ["stir", "strain"]
     assert rows[0][3] == ["gently"]
@@ -140,8 +137,8 @@ def test_apply_review_extract_updates_header(clean):
     r = _recipe(clean)
     rid = _review(clean, entity_kind="recipe", entity_id=str(r), stage="extract-recipe",
                   state="resolved", payload=Json({"title": "Real Negroni"}))
-    clean.execute("select apply_review(%s)", (rid,))
-    title = clean.execute("select title from recipes where id=%s", (r,)).fetchone()[0]
+    apply_review(clean, rid)
+    title = clean.execute("select title from recipes where id=?", (r,)).fetchone()[0]
     assert title == "Real Negroni"
 
 
@@ -149,7 +146,7 @@ def test_apply_review_ignores_unresolved(clean):
     # an OPEN review must not materialize
     rid = _review(clean, entity_kind="ingredient_name", entity_id="x", stage="map-ingredient",
                   payload=Json({"slug": "should-not-apply"}))
-    clean.execute("select apply_review(%s)", (rid,))
+    apply_review(clean, rid)
     n = clean.execute("select count(*) from ingredient_resolutions").fetchone()[0]
     assert n == 0
 
@@ -220,13 +217,13 @@ def test_map_stage_reapplies_override_on_run(clean):
     r = _recipe(clean)
     clean.execute(
         "insert into recipe_ingredients(recipe_id,position,raw_text,name) "
-        "values (%s,0,'x','x')", (r,)
+        "values (?,0,'x','x')", (r,)
     )
     _review(clean, entity_kind="ingredient_name", entity_id="x", stage="map-ingredient",
             state="resolved", payload=Json({"slug": "correct"}))
     clean.execute(
         "insert into ingredient_resolutions(normalized_name,taxonomy_slug,method,version) "
-        "values ('x','WRONG','lexical',%s)", (MAPPER_VERSION,)
+        "values ('x','WRONG','lexical',?)", (MAPPER_VERSION,)
     )
 
     map_stage_fn({}, clean, None)
@@ -244,7 +241,7 @@ def test_parse_stage_reapplies_override_on_run(clean):
 
     r = clean.execute(
         "insert into recipes (source_url, site, source) values "
-        "('u2','t','{\"recipeIngredient\":[\"1 oz gin\"]}'::jsonb) returning id"
+        "('u2','t','{\"recipeIngredient\":[\"1 oz gin\"]}') returning id"
     ).fetchone()[0]
     _review(clean, entity_kind="recipe_ingredient", entity_id=f"{r}:0",
             stage="parse-ingredients", state="resolved", payload=Json({"unit": "ml"}))
@@ -252,7 +249,7 @@ def test_parse_stage_reapplies_override_on_run(clean):
     parse_stage_fn({}, clean, None)
 
     unit = clean.execute(
-        "select unit from recipe_ingredients where recipe_id=%s and position=0", (r,)
+        "select unit from recipe_ingredients where recipe_id=? and position=0", (r,)
     ).fetchone()[0]
     assert unit == "ml"  # override won over the freshly-parsed 'oz'
 

@@ -35,7 +35,7 @@ function ParsedCard({ row }: { row: RecipeIngredientRow | null }) {
       </div>
     );
   }
-  if (row.parse_status === 'unparseable') {
+  if (row.name === null) {
     return (
       <div className="recipe-detail__parsed-card recipe-detail__parsed-card--unparseable">
         <em>unparseable</em>
@@ -47,20 +47,20 @@ function ParsedCard({ row }: { row: RecipeIngredientRow | null }) {
       <span className="recipe-detail__parsed-id">#{row.id}</span>
       <span className="recipe-detail__parsed-amount">{formatAmount(row)}</span>
       <span className="recipe-detail__parsed-name">
-        {row.taxonomy_nodes != null ? (
-          <Link to={`/taxonomy?node=${row.taxonomy_nodes.slug}`}>
-            {row.taxonomy_nodes.display_name}
+        {row.taxonomy_node != null ? (
+          <Link to={`/taxonomy?node=${row.taxonomy_node.slug}`}>
+            {row.taxonomy_node.display_name}
           </Link>
         ) : (
-          row.name ?? ''
+          row.name
         )}
       </span>
-      {row.modifier && (
-        <span className="recipe-detail__parsed-modifier">{row.modifier}</span>
+      {row.modifiers.length > 0 && (
+        <span className="recipe-detail__parsed-modifier">{row.modifiers.join(', ')}</span>
       )}
-      {row.role && (
-        <span className={`recipe-detail__parsed-role recipe-detail__parsed-role--${row.role}`}>
-          {row.role}
+      {row.taxonomy_node?.status === 'provisional' && (
+        <span className="recipe-detail__parsed-role recipe-detail__parsed-role--provisional">
+          provisional
         </span>
       )}
     </div>

@@ -5,16 +5,16 @@ import { MemoryRouter } from 'react-router-dom';
 import { NodeCard } from './NodeCard';
 import type { TaxonomyNode } from './shapeData';
 
-const fromMock = vi.fn();
-vi.mock('../../supabase', () => ({ supabase: { from: (table: string) => fromMock(table) } }));
+const apiMock = vi.fn();
+vi.mock('../../api', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../api')>()),
+  api: (...args: unknown[]) => apiMock(...args),
+}));
 
 beforeEach(() => {
-  fromMock.mockReset();
-  // Default: return a chainable mock that never resolves (safe for tests that don't care about recipes).
-  const neverResolve = vi.fn().mockReturnValue(new Promise(() => {}));
-  fromMock.mockReturnValue({
-    select: vi.fn(() => ({ eq: vi.fn(() => ({ order: neverResolve })) })),
-  });
+  apiMock.mockReset();
+  // Default: a recipes request that never resolves (safe for tests that don't care about recipes).
+  apiMock.mockReturnValue(new Promise(() => {}));
 });
 
 function renderCard(node: Parameters<typeof NodeCard>[0]['node'], mode: 'pinned' | 'hover' = 'pinned', onDismiss: () => void = () => {}) {
@@ -104,7 +104,7 @@ describe('<NodeCard>', () => {
     };
     renderCard(recipeNode, 'hover');
     expect(screen.queryByText(/Loading…/)).not.toBeInTheDocument();
-    expect(fromMock).not.toHaveBeenCalled();
+    expect(apiMock).not.toHaveBeenCalled();
   });
 
   it('does not fetch recipes when recipe_count is 0', async () => {
@@ -116,7 +116,7 @@ describe('<NodeCard>', () => {
       recipe_count: 0, labelW: 10, labelH: 11,
     };
     renderCard(zeroNode);
-    expect(fromMock).not.toHaveBeenCalled();
+    expect(apiMock).not.toHaveBeenCalled();
     // The RECIPES section shows '—' when count is 0
     expect(screen.getAllByText('—').length).toBeGreaterThan(0);
   });
@@ -129,16 +129,10 @@ describe('<NodeCard>', () => {
       parent_ids: [], child_ids: [], aliases: [],
       recipe_count: 2, labelW: 10, labelH: 11,
     };
-    const eq = vi.fn(() => ({
-      order: vi.fn().mockResolvedValue({
-        data: [
-          { recipe_id: 10, recipes: { id: 10, name: 'Negroni', site: 'punchdrink.com' } },
-          { recipe_id: 11, recipes: { id: 11, name: 'Boulevardier', site: 'imbibemagazine.com' } },
-        ],
-        error: null,
-      }),
-    }));
-    fromMock.mockReturnValue({ select: vi.fn(() => ({ eq })) });
+    apiMock.mockResolvedValue([
+      { id: 10, name: 'Negroni', site: 'punchdrink.com' },
+      { id: 11, name: 'Boulevardier', site: 'imbibemagazine.com' },
+    ]);
 
     renderCard(recipeNode);
     expect(await screen.findByRole('link', { name: /negroni/i })).toHaveAttribute(
@@ -149,7 +143,7 @@ describe('<NodeCard>', () => {
     );
   });
 
-  it('dedupes recipes by id when a node appears in multiple positions', async () => {
+  it("requests the node's recipes from the taxonomy endpoint", async () => {
     const dedupNode: TaxonomyNode = {
       id: 1, slug: 'gin', display_name: 'Gin',
       node_kind: null, default_role: 'base_spirit',
@@ -157,22 +151,11 @@ describe('<NodeCard>', () => {
       parent_ids: [], child_ids: [], aliases: [],
       recipe_count: 1, labelW: 10, labelH: 11,
     };
-    fromMock.mockReturnValue({
-      select: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          order: vi.fn().mockResolvedValue({
-            data: [
-              { recipe_id: 10, recipes: { id: 10, name: 'Negroni', site: 'punchdrink.com' } },
-              { recipe_id: 10, recipes: { id: 10, name: 'Negroni', site: 'punchdrink.com' } },
-            ],
-            error: null,
-          }),
-        })),
-      })),
-    });
+    apiMock.mockResolvedValue([{ id: 10, name: 'Negroni', site: 'punchdrink.com' }]);
     renderCard(dedupNode);
     const links = await screen.findAllByRole('link', { name: /negroni/i });
     expect(links).toHaveLength(1);
+    expect(apiMock).toHaveBeenCalledWith('/api/taxonomy/1/recipes');
   });
 });
 

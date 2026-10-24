@@ -2,14 +2,21 @@
 
 Keyed by `(entity_kind, entity_id, stage)` with at most one *open* row (a partial
 unique index); resolved/dismissed rows accumulate as history. `entity_id` is
-text so one table holds both bigint ids (as text) and map's name-keys.
+text so one table holds both integer ids (as text) and map's name-keys.
 """
 
 from __future__ import annotations
 
 from typing import Any, Iterable
 
-from psycopg.types.json import Json
+from common.db import SQL_NOW, jdump, jlist, jload
+
+# parse's entity key is "recipe_id:position"; every other stage keys by the bare
+# entity id. This expression yields the part before the colon (or the whole id).
+ENTITY_PREFIX_SQL = (
+    "case when instr(entity_id, ':') > 0 "
+    "then substr(entity_id, 1, instr(entity_id, ':') - 1) else entity_id end"
+)
 
 
 def insert_review(
@@ -36,14 +43,13 @@ def insert_review(
         insert into human_reviews
             (entity_kind, entity_id, stage, origin, payload, note,
              origin_version, state, created_by)
-        values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
         on conflict (entity_kind, entity_id, stage) where state = 'open'
             do nothing
         returning id
         """,
         (
-            entity_kind, entity_id, stage, origin,
-            Json(payload) if payload is not None else None,
+            entity_kind, entity_id, stage, origin, jdump(payload),
             note, origin_version, state, created_by,
         ),
     ).fetchone()
@@ -51,7 +57,7 @@ def insert_review(
         return row[0]
     existing = conn.execute(
         "select id from human_reviews "
-        "where entity_kind = %s and entity_id = %s and stage = %s and state = 'open'",
+        "where entity_kind = ? and entity_id = ? and stage = ? and state = 'open'",
         (entity_kind, entity_id, stage),
     ).fetchone()
     return existing[0]
@@ -62,8 +68,8 @@ def set_state(
 ) -> None:
     """Move a review to `state` (resolved/dismissed/open), stamping the reviewer."""
     conn.execute(
-        "update human_reviews set state = %s, reviewed_by = %s, reviewed_at = now() "
-        "where id = %s",
+        f"update human_reviews set state = ?, reviewed_by = ?, reviewed_at = {SQL_NOW}, "
+        f"updated_at = {SQL_NOW} where id = ?",
         (state, reviewed_by, review_id),
     )
 
@@ -75,12 +81,13 @@ def open_reviews_for(
     rows = conn.execute(
         "select id, entity_kind, entity_id, origin, payload, note "
         "from human_reviews "
-        "where stage = %s and state = 'open' and entity_id = any(%s)",
-        (stage, list(entity_ids)),
+        "where stage = ? and state = 'open' "
+        "and entity_id in (select value from json_each(?))",
+        (stage, jlist(entity_ids)),
     ).fetchall()
     return [
         {"id": r[0], "entity_kind": r[1], "entity_id": r[2],
-         "origin": r[3], "payload": r[4], "note": r[5]}
+         "origin": r[3], "payload": jload(r[4]), "note": r[5]}
         for r in rows
     ]
 
@@ -96,13 +103,14 @@ def resolved_override_ids(
     passes recipe-id-strings (recipe stages) or names (map) and gets every
     override those entities own.
     """
-    id_list = list(ids)
+    id_list = [str(i) for i in ids]
     if not id_list:
         return []
     rows = conn.execute(
-        "select id from human_reviews "
-        "where stage = %s and state = 'resolved' "
-        "and (entity_id = any(%s) or split_part(entity_id, ':', 1) = any(%s))",
-        (stage, id_list, id_list),
+        f"select id from human_reviews "
+        f"where stage = ? and state = 'resolved' "
+        f"and (entity_id in (select value from json_each(?)) "
+        f"  or {ENTITY_PREFIX_SQL} in (select value from json_each(?)))",
+        (stage, jlist(id_list), jlist(id_list)),
     ).fetchall()
     return [r[0] for r in rows]

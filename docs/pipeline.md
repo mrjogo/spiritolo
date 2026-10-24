@@ -3,7 +3,7 @@
 The pipeline runs in two zones. **Zone 1** (the `scraper/` package — SQLite plus
 the object-store HTML corpus) crawls the web into two durable inputs: per-URL `pages` state
 and the write-once HTML corpus. **Zone 2** (the `ingredients/` package —
-Supabase) turns those into the relational recipe and its published RecipeGF
+SQLite, inside the service process) turns those into the relational recipe and its published RecipeGF
 bundle.
 
 Every Zone-2 stage is a `stage_fn` over the `stage_runs` work queue: a stage's
@@ -34,7 +34,7 @@ flowchart TD
         D --> C --> F
     end
 
-    subgraph Z2 ["Zone 2 · Content pipeline — Supabase, over the stage_runs queue"]
+    subgraph Z2 ["Zone 2 · Content pipeline — SQLite, over explicit runs (jobs + job_items)"]
         direction LR
         X["extract-recipe<br/>Recipe JSON-LD → recipes"]
         P["parse-ingredients<br/>recipeIngredient → recipe_ingredients"]

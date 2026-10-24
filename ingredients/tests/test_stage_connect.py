@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-import psycopg
 import pytest
 
 from ingredients.pipeline.stages.connect import CONNECT_VERSION, connect_stage_fn
@@ -27,7 +26,7 @@ class _FakeChain:
 
 
 @pytest.fixture()
-def conn(test_db_url: str):
+def conn(db_conn):
     tables = (
         "job_items",
         "human_reviews",
@@ -35,12 +34,12 @@ def conn(test_db_url: str):
         "taxonomy_aliases",
         "taxonomy_nodes",
     )
-    with psycopg.connect(test_db_url, autocommit=True) as c:
+    if (c := db_conn) is not None:
         for t in tables:
-            c.execute(f"truncate {t} restart identity cascade")
+            c.execute(f"delete from {t}")
         yield c
         for t in tables:
-            c.execute(f"truncate {t} restart identity cascade")
+            c.execute(f"delete from {t}")
 
 
 def _job():
@@ -50,14 +49,14 @@ def _job():
 def _node(conn, slug, name, *, status, is_cluster_node=False, node_kind=None):
     return conn.execute(
         "insert into taxonomy_nodes (slug, display_name, status, node_kind, is_cluster_node) "
-        "values (%s, %s, %s, %s, %s) returning id",
+        "values (?, ?, ?, ?, ?) returning id",
         (slug, name, status, node_kind, is_cluster_node),
     ).fetchone()[0]
 
 
 def _edge(conn, parent_id, child_id):
     conn.execute(
-        "insert into taxonomy_edges (parent_id, child_id) values (%s, %s)",
+        "insert into taxonomy_edges (parent_id, child_id) values (?, ?)",
         (parent_id, child_id),
     )
 
@@ -65,7 +64,7 @@ def _edge(conn, parent_id, child_id):
 def _job_item(conn, node_id):
     return conn.execute(
         "select outcome, state from job_items "
-        "where entity_id = %s and stage = 'connect-nodes'",
+        "where entity_id = ? and stage = 'connect-nodes'",
         (node_id,),
     ).fetchone()
 
@@ -73,7 +72,7 @@ def _job_item(conn, node_id):
 def _open_review(conn, node_id):
     return conn.execute(
         "select payload from human_reviews "
-        "where entity_kind = 'taxonomy_node' and entity_id = %s "
+        "where entity_kind = 'taxonomy_node' and entity_id = ? "
         "and stage = 'connect-nodes' and state = 'open'",
         (str(node_id),),
     ).fetchone()
@@ -93,12 +92,12 @@ def test_places_node_under_parent_and_promotes(conn):
     assert counts == {"connected": 1, "pending": 0}
     # Edge created under the chosen parent.
     assert conn.execute(
-        "select 1 from taxonomy_edges where parent_id = %s and child_id = %s",
+        "select 1 from taxonomy_edges where parent_id = ? and child_id = ?",
         (parent, node),
     ).fetchone()
     # node_kind + is_cluster_node set; promoted to live.
     assert conn.execute(
-        "select node_kind, status, is_cluster_node from taxonomy_nodes where id = %s",
+        "select node_kind, status, is_cluster_node from taxonomy_nodes where id = ?",
         (node,),
     ).fetchone() == (None, "live", False)
     # Outcome resolved -> applied; no review opened.
@@ -116,10 +115,10 @@ def test_unknown_parent_slug_parks_for_review(conn):
     assert counts == {"connected": 0, "pending": 1}
     # connect_place raised -> node untouched, still provisional, no edge.
     assert conn.execute(
-        "select status from taxonomy_nodes where id = %s", (node,)
+        "select status from taxonomy_nodes where id = ?", (node,)
     ).fetchone()[0] == "provisional"
     assert conn.execute(
-        "select count(*) from taxonomy_edges where child_id = %s", (node,)
+        "select count(*) from taxonomy_edges where child_id = ?", (node,)
     ).fetchone()[0] == 0
     # A connect-nodes review is opened carrying the proposed placement.
     review = _open_review(conn, node)
@@ -134,7 +133,7 @@ def test_no_providers_parks_for_review(conn):
 
     assert counts == {"connected": 0, "pending": 1}
     assert conn.execute(
-        "select status from taxonomy_nodes where id = %s", (node,)
+        "select status from taxonomy_nodes where id = ?", (node,)
     ).fetchone()[0] == "provisional"
     assert _open_review(conn, node) is not None
     assert _job_item(conn, node) == ("pending", "flagged")
@@ -147,7 +146,7 @@ def test_uncertain_answer_parks_for_review(conn):
 
     assert counts == {"connected": 0, "pending": 1}
     assert conn.execute(
-        "select status from taxonomy_nodes where id = %s", (node,)
+        "select status from taxonomy_nodes where id = ?", (node,)
     ).fetchone()[0] == "provisional"
     assert _open_review(conn, node) is not None
     assert _job_item(conn, node) == ("pending", "flagged")
@@ -169,10 +168,10 @@ def test_antichain_violation_parks_for_review(conn):
     assert counts == {"connected": 0, "pending": 1}
     # Savepoint rolled back: no edge persisted, node still provisional.
     assert conn.execute(
-        "select count(*) from taxonomy_edges where child_id = %s", (node,)
+        "select count(*) from taxonomy_edges where child_id = ?", (node,)
     ).fetchone()[0] == 0
     assert conn.execute(
-        "select status from taxonomy_nodes where id = %s", (node,)
+        "select status from taxonomy_nodes where id = ?", (node,)
     ).fetchone()[0] == "provisional"
     assert _open_review(conn, node) is not None
     assert _job_item(conn, node) == ("pending", "flagged")

@@ -6,8 +6,8 @@ import { batchMode } from './tasksTableModel';
 import type { RunItem } from './useRunItems';
 
 const ITEMS: RunItem[] = [
-  { item_id: '1', entity_id: '1', title: 'Oaxaca Old Fashioned', source: 'diffordsguide', why_added: 'flagged', task_state: 'pending', total_count: 2 },
-  { item_id: '2', entity_id: '2', title: 'Amaro Spritz', source: 'punch', why_added: 'never_run', task_state: 'pending', total_count: 2 },
+  { item_id: '1', entity_id: '1', title: 'Oaxaca Old Fashioned', source: 'diffordsguide', why_added: 'flagged', task_state: 'pending' },
+  { item_id: '2', entity_id: '2', title: 'Amaro Spritz', source: 'punch', why_added: 'never_run', task_state: 'pending' },
 ];
 
 function baseProps(overrides: Partial<React.ComponentProps<typeof TasksTable>> = {}): React.ComponentProps<typeof TasksTable> {
