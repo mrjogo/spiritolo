@@ -88,7 +88,7 @@ export function AddTasks() {
   const [viewSelectionOnly, setViewSelectionOnly] = useState(false);
 
   const pFilter = useMemo(() => buildPFilter(filterState), [filterState]);
-  const { rows, total, facets } = useEligiblePool(stage, pFilter, sort, page, PAGE_SIZE);
+  const { rows, total, facets, status: poolStatus } = useEligiblePool(stage, pFilter, sort, page, PAGE_SIZE);
 
   const onHeaderSort = (col: string) => {
     setSort((s) => promoteSort(s, col));
@@ -146,7 +146,7 @@ export function AddTasks() {
         </span>
         <div className="runs-metrics">
           <div className="runs-metric">
-            <div className="runs-metric__n">{(run?.task_count ?? 0).toLocaleString()}</div>
+            <div className="runs-metric__n">{run ? run.task_count.toLocaleString() : '…'}</div>
             <div className="runs-metric__l">in run</div>
           </div>
           <div className="runs-metric runs-metric--add">
@@ -227,6 +227,18 @@ export function AddTasks() {
             </tr>
           </thead>
           <tbody>
+            {poolStatus === 'loading' && (
+              <tr>
+                <td colSpan={5} className="data-table__state" aria-busy="true">
+                  <span className="ops-spinner" aria-hidden="true" /> Loading…
+                </td>
+              </tr>
+            )}
+            {poolStatus === 'error' && (
+              <tr>
+                <td colSpan={5} className="data-table__state">Couldn't load the eligible pool.</td>
+              </tr>
+            )}
             {visibleRows.map((r) => {
               const sel = isSelected(selection, r.entity_id);
               return (
@@ -250,7 +262,9 @@ export function AddTasks() {
             })}
           </tbody>
         </table>
-        <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="matching" />
+        {poolStatus === 'loaded' && (
+          <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="matching" />
+        )}
       </div>
 
       {selCount > 0 && (

@@ -73,6 +73,25 @@ beforeEach(() => {
 });
 
 describe('<AddTasks>', () => {
+  it('shows a loader, not "0 matching", until the pool arrives — and never queries without a stage', async () => {
+    let releaseRun: (v: typeof RUN) => void = () => {};
+    apiMock.mockImplementation(async (path: string) => {
+      if (path === '/api/ops/runs/142') return new Promise((r) => { releaseRun = r; });
+      if (path === '/api/ops/eligible-pool') return { rows: POOL_ROWS, total: 1139 };
+      if (path === '/api/ops/eligible-pool/facets') return FACETS;
+      throw new Error(`unexpected call ${path}`);
+    });
+    renderAt();
+    expect(await screen.findByText(/Loading…/)).toBeInTheDocument();
+    expect(screen.queryByText(/of 0 matching/)).not.toBeInTheDocument();
+    expect(apiMock.mock.calls.some(([p]) => String(p).startsWith('/api/ops/eligible-pool'))).toBe(false);
+
+    releaseRun(RUN);
+    expect(await screen.findByText('Oaxaca Old Fashioned')).toBeInTheDocument();
+    expect(screen.queryByText(/Loading…/)).not.toBeInTheDocument();
+    expect(screen.getByText(/of 1,139 matching/)).toBeInTheDocument();
+  });
+
   it('renders the eligible pool with its status detail', async () => {
     renderAt();
     expect(await screen.findByText('Oaxaca Old Fashioned')).toBeInTheDocument();
