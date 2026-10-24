@@ -41,21 +41,22 @@ restart policy come from `railway.json`; the API also accepts them via
 
 Two S3-compatible Railway buckets (project-token API access cannot create
 buckets, so this is a dashboard step). Their credentials never go in the
-vault: attach each bucket to the service with **Bucket → Credentials → Add to
-service**, which injects the keys and endpoint as **reference variables**
-(auto-rotating, never visible to Claude).
+vault: each reaches the service as **reference variables** (auto-rotating,
+never visible to Claude), one purpose-named set per bucket. Add them under
+**Service → Variables** as `${{<bucket>.<KEY>}}` templates rather than with
+the bucket's "Add to service" presets, whose generic `BUCKET_*` / `AWS_*` names
+say nothing about which bucket they belong to.
 
-- **Litestream replica** — `spiritolo-litestream`, attached in Railway's
-  default style, which injects `BUCKET_NAME`, `BUCKET_ENDPOINT`,
-  `BUCKET_REGION`, `BUCKET_ACCESS_KEY_ID`, `BUCKET_SECRET_ACCESS_KEY`. The
-  entrypoint derives the `LITESTREAM_*` settings from those (replica URL
-  `s3://$BUCKET_NAME/spiritolo`), so nothing else is needed; set any
-  `LITESTREAM_*` variable explicitly only to override.
+- **Litestream replica** — `spiritolo-litestream`, as `LITESTREAM_BUCKET`,
+  `LITESTREAM_ENDPOINT`, `LITESTREAM_REGION`, `LITESTREAM_ACCESS_KEY_ID`,
+  `LITESTREAM_SECRET_ACCESS_KEY` (→ `${{spiritolo-litestream.BUCKET}}`,
+  `.ENDPOINT`, `.REGION`, `.ACCESS_KEY_ID`, `.SECRET_ACCESS_KEY`), read by
+  `litestream.yml`; the replica lives under the `spiritolo/` prefix.
 - **HTML corpus** — the existing `spiritolo-corpus` bucket lives in the old
   Railway project and cannot be referenced across projects. Create
-  `spiritolo-corpus` in this project, attach it in the **AWS SDK (Generic)**
-  style (`AWS_ENDPOINT_URL`, `AWS_S3_BUCKET_NAME`, `AWS_DEFAULT_REGION`,
-  `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, read by
+  `spiritolo-corpus` in this project, reference it as `CORPUS_BUCKET`,
+  `CORPUS_ENDPOINT`, `CORPUS_REGION`, `CORPUS_ACCESS_KEY_ID`,
+  `CORPUS_SECRET_ACCESS_KEY` (→ `${{spiritolo-corpus.*}}`, read by
   `ingredients/pipeline/corpus.py`), and copy the objects over once (e.g.
   `rclone sync` with both buckets' credentials in a local shell). The corpus
   is only read by future `extract-recipe` runs — migrated recipes already
@@ -87,10 +88,8 @@ RUN_EXECUTOR=1
 LOG_LEVEL=INFO
 ```
 
-Reference variables from the attached buckets (step 2): the Litestream
-bucket's `BUCKET_*` set (the entrypoint maps it to `LITESTREAM_*`), and the corpus
-bucket's `AWS_ENDPOINT_URL`, `AWS_S3_BUCKET_NAME`, `AWS_DEFAULT_REGION`,
-`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (+ `AWS_S3_URL_STYLE=path`).
+Reference variables from the buckets (step 2): the `LITESTREAM_*` set and the
+`CORPUS_*` set (+ optional `CORPUS_URL_STYLE=path`).
 
 Optional: `OLLAMA_BASE_URL=http://barbot:11434` for a tailnet Ollama; the
 entrypoint only starts tailscaled when `TAILSCALE_AUTHKEY` resolves from the

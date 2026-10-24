@@ -5,7 +5,7 @@ volume. Two layers protect it:
 
 1. **Litestream, continuous.** The entrypoint runs the app as a child of
    `litestream replicate`, which ships every WAL segment to the Litestream
-   bucket (`LITESTREAM_REPLICA_URL`) within about a second, keeps 7 days of
+   bucket (`s3://$LITESTREAM_BUCKET/spiritolo`) within about a second, keeps 7 days of
    WAL history and takes a full snapshot daily ([`litestream.yml`](../litestream.yml)).
    Point-in-time restore to any moment in that window.
 2. **`VACUUM INTO` snapshots, operator-driven.** A compact, self-contained copy
@@ -26,7 +26,7 @@ export LITESTREAM_ACCESS_KEY_ID=… LITESTREAM_SECRET_ACCESS_KEY=…   # from th
 litestream restore -o ./restored.db \
   -timestamp 2026-10-22T18:00:00Z \
   -endpoint "$LITESTREAM_ENDPOINT" \
-  "$LITESTREAM_REPLICA_URL"
+  "s3://$LITESTREAM_BUCKET/spiritolo"
 ```
 
 Then load `restored.db` through **/ops → Import** (stage, verify, apply); the

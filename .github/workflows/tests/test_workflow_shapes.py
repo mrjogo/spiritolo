@@ -76,7 +76,7 @@ def test_dockerfile_bakes_no_secrets():
     # RECIPEGF_TOKEN is a build ARG, never a runtime ENV.
     assert "ARG RECIPEGF_TOKEN" in df
     assert "ENV RECIPEGF_TOKEN" not in df
-    for name in ("OP_SERVICE_ACCOUNT_TOKEN", "SESSION_SECRET", "LITESTREAM_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+    for name in ("OP_SERVICE_ACCOUNT_TOKEN", "SESSION_SECRET", "LITESTREAM_ACCESS_KEY_ID", "CORPUS_SECRET_ACCESS_KEY"):
         assert name not in df, f"{name} must come from the vault at boot, not the image"
     # The entrypoint and the secrets template are copied in; the runtime env
     # points at the volume and turns on restart-mode import.
@@ -105,11 +105,13 @@ def test_entrypoint_applies_staged_import_before_anything_opens_the_db():
     assert 'rm -f "$DB_PATH" "$DB_PATH-wal" "$DB_PATH-shm"' in sh
 
 
-def test_entrypoint_derives_litestream_settings_from_the_attached_bucket():
+def test_entrypoint_reads_purpose_named_bucket_variables_only():
     sh = _text("scripts/entrypoint.sh")
-    assert 'LITESTREAM_REPLICA_URL="s3://${BUCKET_NAME}/spiritolo"' in sh
-    for var in ("BUCKET_ENDPOINT", "BUCKET_REGION", "BUCKET_ACCESS_KEY_ID", "BUCKET_SECRET_ACCESS_KEY"):
-        assert var in sh
+    # Replication is gated on the Litestream bucket's own variable; the generic
+    # BUCKET_* / AWS_* names Railway's presets inject are not used anywhere.
+    assert '[ -n "${LITESTREAM_BUCKET:-}" ]' in sh
+    for stale in ("BUCKET_NAME", "BUCKET_ENDPOINT", "LITESTREAM_REPLICA_URL", "AWS_"):
+        assert stale not in sh, f"entrypoint still mentions {stale}"
 
 
 def test_entrypoint_restores_then_replicates_with_uvicorn_as_child():
@@ -117,8 +119,8 @@ def test_entrypoint_restores_then_replicates_with_uvicorn_as_child():
     assert "litestream restore -if-replica-exists" in sh
     assert "litestream replicate -config /etc/litestream.yml" in sh
     assert "-exec /usr/local/bin/run-app.sh" in sh
-    # Without a replica URL it still boots (local docker runs).
-    assert "LITESTREAM_REPLICA_URL" in sh
+    # Without a Litestream bucket it still boots (local docker runs).
+    assert "LITESTREAM_BUCKET not set" in sh
     assert sh.count("/usr/local/bin/run-app.sh") == 2
 
 
@@ -154,13 +156,14 @@ def test_entrypoint_tailscale_is_optional_and_userspace():
 
 def test_litestream_config_reads_everything_from_env():
     cfg = _text("litestream.yml")
-    for var in ("SPIRITOLO_DB", "LITESTREAM_REPLICA_URL", "LITESTREAM_ENDPOINT", "LITESTREAM_REGION",
+    for var in ("SPIRITOLO_DB", "LITESTREAM_BUCKET", "LITESTREAM_ENDPOINT", "LITESTREAM_REGION",
                 "LITESTREAM_ACCESS_KEY_ID", "LITESTREAM_SECRET_ACCESS_KEY"):
         assert "${" + var + "}" in cfg, f"litestream.yml must read {var} from the environment"
     doc = yaml.safe_load(cfg)
     replica = doc["dbs"][0]["replicas"][0]
     assert replica["type"] == "s3" and replica["force-path-style"] is True
     assert "retention" in replica and "snapshot-interval" in replica
+    assert replica["path"] == "spiritolo"
 
 
 def test_secrets_env_holds_only_op_references():
@@ -176,7 +179,7 @@ def test_secrets_env_holds_only_op_references():
     assert "SESSION_SECRET" in names
     # Bucket credentials are Railway reference variables, never vault items.
     for name in ("LITESTREAM_ACCESS_KEY_ID", "LITESTREAM_SECRET_ACCESS_KEY",
-                 "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"):
+                 "CORPUS_ACCESS_KEY_ID", "CORPUS_SECRET_ACCESS_KEY"):
         assert name not in names, f"{name} must come from the attached Railway bucket, not the vault"
 
 
@@ -252,8 +255,8 @@ def test_runbook_covers_all_steps():
     ):
         assert marker in lowered, f"runbook missing a section for {marker!r}"
     # The load-bearing variables an operator must not miss.
-    for var in ("OP_SERVICE_ACCOUNT_TOKEN", "PUBLIC_ORIGIN", "BUCKET_NAME",
-                "BUCKET_ACCESS_KEY_ID", "AWS_ENDPOINT_URL", "AWS_S3_BUCKET_NAME"):
+    for var in ("OP_SERVICE_ACCOUNT_TOKEN", "PUBLIC_ORIGIN", "LITESTREAM_BUCKET",
+                "LITESTREAM_ACCESS_KEY_ID", "CORPUS_BUCKET", "CORPUS_ENDPOINT"):
         assert var in md, f"runbook must name {var}"
     # Nothing from the Supabase era leaks back in.
     assert "supabase db push" not in lowered

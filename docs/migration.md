@@ -86,7 +86,7 @@ Runs lists the historical runs with their items.
 
 Pages' HTML lives in the `spiritolo-corpus` bucket and is referenced by
 `pages.corpus_key`, which the ETL carries over unchanged. Either keep reading
-that bucket (its credentials in the vault, its endpoint/name as `AWS_*`
+that bucket (its credentials and endpoint/name as `CORPUS_*`
 variables) or copy the objects to a bucket in the new project and point the
 variables there. No re-crawl is needed.
 
