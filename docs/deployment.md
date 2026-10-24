@@ -33,14 +33,16 @@ boot, tracked in `schema_migrations`.
   here via PR.
 - The Railway service deploys from the branch set in its **Settings → Source**
   (the API refuses that change to a project token, so it is a UI setting).
-  During the Supabase → Railway changeover it deploys from the work branch
-  `claude/project-thread-0e8m4j`; once that lands it should point at `main`.
+  That is **`prod`**, a promotion branch: `main` is the dev branch and never
+  deploys on its own. A release is a PR `main → prod`, merged with a **merge
+  commit, never squash** (a squash diverges the trees and breaks the next
+  promotion). (`prod` is the old `staging` branch, renamed; during the Supabase
+  → Railway changeover the service deployed from `claude/project-thread-0e8m4j`.)
   `railway.json` pins the Dockerfile builder, the `/api/health` check, a single
   replica and the on-failure restart policy, so a push to the deploy branch is
   the whole release.
 
-The old `staging` promotion branch, the Supabase migrations workflow and the
-Vercel project are gone.
+The Supabase migrations workflow and the Vercel project are gone.
 
 ## URL
 

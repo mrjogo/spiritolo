@@ -23,8 +23,9 @@ repo: the Railway resources, the vault, and the few plain variables.
 1. Dashboard → **New project** → **GitHub Repo** → `mrjogo/spiritolo`. Name the
    project `spiritolo-neo`, the service `spiritolo`, and rename the
    environment to `production`.
-2. Service → **Settings → Source**: set the **deploy branch** (during the
-   changeover: `claude/project-thread-0e8m4j`; afterwards `main`). Leave
+2. Service → **Settings → Source**: set the **deploy branch** to
+   **`prod`**, the promotion branch (releases are `main → prod` PRs merged
+   with a merge commit). Leave
    build/start commands empty — `railway.json` declares the Dockerfile builder
    and the entrypoint is the start command.
 3. Service → **Volumes** → add a volume mounted at **`/data`** (name
@@ -151,4 +152,4 @@ GitHub Action, converted with `scripts/pg_to_sqlite`, and loaded through
 | `app/**`, `common/**`, `ingredients/**`, `scripts/**` (PR → main) | `python-ci.yml` | pytest gates for every workspace member (SQLite, no services) |
 | `web/**` (PR → main) | `web-ci.yml` | Vitest gate |
 | deploy artifacts (PR → main) | `workflows-ci.yml` | shape tests over Dockerfile, entrypoint, railway.json, litestream.yml, secrets.env, this runbook |
-| anything (push → deploy branch) | Railway GitHub App | builds the Dockerfile, health-checks `/api/health`, swaps the deployment |
+| `main → prod` promotion PR merged | Railway GitHub App (deploy branch `prod`) | builds the Dockerfile, health-checks `/api/health`, swaps the deployment |
