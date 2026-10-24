@@ -105,3 +105,13 @@ def test_stage_exception_fails_the_job_not_the_executor(tmp_path):
     finally:
         ex.stop()
         conn.close()
+
+
+def test_every_pipeline_stage_is_registered_for_the_executor():
+    from ingredients.runs import STAGE_ENTITY
+    from spiritolo.executor import STAGE_FNS
+
+    assert set(STAGE_ENTITY) <= set(STAGE_FNS)
+    for stage in ("extract-recipe", "parse-ingredients", "map-ingredient", "combine-nodes",
+                  "connect-nodes", "convert-steps", "cluster-recipes", "export-recipegf"):
+        assert stage in STAGE_FNS, f"{stage} has no stage_fn in the API process"
