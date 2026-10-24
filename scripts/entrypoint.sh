@@ -39,15 +39,8 @@ run_with_secrets() {
 # 1–3 run under `op run` so TAILSCALE_AUTHKEY (a vault item) resolves too.
 run_with_secrets bash -c '
   set -euo pipefail
-  # Railway attaches a bucket to the service as BUCKET_* reference variables.
-  # Derive the Litestream settings from them unless set explicitly.
-  if [ -z "${LITESTREAM_REPLICA_URL:-}" ] && [ -n "${BUCKET_NAME:-}" ]; then
-    export LITESTREAM_REPLICA_URL="s3://${BUCKET_NAME}/spiritolo"
-    export LITESTREAM_ENDPOINT="${LITESTREAM_ENDPOINT:-${BUCKET_ENDPOINT:-}}"
-    export LITESTREAM_REGION="${LITESTREAM_REGION:-${BUCKET_REGION:-us-east-1}}"
-    export LITESTREAM_ACCESS_KEY_ID="${LITESTREAM_ACCESS_KEY_ID:-${BUCKET_ACCESS_KEY_ID:-}}"
-    export LITESTREAM_SECRET_ACCESS_KEY="${LITESTREAM_SECRET_ACCESS_KEY:-${BUCKET_SECRET_ACCESS_KEY:-}}"
-  fi
+  # LITESTREAM_* are Railway reference variables pointing at the
+  # spiritolo-litestream bucket (see litestream.yml).
   export LITESTREAM_REGION="${LITESTREAM_REGION:-us-east-1}"
   # 1. Tailscale (optional): only when an auth key is present.
   if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
@@ -57,14 +50,14 @@ run_with_secrets bash -c '
       --advertise-tags=tag:worker --hostname="spiritolo" --accept-routes
     export TS_LOCAL_PROXY="socks5://localhost:1055"
   fi
-  if [ -n "${LITESTREAM_REPLICA_URL:-}" ]; then
+  if [ -n "${LITESTREAM_BUCKET:-}" ]; then
     if [ ! -f "'"$DB_PATH"'" ]; then
       echo "entrypoint: no database on the volume; restoring from the replica if one exists" >&2
       litestream restore -if-replica-exists -config /etc/litestream.yml "'"$DB_PATH"'" || true
     fi
     exec litestream replicate -config /etc/litestream.yml -exec /usr/local/bin/run-app.sh
   else
-    echo "entrypoint: LITESTREAM_REPLICA_URL not set; running without replication" >&2
+    echo "entrypoint: LITESTREAM_BUCKET not set; running without replication" >&2
     exec /usr/local/bin/run-app.sh
   fi
 '

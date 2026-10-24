@@ -73,14 +73,14 @@ def _s3_config():
 
     Virtual-host addressing (``<bucket>.<endpoint>``): boto3 defaults to
     path-style for a custom ``endpoint_url``, which Tigris/Railway reject with a
-    request timeout. ``AWS_S3_URL_STYLE=path`` forces path-style if ever needed.
+    request timeout. ``CORPUS_URL_STYLE=path`` forces path-style if ever needed.
     Retries + timeouts keep a transient miss from failing an extract read.
     (Duplicated from scripts/src/corpus_loader/load.py — one small helper isn't
     worth a shared package across the two zones; see key_for's note.)
     """
     from botocore.config import Config
 
-    style = "path" if os.environ.get("AWS_S3_URL_STYLE", "").startswith("path") else "virtual"
+    style = "path" if os.environ.get("CORPUS_URL_STYLE", "").startswith("path") else "virtual"
     return Config(
         s3={"addressing_style": style},
         retries={"max_attempts": 8, "mode": "standard"},
@@ -90,11 +90,12 @@ def _s3_config():
 
 
 def default_reader() -> CorpusReader:
-    """Build the real corpus reader from the standard ``AWS_*`` env vars
-    (``AWS_ENDPOINT_URL`` / ``AWS_ACCESS_KEY_ID`` / ``AWS_SECRET_ACCESS_KEY`` /
-    ``AWS_S3_BUCKET_NAME``, optional ``AWS_DEFAULT_REGION``) — the names Railway's
-    bucket "AWS SDK" preset injects and boto3 reads by convention. Any
-    S3-compatible object store works.
+    """Build the real corpus reader from the ``CORPUS_*`` env vars
+    (``CORPUS_BUCKET`` / ``CORPUS_ENDPOINT`` / ``CORPUS_ACCESS_KEY_ID`` /
+    ``CORPUS_SECRET_ACCESS_KEY``, optional ``CORPUS_REGION``). On Railway they
+    are reference variables pointing at the spiritolo-corpus bucket, named for
+    the bucket's purpose so they never collide with Litestream's
+    ``LITESTREAM_*`` set. Any S3-compatible object store works.
 
     Not exercised by any test — those inject a fake client instead (see
     ingredients/tests/test_corpus_reader.py). Used by the worker at runtime.
@@ -103,13 +104,13 @@ def default_reader() -> CorpusReader:
 
     raw = boto3.client(
         "s3",
-        endpoint_url=os.environ["AWS_ENDPOINT_URL"],
-        aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
-        region_name=os.environ.get("AWS_DEFAULT_REGION", "auto"),
+        endpoint_url=os.environ["CORPUS_ENDPOINT"],
+        aws_access_key_id=os.environ["CORPUS_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["CORPUS_SECRET_ACCESS_KEY"],
+        region_name=os.environ.get("CORPUS_REGION", "auto"),
         config=_s3_config(),
     )
-    return CorpusReader(_NotFoundIsNoneAdapter(raw), bucket=os.environ["AWS_S3_BUCKET_NAME"])
+    return CorpusReader(_NotFoundIsNoneAdapter(raw), bucket=os.environ["CORPUS_BUCKET"])
 
 
 class _NotFoundIsNoneAdapter:

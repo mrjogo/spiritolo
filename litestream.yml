@@ -1,20 +1,20 @@
 # Litestream: continuous replication of the SQLite file to an S3-compatible
-# bucket (Railway bucket). Every value comes from the environment so the same
-# file serves staging and any future environment:
-#   LITESTREAM_REPLICA_URL          s3://<bucket>/spiritolo
+# bucket (the spiritolo-litestream Railway bucket), under the prefix
+# `spiritolo/`. Every value comes from the environment — on Railway, reference
+# variables pointing at that bucket (`${{spiritolo-litestream.BUCKET}}` …):
+#   LITESTREAM_BUCKET               the bucket's (internal) name
 #   LITESTREAM_ENDPOINT             the bucket's S3 endpoint
 #   LITESTREAM_REGION               the bucket's region
 #   LITESTREAM_ACCESS_KEY_ID        }  never literal values
 #   LITESTREAM_SECRET_ACCESS_KEY    }
-# The entrypoint derives all five from the BUCKET_* reference variables Railway
-# injects when the spiritolo-litestream bucket is attached to the service.
 # The nightly VACUUM INTO snapshot is a separate, operator-driven safety net
 # (scripts/snapshot-sqlite.sh); Litestream is the continuous one.
 dbs:
   - path: ${SPIRITOLO_DB}
     replicas:
       - type: s3
-        url: ${LITESTREAM_REPLICA_URL}
+        bucket: ${LITESTREAM_BUCKET}
+        path: spiritolo
         endpoint: ${LITESTREAM_ENDPOINT}
         region: ${LITESTREAM_REGION}
         force-path-style: true
