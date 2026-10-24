@@ -1,7 +1,7 @@
 # DevOps runbook — zero to a running service
 
 One Railway service (`spiritolo`, project `spiritolo-neo`, environment
-`production`) running the FastAPI app + executor over a SQLite file on a volume,
+`prod`) running the FastAPI app + executor over a SQLite file on a volume,
 replicated by Litestream to a Railway bucket, with secrets read from a
 1Password vault at boot. No Postgres, no separate frontend host, no worker daemon.
 
@@ -22,7 +22,7 @@ repo: the Railway resources, the vault, and the few plain variables.
 
 1. Dashboard → **New project** → **GitHub Repo** → `mrjogo/spiritolo`. Name the
    project `spiritolo-neo`, the service `spiritolo`, and rename the
-   environment to `production`.
+   environment to `prod`.
 2. Service → **Settings → Source**: set the **deploy branch** to
    **`prod`**, the promotion branch (releases are `main → prod` PRs merged
    with a merge commit). Leave
@@ -30,8 +30,12 @@ repo: the Railway resources, the vault, and the few plain variables.
    and the entrypoint is the start command.
 3. Service → **Volumes** → add a volume mounted at **`/data`** (name
    `spiritolo-volume`). The database lives at `/data/spiritolo.db`.
-4. Service → **Settings → Networking** → **Generate domain** on port `8000`.
-   This is the `PUBLIC_ORIGIN` (currently `https://spiritolo-staging.up.railway.app`).
+4. Service → **Settings → Networking** → add the domain on port `8080` (the
+   `PORT` Railway injects; the image's own default is 8000). This is the
+   `PUBLIC_ORIGIN`, currently `https://spiritolo.com`: a custom apex domain on
+   Cloudflare DNS (record DNS-only), with `www` redirected to it by a Cloudflare
+   redirect rule. See [deployment.md](deployment.md#moving-to-a-new-hostname)
+   before changing it.
 
 The health check (`/api/health`, 120 s), single replica and `ON_FAILURE`
 restart policy come from `railway.json`; the API also accepts them via
@@ -81,7 +85,7 @@ access to that vault only gives `OP_SERVICE_ACCOUNT_TOKEN`.
 Plain (non-secret) variables on the service:
 
 ```
-PUBLIC_ORIGIN=https://spiritolo-staging.up.railway.app
+PUBLIC_ORIGIN=https://spiritolo.com
 SPIRITOLO_DB=/data/spiritolo.db
 STATIC_DIR=/app/web/dist
 RUN_EXECUTOR=1

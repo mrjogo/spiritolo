@@ -1,7 +1,7 @@
 # Deployment
 
 One Railway service, one environment. The Railway project is **spiritolo-neo**
-(environment `production`, service `spiritolo`). There is deliberately no
+(environment `prod`, service `spiritolo`). There is deliberately no
 standing staging environment: pipeline runs are one-shot and their results are
 the real data, so a second file would only mean a second import. If a code
 change ever needs a rehearsal, fork a Railway environment and let the
@@ -46,7 +46,9 @@ The Supabase migrations workflow and the Vercel project are gone.
 
 ## URL
 
-<https://spiritolo-staging.up.railway.app> (Railway-provided domain, port 8000).
+<https://spiritolo.com> (custom apex domain on Cloudflare DNS, Railway target
+port 8080; `www` redirects to it at Cloudflare). Before 2026-10-24 it was
+<https://spiritolo-staging.up.railway.app>.
 `PUBLIC_ORIGIN` must equal this origin: it is the WebAuthn relying-party origin
 and decides whether the session cookie is `Secure`.
 
@@ -56,7 +58,7 @@ Non-secret configuration is plain Railway variables on the service:
 
 | Variable | Value |
 |---|---|
-| `PUBLIC_ORIGIN` | `https://spiritolo-staging.up.railway.app` |
+| `PUBLIC_ORIGIN` | `https://spiritolo.com` |
 | `SPIRITOLO_DB` | `/data/spiritolo.db` (also the image default) |
 | `STATIC_DIR` | `/app/web/dist` (image default) |
 | `RUN_EXECUTOR` | `1` |

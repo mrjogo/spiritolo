@@ -80,7 +80,7 @@ Sign in to `/ops` as an admin → **Import**:
 ## 4. Verify
 
 ```bash
-curl -s https://spiritolo-staging.up.railway.app/api/recipes?page_size=1 | head -c 400
+curl -s https://spiritolo.com/api/recipes?page_size=1 | head -c 400
 ```
 
 and in `/ops`: Recipes / Exports / Audit log browsers show the migrated rows;
