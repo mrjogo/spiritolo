@@ -51,8 +51,8 @@ class ClaudeProvider:
         kwargs: dict[str, object] = {}
         if response_schema is not None:
             # Structured outputs: the reply is constrained to the schema.
-            kwargs["output_config"] = {
-                "format": {"type": "json_schema", "schema": response_schema}
+            kwargs.setdefault("output_config", {})["format"] = {
+                "type": "json_schema", "schema": response_schema,
             }
         msg = self.client.messages.create(
             model=self.model_id,

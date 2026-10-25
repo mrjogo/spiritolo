@@ -274,7 +274,7 @@ def test_run_classify_pool_respects_concurrency_limit(tmp_db):
     class TrackingProvider:
         model_id = "m"
 
-        def resolve(self, *, system_prompt, user_prompt):
+        def resolve(self, *, system_prompt, user_prompt, **_kw):
             nonlocal in_flight, max_in_flight
             with lock:
                 in_flight += 1
@@ -329,7 +329,7 @@ def test_run_review_reports_pass_and_fail_counts(tmp_path, capsys):
     class FakeProvider:
         model_id = "qwen3:14b"
 
-        def resolve(self, *, system_prompt, user_prompt):
+        def resolve(self, *, system_prompt, user_prompt, **_kw):
             if "https://a.com/1" in user_prompt:
                 return ProviderResult(
                     raw_text='{"label": "likely_drink_recipe"}',
@@ -408,7 +408,7 @@ def test_end_to_end_classify_run_with_mocked_provider(tmp_db):
     class FakeProvider:
         model_id = "qwen3:14b"
 
-        def resolve(self, *, system_prompt, user_prompt):
+        def resolve(self, *, system_prompt, user_prompt, **_kw):
             # Extract URL from user_prompt (format: "URL: <url>\nSitemap: ...")
             url_line = user_prompt.splitlines()[0]
             url = url_line.replace("URL: ", "").strip()
@@ -489,7 +489,7 @@ def test_run_classify_pool_returns_success_count(tmp_db):
     class FlakyProvider:
         model_id = "m"
 
-        def resolve(self, *, system_prompt, user_prompt):
+        def resolve(self, *, system_prompt, user_prompt, **_kw):
             call_count["n"] += 1
             if call_count["n"] <= 2:
                 return ProviderResult(
@@ -520,7 +520,7 @@ def test_run_main_builds_provider_once(tmp_db, monkeypatch):
         def __init__(self):
             constructed_count["n"] += 1
 
-        def resolve(self, *, system_prompt, user_prompt):
+        def resolve(self, *, system_prompt, user_prompt, **_kw):
             return ProviderResult(
                 raw_text='{"label": "likely_drink_recipe"}', model_id="qwen3:14b",
             )
