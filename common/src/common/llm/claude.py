@@ -40,7 +40,10 @@ class ClaudeProvider:
             client_kwargs["http_client"] = http_client
         return cls(client=anthropic.Anthropic(**client_kwargs), model_id=model_id)
 
-    def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+    def resolve(
+        self, *, system_prompt: str, user_prompt: str,
+        response_schema: dict | None = None,
+    ) -> ProviderResult:
         # No `thinking` and no `output_config.effort` on purpose: on Haiku 4.5
         # extended thinking is opt-in (omitting `thinking` = no thinking, which
         # is what we want for structured retrieval), and the `effort` parameter

@@ -7,13 +7,18 @@ they live inside each stage_fn (e.g. ``map._resolve_names``), which resolves
 what it can deterministically first and only hands the residue to the chain. So
 the chain is a single LLM tier plus per-call cost enforcement.
 
-``ProviderChain.resolve(items)``:
+``ProviderChain.resolve(items, *, system_prompt, answer_schema)``:
 
 - **short-circuits** — once every item is resolved, later tiers are never
   touched (with one LLM tier this simply means an empty ``items`` is a no-op);
 - **packs** LLM tiers — many items per request, re-mapped to entity ids by
   custom id (order-independent), so a partial provider failure parks only the
   failed items;
+- **speaks the envelope** — every call's system prompt is
+  ``packing.ENVELOPE_INSTRUCTIONS`` followed by the stage's own prompt, so a real
+  model knows to answer ``{"results": [{"id", "answer"}]}``; a stage's per-item
+  ``answer_schema`` is wrapped by ``packing.envelope_schema`` and handed to the
+  provider as ``response_schema`` (its native structured-output mode);
 - **meters cost** — before each metered call it charges the job's ``CostMeter``,
   which raises ``CostCapExceeded`` if the call would breach ``max_cost_cents``.
   Local (``ollama``) tiers are free and never consult the cap.
@@ -114,8 +119,17 @@ class ProviderChain:
     # pack. None (the default) means never stop.
     should_stop: Callable[[], bool] | None = None
 
-    def resolve(self, items: list[Item], *, system_prompt: str = "") -> ChainResult:
+    def resolve(
+        self,
+        items: list[Item],
+        *,
+        system_prompt: str = "",
+        answer_schema: dict[str, Any] | None = None,
+    ) -> ChainResult:
         """Resolve ``items`` through the tiers in order.
+
+        ``system_prompt`` is the stage's task description, phrased per item;
+        ``answer_schema`` (optional) is the JSON schema of one item's answer.
 
         Returns a ``ChainResult`` (resolved map, parked ids, aggregate cost,
         metered flag, per-tier breakdown). May raise ``CostCapExceeded`` from a
@@ -146,7 +160,8 @@ class ProviderChain:
                 )
             else:
                 newly, tier_parked, calls, tier_cost, metered = self._run_llm(
-                    provider_id, provider, pending, resolved, system_prompt
+                    provider_id, provider, pending, resolved, system_prompt,
+                    answer_schema,
                 )
                 parked.extend(tier_parked)
                 total_cost += tier_cost
@@ -196,6 +211,7 @@ class ProviderChain:
         pending: list[Item],
         resolved: dict[str, Any],
         system_prompt: str,
+        answer_schema: dict[str, Any] | None = None,
     ) -> tuple[list[str], list[str], int, int, bool]:
         unit = _cost.call_cost_cents(provider_id, provider)
         metered = _cost.is_metered(unit)
@@ -217,7 +233,7 @@ class ProviderChain:
                 # never spent and its items stay unprocessed (raises out).
                 self.meter.charge(unit)
             try:
-                raw = self._resolve_group(provider, group, system_prompt)
+                raw = self._resolve_group(provider, group, system_prompt, answer_schema)
             except Exception as exc:  # noqa: BLE001 - the provider transport surface
                 # Fatal (auth/billing/config) -> abort the run fast, message and
                 # all. Otherwise park this pack and keep going, but trip the
@@ -245,16 +261,31 @@ class ProviderChain:
         return newly, parked, calls, tier_cost, metered
 
     @staticmethod
-    def _resolve_group(provider: Any, group: list[Item], system_prompt: str) -> str:
+    def _resolve_group(
+        provider: Any,
+        group: list[Item],
+        system_prompt: str,
+        answer_schema: dict[str, Any] | None = None,
+    ) -> str:
         """One packed provider call, with bounded exponential backoff on
         transient errors. A fatal error (see ``_is_fatal``) is re-raised
         immediately without retrying; a transient error is retried up to
-        ``_MAX_LLM_ATTEMPTS`` and then re-raised for the caller to park."""
+        ``_MAX_LLM_ATTEMPTS`` and then re-raised for the caller to park.
+
+        The envelope preamble always leads the system prompt. ``response_schema``
+        is passed only when the stage gave an ``answer_schema``, so a provider
+        without structured output (or a test stub) is called exactly as before."""
         user_prompt = _packing.encode_request(group)
+        full_prompt = _packing.ENVELOPE_INSTRUCTIONS
+        if system_prompt:
+            full_prompt += "\n\n" + system_prompt
+        kwargs: dict[str, Any] = {}
+        if answer_schema is not None:
+            kwargs["response_schema"] = _packing.envelope_schema(answer_schema)
         for attempt in range(_MAX_LLM_ATTEMPTS):
             try:
                 return provider.resolve(
-                    system_prompt=system_prompt, user_prompt=user_prompt
+                    system_prompt=full_prompt, user_prompt=user_prompt, **kwargs
                 ).raw_text
             except Exception as exc:  # noqa: BLE001 - the provider transport surface
                 if _is_fatal(exc) or attempt + 1 == _MAX_LLM_ATTEMPTS:

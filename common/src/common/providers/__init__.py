@@ -12,16 +12,19 @@ worker (``ingredients.worker.providers.ProviderChain``), not here.
 from .cost import UNIT_COST_CENTS, call_cost_cents, is_metered
 from .fake import FakeProvider
 from .packing import (
+    ENVELOPE_INSTRUCTIONS,
     Item,
     chunk,
     decode_request,
     decode_response,
     encode_request,
     encode_response,
+    envelope_schema,
 )
 from .results import ChainResult, TierResult
 
 __all__ = [
+    "ENVELOPE_INSTRUCTIONS",
     "ChainResult",
     "FakeProvider",
     "Item",
@@ -33,5 +36,6 @@ __all__ = [
     "decode_response",
     "encode_request",
     "encode_response",
+    "envelope_schema",
     "is_metered",
 ]

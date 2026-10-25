@@ -312,3 +312,68 @@ def test_llm_circuit_breaker_aborts_after_consecutive_pack_failures(_no_backoff)
         chain.resolve([Item(str(i)) for i in range(10)])
 
     assert prov.calls == _CONSECUTIVE_FAIL_ABORT * _MAX_LLM_ATTEMPTS
+
+
+@dataclass
+class _RecordingProvider:
+    """Records each call's prompts + kwargs and answers every id."""
+
+    cost_per_call: int = 0
+    seen: list[dict[str, Any]] | None = None
+
+    def resolve(self, *, system_prompt: str, user_prompt: str, **kwargs) -> ProviderResult:
+        if self.seen is None:
+            self.seen = []
+        self.seen.append(
+            {"system_prompt": system_prompt, "user_prompt": user_prompt, **kwargs}
+        )
+        ids = packing.decode_request(user_prompt)
+        rows = [{"id": i, "answer": "ok"} for i in ids]
+        return ProviderResult(raw_text=packing.encode_response(rows), model_id="x")
+
+
+_ANSWER = {"type": "object", "properties": {"a": {"type": "string"}},
+           "required": ["a"], "additionalProperties": False}
+
+
+def test_chain_prepends_envelope_instructions_and_wraps_schema():
+    prov = _RecordingProvider()
+    chain = ProviderChain(tiers=[("ollama", prov)], pack_size=5)
+
+    res = chain.resolve(
+        [Item("1", {"name": "x"})], system_prompt="STAGE PROMPT", answer_schema=_ANSWER
+    )
+
+    assert res.resolved == {"1": "ok"}
+    call = prov.seen[0]
+    assert call["system_prompt"].startswith(packing.ENVELOPE_INSTRUCTIONS)
+    assert call["system_prompt"].endswith("STAGE PROMPT")
+    assert call["response_schema"] == packing.envelope_schema(_ANSWER)
+
+
+def test_chain_without_answer_schema_sends_no_response_schema():
+    prov = _RecordingProvider()
+    chain = ProviderChain(tiers=[("ollama", prov)], pack_size=5)
+
+    chain.resolve([Item("1")])
+
+    call = prov.seen[0]
+    assert call["system_prompt"].startswith(packing.ENVELOPE_INSTRUCTIONS)
+    assert "response_schema" not in call
+
+
+@dataclass
+class _GarbageProvider:
+    cost_per_call: int = 0
+
+    def resolve(self, *, system_prompt: str, user_prompt: str, **kwargs) -> ProviderResult:
+        return ProviderResult(raw_text='{"results": [{"id": "1", "ans', model_id="x")
+
+
+def test_unreadable_reply_parks_the_pack_instead_of_failing():
+    chain = ProviderChain(tiers=[("ollama", _GarbageProvider())], pack_size=5)
+
+    res = chain.resolve([Item("1"), Item("2")])
+
+    assert res.resolved == {}
+    assert sorted(res.parked) == ["1", "2"]

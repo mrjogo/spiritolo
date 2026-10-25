@@ -64,7 +64,10 @@ class OpenAIProvider:
             client_kwargs["http_client"] = http_client
         return cls(client=openai.OpenAI(**client_kwargs), model_id=model_id)
 
-    def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+    def resolve(
+        self, *, system_prompt: str, user_prompt: str,
+        response_schema: dict | None = None,
+    ) -> ProviderResult:
         kwargs = {
             "model": self.model_id,
             "max_completion_tokens": self.max_tokens,
