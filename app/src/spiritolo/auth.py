@@ -368,6 +368,20 @@ def list_passkeys(conn: Connection, operator_id: int) -> list[dict[str, Any]]:
     return [{**r.asdict(), "transports": jload(r["transports"], [])} for r in rows]
 
 
+def delete_passkey(conn: Connection, operator_id: int, credential_id: str) -> None:
+    """Remove one of the operator's own passkeys. Refuses the last one, which
+    would leave the operator unable to sign in at all."""
+    with conn.transaction():
+        owned = conn.execute(
+            "select credential_id from passkeys where operator_id = ?", (operator_id,)
+        ).fetchall()
+        if credential_id not in {r["credential_id"] for r in owned}:
+            raise HTTPException(404, "no such passkey")
+        if len(owned) == 1:
+            raise HTTPException(409, "cannot remove your only passkey")
+        conn.execute("delete from passkeys where credential_id = ?", (credential_id,))
+
+
 def parse_credential(body: Any) -> dict[str, Any]:
     cred = body.get("credential") if isinstance(body, dict) else None
     if isinstance(cred, str):

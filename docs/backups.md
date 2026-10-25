@@ -54,6 +54,6 @@ sqlite3 spiritolo.db 'select count(*) from recipes; select count(*) from audit_l
 ## The legacy Postgres dump
 
 `scripts/backup-supabase.sh` and the *Backup staging database* GitHub Action
-dump the old Supabase Postgres (`public` + `audit` schemas, custom format).
-They exist only to feed the one-time migration
-([migration.md](migration.md)) and go away with the Supabase project.
+dumped the old Supabase Postgres (`public` + `audit` schemas, custom format)
+for the one-time migration ([migration.md](migration.md)). Both were removed
+once it was done; they live on in git history.

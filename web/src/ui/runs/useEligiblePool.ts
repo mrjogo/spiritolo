@@ -28,7 +28,9 @@ export interface UseEligiblePoolResult {
 
 // Reads a page of the eligible pool (POST /api/ops/eligible-pool) + its facets.
 // keepPreviousData holds the prior page on screen while a filter change loads,
-// so the JIRA-style facet counts don't flash empty.
+// so the JIRA-style facet counts don't flash empty. Both stay idle until the
+// stage is known (the run header loads first): querying with an empty stage
+// would return the wrong universe and leave its counts on screen.
 export function useEligiblePool(
   stage: string,
   pFilter: PFilter,
@@ -40,6 +42,7 @@ export function useEligiblePool(
 
   const poolQuery = useQuery({
     queryKey: ['eligiblePool', stage, pFilter, sort, page, pageSize],
+    enabled: stage !== '',
     placeholderData: keepPreviousData,
     queryFn: () =>
       api<Page<EligibleRow>>('/api/ops/eligible-pool', {
@@ -49,6 +52,7 @@ export function useEligiblePool(
 
   const facetsQuery = useQuery({
     queryKey: ['eligiblePoolFacets', stage, pFilter],
+    enabled: stage !== '',
     placeholderData: keepPreviousData,
     queryFn: () => api<Facets>('/api/ops/eligible-pool/facets', { body: { stage, filter: pFilter } }),
   });

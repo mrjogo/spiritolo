@@ -53,7 +53,7 @@ export function ClustersBrowser() {
 
   return (
     <div className="ops-clusters">
-      <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="clusters" />
+      <Pager page={page} pageSize={PAGE_SIZE} total={total} onPage={setPage} unit="clusters" loading={status === 'loading'} />
       <SplitView
         list={({ select }) => (
           <DataTable

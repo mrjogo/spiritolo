@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../api';
-import { inviteUrl, operatorsKey, type InviteResult, type OperatorRow } from './operators';
+import { inviteUrl, myPasskeysKey, operatorsKey, type InviteResult, type OperatorRow, type PasskeyRow } from './operators';
 
 // /ops → Operators: who can sign in, and registration links. A link is a
 // single-use, 7-day URL that registers a passkey for one operator with no
@@ -19,7 +19,24 @@ export function Operators() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const passkeys = useQuery({ queryKey: myPasskeysKey, queryFn: () => api<PasskeyRow[]>('/api/auth/passkeys') });
+
   const invalidate = () => queryClient.invalidateQueries({ queryKey: operatorsKey });
+
+  const removeKey = useMutation({
+    mutationFn: (credentialId: string) =>
+      api<{ ok: boolean }>(`/api/auth/passkeys/${encodeURIComponent(credentialId)}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      setError(null);
+      await Promise.all([queryClient.invalidateQueries({ queryKey: myPasskeysKey }), invalidate()]);
+    },
+    onError: (e) => setError(e instanceof Error ? e.message : String(e)),
+  });
+
+  function onRemoveKey(k: PasskeyRow) {
+    const when = new Date(k.created_at).toLocaleString();
+    if (window.confirm(`Remove the passkey created ${when}? It will no longer sign you in.`)) removeKey.mutate(k.credential_id);
+  }
 
   const create = useMutation({
     mutationFn: () => api<{ id: number }>('/api/ops/operators', { body: { handle, display_name: displayName, is_admin: isAdmin } }),
@@ -130,6 +147,41 @@ export function Operators() {
           </tbody>
         </table>
       )}
+
+      <section className="ops-operators__keys" aria-label="your passkeys">
+        <h3>Your passkeys</h3>
+        <p className="ops-operators__muted">
+          A passkey only works on the hostname it was created on, so after a hostname move the old one shows no
+          new use. You can remove any passkey except your last.
+        </p>
+        {passkeys.data && (
+          <table className="ops-operators__table">
+            <thead>
+              <tr>
+                <th>Label</th>
+                <th>Created</th>
+                <th>Last used</th>
+                <th aria-label="actions" />
+              </tr>
+            </thead>
+            <tbody>
+              {passkeys.data.map((k) => (
+                <tr key={k.credential_id}>
+                  <td>{k.label || <span className="ops-operators__muted">unlabelled</span>}</td>
+                  <td>{new Date(k.created_at).toLocaleString()}</td>
+                  <td>{k.last_used_at ? new Date(k.last_used_at).toLocaleString() : 'never'}</td>
+                  <td className="ops-operators__actions">
+                    <button type="button" onClick={() => onRemoveKey(k)}
+                      disabled={removeKey.isPending || passkeys.data.length < 2}>
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </section>
 
       <section className="ops-operators__new">
         <h3>New operator</h3>
