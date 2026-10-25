@@ -97,9 +97,10 @@ so a tier counts as working only after a real run from `/ops`:
 
 What a failure looks like:
 
-- The run ends `failed` with `error_code = 'stage_error'` and an `error_detail`
+- The run ends `failed` with `error_code = 'provider_unavailable'` and an `error_detail`
   naming the provider and HTTP status (`deepseek error 400: …`): a request the
-  API rejected. Paste the detail.
+  API rejected. Paste the detail. `error_code = 'stage_error'` is a bug in the
+  stage itself; its `error_detail` carries the traceback.
 - The run ends `done` but no item has `method = 'llm'`: the model answered and
   nothing decoded. Look for `LLM pack … failed` lines in the service log, and
   check the run's actual cost: a non-zero cost with zero `llm` items means
