@@ -18,19 +18,15 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 
 from .batch_provider import BatchRequest, BatchResult, BatchStatus, BatchSubmission
-from .openai import response_format_for
+from .openai import _reasoning_effort_off, response_format_for
 
 DEFAULT_MODEL = "gpt-5.4-mini"
 # gpt-5-family charges reasoning tokens against max_completion_tokens; see
 # common.llm.openai.OpenAIProvider for the full rationale. 2048 leaves
-# headroom; reasoning_effort='none' (set below for gpt-5*) disables reasoning
+# headroom; reasoning_effort='none' (set below for gpt-5*/gpt-6*) disables reasoning
 # entirely for these structured-retrieval prompts.
 DEFAULT_MAX_TOKENS = 2048
 DEFAULT_COMPLETION_WINDOW = "24h"
-
-
-def _is_gpt5_family(model_id: str) -> bool:
-    return model_id.startswith("gpt-5")
 
 
 @dataclass
@@ -59,8 +55,9 @@ class OpenAIBatchProvider:
             "model": self.model_id,
             "max_completion_tokens": self.max_tokens,
         }
-        if _is_gpt5_family(self.model_id):
-            body_kwargs["reasoning_effort"] = "none"  # reasoning off for structured retrieval
+        effort = _reasoning_effort_off(self.model_id)
+        if effort is not None:
+            body_kwargs["reasoning_effort"] = effort  # reasoning off for structured retrieval
         for r in requests:
             lines.append(json.dumps({
                 "custom_id": r.custom_id,

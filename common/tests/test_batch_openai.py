@@ -200,3 +200,16 @@ def test_submit_writes_json_schema_format_per_request():
         "json_schema": {"name": "answer", "schema": schema, "strict": True},
     }
     assert lines[1]["body"]["response_format"] == {"type": "json_object"}
+
+
+def test_submit_turns_reasoning_off_for_gpt6_models():
+    client = _stub_openai_client()
+    client.files.create.return_value = MagicMock(id="file_x")
+    client.batches.create.return_value = MagicMock(id="batch_y")
+    p = OpenAIBatchProvider(client=client, model_id="gpt-6-luna")
+    p.submit([BatchRequest(custom_id="r0", system_prompt="s", user_prompt="u")])
+    raw = client.files.create.call_args.kwargs["file"]
+    body = raw if isinstance(raw, (bytes, str)) else raw.read()
+    if isinstance(body, bytes):
+        body = body.decode()
+    assert json.loads(body.splitlines()[0])["body"]["reasoning_effort"] == "none"
