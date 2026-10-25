@@ -29,8 +29,6 @@ htmlcov/
 .worktrees/
 .claude/worktrees/
 
-# Brainstorm visual companion mockups
-
 # Ad-hoc UI mockups (HTML → screenshot scratch, kept local, never committed)
 .mockups/
 
