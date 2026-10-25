@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { api, ApiError } from '../../api';
 import { useApiMutation } from '../hooks/useApiMutation';
-import { findTier, DEFAULT_LLM_TIER, type LlmTier } from './llmTiers';
+import { defaultTier, findTier, rawTier, useLlmTiers, type LlmTier } from './llmTiers';
 
 // The lifecycle states a run (a `jobs` row) moves through, from the queue
 // selection UI's point of view.
@@ -64,13 +64,16 @@ const ACTIVE_POLL_MS = 2500;
 
 export interface UseRunResult {
   run: RunHeader | null;
-  tier: LlmTier;
+  /** Null only while the tier list is still loading for a run with no tier. */
+  tier: LlmTier | null;
   status: 'loading' | 'error' | 'loaded';
 }
 
 // Reads one run's header from the `runs` view. The selected LLM tier is
-// resolved back to an LlmTier (falling back to the free default) so callers
-// render the picker + estimate without re-deriving the mapping.
+// resolved back to an LlmTier from the server's tier list — a run naming a
+// tier the server no longer lists keeps its raw provider · model; a run with
+// none falls back to the first available tier — so callers render the picker
+// + estimate without re-deriving the mapping.
 export function useRun(jobId: number | null): UseRunResult {
   const query = useQuery({
     queryKey: ['run', jobId],
@@ -90,8 +93,12 @@ export function useRun(jobId: number | null): UseRunResult {
     },
   });
 
+  const { tiers } = useLlmTiers();
   const run = query.data ?? null;
-  const tier = findTier(run?.llm_provider, run?.llm_model) ?? DEFAULT_LLM_TIER;
+  const tier =
+    run?.llm_provider && run.llm_model
+      ? findTier(tiers, run.llm_provider, run.llm_model) ?? rawTier(run.llm_provider, run.llm_model)
+      : defaultTier(tiers);
 
   return {
     run,

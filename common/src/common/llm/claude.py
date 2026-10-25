@@ -1,14 +1,32 @@
-"""Anthropic Claude provider (sync). Defaults to Haiku 4.5."""
+"""Anthropic Claude provider (sync). Default model from ``common.providers.pricing``."""
 
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 
+from common.providers.pricing import DEFAULT_MODEL as _DEFAULTS
+
 from .provider import ProviderResult
 
-DEFAULT_MODEL = "claude-haiku-4-5"
-DEFAULT_MAX_TOKENS = 256
+DEFAULT_MODEL = _DEFAULTS["anthropic"]
+# Room for a full packed reply (10 items' answers in one envelope).
+DEFAULT_MAX_TOKENS = 2048
+_NON_TEXT = ("thinking", "redacted_thinking")
+
+
+def _reasoning_off(model_id: str) -> dict[str, object]:
+    """Request kwargs that turn reasoning off for structured retrieval.
+
+    Haiku 5.5 thinks by default (adaptive, effort ``medium``); ``disabled`` is
+    accepted at effort ``high`` or below, so pin effort ``low`` with it. Haiku
+    4.5 (old runs) thinks only when asked and rejects ``effort``, so it gets
+    nothing. Other models aren't offered as tiers; leave them at their defaults
+    rather than send a setting they may reject.
+    """
+    if model_id.startswith("claude-haiku-5"):
+        return {"thinking": {"type": "disabled"}, "output_config": {"effort": "low"}}
+    return {}
 
 
 @dataclass
@@ -44,22 +62,25 @@ class ClaudeProvider:
         self, *, system_prompt: str, user_prompt: str,
         response_schema: dict | None = None,
     ) -> ProviderResult:
-        # No `thinking` and no `output_config.effort` on purpose: on Haiku 4.5
-        # extended thinking is opt-in (omitting `thinking` = no thinking, which
-        # is what we want for structured retrieval), and the `effort` parameter
-        # is rejected by Haiku 4.5 — setting either would be wrong here.
-        kwargs: dict[str, object] = {}
+        kwargs: dict[str, object] = {
+            "model": self.model_id,
+            "max_tokens": self.max_tokens,
+            "messages": [{"role": "user", "content": user_prompt}],
+            **_reasoning_off(self.model_id),
+        }
+        if system_prompt:
+            # The stage prompt is identical across a run's calls: cache it.
+            # (Below the model's minimum cacheable length it simply isn't.)
+            kwargs["system"] = [
+                {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}
+            ]
         if response_schema is not None:
             # Structured outputs: the reply is constrained to the schema.
             kwargs.setdefault("output_config", {})["format"] = {
                 "type": "json_schema", "schema": response_schema,
             }
-        msg = self.client.messages.create(
-            model=self.model_id,
-            max_tokens=self.max_tokens,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
-            **kwargs,
+        msg = self.client.messages.create(**kwargs)
+        text = next(
+            (b.text for b in msg.content if getattr(b, "type", None) not in _NON_TEXT), ""
         )
-        text = msg.content[0].text
         return ProviderResult(raw_text=text, model_id=self.model_id)

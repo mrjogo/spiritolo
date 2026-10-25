@@ -9,8 +9,8 @@ from ingredients import runs as R
 
 
 def test_available_providers_follow_env_keys():
-    assert available_providers({}) == ["ollama"]
-    assert available_providers({"OPENAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}) == ["ollama", "openai", "claude", "anthropic"]
+    assert available_providers({}) == ["local"]
+    assert available_providers({"OPENAI_API_KEY": "k", "ANTHROPIC_API_KEY": "k"}) == ["local", "openai", "claude", "anthropic"]
 
 
 def _queued_run(db, conn, n=2):

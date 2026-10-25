@@ -27,13 +27,13 @@ class CostCapExceeded(Exception):
     charge is NOT applied — ``spent`` is the total actually incurred so far.
     """
 
-    def __init__(self, *, attempted: int, cap: int, spent: int) -> None:
+    def __init__(self, *, attempted: float, cap: int, spent: float) -> None:
         self.attempted = attempted
         self.cap = cap
         self.spent = spent
         super().__init__(
-            f"cost cap exceeded: next charge would reach {attempted}c, "
-            f"cap is {cap}c (already spent {spent}c)"
+            f"cost cap exceeded: next charge would reach {attempted:.2f}c, "
+            f"cap is {cap}c (already spent {spent:.2f}c)"
         )
 
 
@@ -48,10 +48,10 @@ class CostMeter:
 
     def __init__(self, cap_cents: int | None = None) -> None:
         self.cap_cents = cap_cents
-        self.spent_cents = 0
+        self.spent_cents: float = 0
         self.consultations = 0
 
-    def charge(self, cents: int) -> None:
+    def charge(self, cents: float) -> None:
         """Record ``cents`` of metered spend, or raise ``CostCapExceeded``.
 
         A non-positive charge is free work: it returns immediately and never

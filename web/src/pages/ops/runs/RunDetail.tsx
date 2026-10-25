@@ -130,7 +130,7 @@ export function RunDetail() {
             <span className="runs-ctlcard__label">Estimated cost</span>
             <div className="runs-esti">
               <span className="runs-esti__amt">≈ {formatCents(estimateCents)}</span>
-              {activeTier.metered && <span className="runs-tag">metered</span>}
+              {activeTier?.metered && <span className="runs-tag">metered</span>}
             </div>
             <div className="runs-meta">
               {run.task_count.toLocaleString()} tasks · deterministic tier first, LLM on residue
@@ -140,13 +140,13 @@ export function RunDetail() {
             <button
               type="button"
               className="runs-btn--primary"
-              disabled={run.task_count === 0}
+              disabled={run.task_count === 0 || activeTier == null}
               onClick={() => setModalOpen(true)}
             >
               Start run →
             </button>
             <div className="runs-startcard__fine">
-              {activeTier.metered ? 'metered — needs approval to start' : 'free — starts immediately'}
+              {activeTier?.metered ? 'metered — needs approval to start' : 'free — starts immediately'}
             </div>
           </div>
         </div>
@@ -187,7 +187,7 @@ export function RunDetail() {
         })}
       />
 
-      {modalOpen && (
+      {modalOpen && activeTier && (
         <StartConfirmModal
           run={run}
           tier={activeTier}

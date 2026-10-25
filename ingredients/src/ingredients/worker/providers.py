@@ -214,13 +214,12 @@ class ProviderChain:
         resolved: dict[str, Any],
         system_prompt: str,
         answer_schema: dict[str, Any] | None = None,
-    ) -> tuple[list[str], list[str], int, int, bool]:
-        unit = _cost.call_cost_cents(provider_id, provider)
-        metered = _cost.is_metered(unit)
+    ) -> tuple[list[str], list[str], int, float, bool]:
+        metered = _cost.is_metered(_cost.call_cost_cents(provider_id, provider))
         newly: list[str] = []
         parked: list[str] = []
         calls = 0
-        tier_cost = 0
+        tier_cost = 0.0
         consecutive_failures = 0
 
         for group in _packing.chunk(pending, self.pack_size):
@@ -230,6 +229,8 @@ class ProviderChain:
                 # pending for a later re-run.
                 parked.extend(it.id for it in group)
                 break
+            # Priced per pack: its item count at the rate in force right now.
+            unit = _cost.call_cost_cents(provider_id, provider, items=len(group))
             if metered:
                 # Cost cap is enforced BEFORE the call, so a breaching chunk is
                 # never spent and its items stay unprocessed (raises out).

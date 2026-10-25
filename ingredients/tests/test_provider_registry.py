@@ -55,7 +55,7 @@ def test_claude_uses_the_runs_model():
 
 def test_claude_falls_back_to_default_model():
     prov = build_provider_for_run("claude", None, env={"ANTHROPIC_API_KEY": "sk-a"})
-    assert prov.model_id == "claude-haiku-4-5"  # DEFAULT
+    assert prov.model_id == "claude-haiku-5-5"  # DEFAULT
 
 
 def test_deepseek_builds_an_openai_compatible_provider():

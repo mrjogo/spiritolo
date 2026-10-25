@@ -17,7 +17,7 @@ class TierResult:
     kind: str  # 'deterministic' | 'local' | 'hosted'
     calls: int
     resolved_ids: tuple[str, ...]
-    cost_cents: int
+    cost_cents: float
     metered: bool
 
 
@@ -25,6 +25,6 @@ class TierResult:
 class ChainResult:
     resolved: dict[str, Any]
     parked: list[str]
-    cost_cents: int
+    cost_cents: float
     metered: bool
     tiers: list[TierResult] = field(default_factory=list)
