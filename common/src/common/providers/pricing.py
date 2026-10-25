@@ -100,6 +100,7 @@ class ModelPrice:
 
 
 _ANTHROPIC_TABLE = "Anthropic model table"
+_OPENAI_PAGE = "OpenAI pricing page (Standard), supplied by Ruddick"
 _CARRIED = "carried over from the pre-2026-10 inline estimate; not re-verified"
 
 MODEL_PRICES: dict[tuple[str, str], ModelPrice] = {
@@ -109,14 +110,16 @@ MODEL_PRICES: dict[tuple[str, str], ModelPrice] = {
     ),
     # Old runs still name these; keep them priced so a retry is capped right.
     ("anthropic", "claude-haiku-4-5"): ModelPrice(1.00, 5.00, "2026-10-06", _ANTHROPIC_TABLE),
-    ("openai", "gpt-5.4-mini"): ModelPrice(0.75, 4.50, None, _CARRIED),
+    # Standard tier, short context. Long-context rates not yet supplied.
+    ("openai", "gpt-6-luna"): ModelPrice(0.10, 0.50, "2026-10-25", _OPENAI_PAGE),
+    ("openai", "gpt-5.4-mini"): ModelPrice(0.75, 4.50, "2026-10-25", _OPENAI_PAGE),
     ("deepseek", "deepseek-v4-flash"): ModelPrice(0.14, 0.28, None, _CARRIED),
 }
 
 # The model a provider runs when a run names none.
 DEFAULT_MODEL: dict[str, str] = {
     "anthropic": "claude-haiku-5-5",
-    "openai": "gpt-5.4-mini",
+    "openai": "gpt-6-luna",
     "deepseek": "deepseek-v4-flash",
     LOCAL_PROVIDER: LOCAL_DEFAULT_MODEL,
 }

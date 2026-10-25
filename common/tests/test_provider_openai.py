@@ -70,7 +70,7 @@ def test_from_env_reads_api_key_and_constructs_client(monkeypatch):
     p = OpenAIProvider.from_env()
 
     assert captured == {"api_key": "sk-env"}
-    assert p.model_id == "gpt-5.4-mini"
+    assert p.model_id == "gpt-6-luna"
 
 
 def test_from_env_missing_key_raises(monkeypatch):

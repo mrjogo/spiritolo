@@ -5,7 +5,7 @@ For batch (50% off, ~24h SLA), see openai_batch.py.
 gpt-5- and gpt-6-family models reason by default, charging reasoning tokens
 against `max_completion_tokens`. Our prompts are pure structured retrieval and
 need no reasoning, so we pin `reasoning_effort='none'` — which disables the
-reasoning trace entirely (GPT-5.1+, including the default gpt-5.4-mini) rather
+reasoning trace entirely (GPT-5.1+ and gpt-6) rather
 than merely minimizing it. That also frees the whole 2048-token budget for the JSON output;
 without disabling it, gpt-5.4-mini routinely returned empty content with
 finish_reason='length'.

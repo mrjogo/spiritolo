@@ -38,7 +38,7 @@ def test_openai_uses_the_runs_model():
 def test_openai_falls_back_to_default_model():
     prov = build_provider_for_run("openai", None, env={"OPENAI_API_KEY": "sk-o"})
     assert prov is not None
-    assert prov.model_id == "gpt-5.4-mini"  # DEFAULT
+    assert prov.model_id == "gpt-6-luna"  # DEFAULT
 
 
 def test_openai_without_key_is_none():

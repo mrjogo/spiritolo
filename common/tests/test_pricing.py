@@ -139,3 +139,9 @@ def test_tier_payload_carries_the_price_in_force(monkeypatch):
     local = pricing.tier_payload(pricing.tier_for("ollama", "qwen3:14b"), True)
     assert local["provider"] == "local"  # old id normalized
     assert local["price"] is None and local["metered"] is False
+
+
+def test_gpt6_luna_is_the_openai_default_at_its_listed_price():
+    assert pricing.DEFAULT_MODEL["openai"] == "gpt-6-luna"
+    # Same list price as Haiku 5.5: 1200 * 0.10 + 200 * 0.50 per MTok.
+    assert pricing.estimate_item_cents("openai", None, 1) == pytest.approx(0.022)
