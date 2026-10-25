@@ -178,3 +178,25 @@ def test_fetch_results_strips_nul_bytes_from_content():
     # The escaped form was the actual bug; assert it specifically.
     parsed_escaped = json.loads(results[1].raw_text)
     assert parsed_escaped["slug"] == "bazqux"
+
+
+def test_submit_writes_json_schema_format_per_request():
+    client = _stub_openai_client()
+    client.files.create.return_value = MagicMock(id="f")
+    client.batches.create.return_value = MagicMock(id="b")
+    schema = {"type": "object", "properties": {"label": {"type": "string"}},
+              "required": ["label"], "additionalProperties": False}
+
+    OpenAIBatchProvider(client=client, model_id="gpt-5-mini").submit([
+        BatchRequest(custom_id="r0", system_prompt="s", user_prompt="u", response_schema=schema),
+        BatchRequest(custom_id="r1", system_prompt="s", user_prompt="u"),
+    ])
+
+    body = client.files.create.call_args.kwargs["file"]
+    body = body.decode() if isinstance(body, bytes) else body
+    lines = [json.loads(line) for line in body.splitlines() if line.strip()]
+    assert lines[0]["body"]["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {"name": "answer", "schema": schema, "strict": True},
+    }
+    assert lines[1]["body"]["response_format"] == {"type": "json_object"}

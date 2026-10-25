@@ -23,6 +23,7 @@ class BatchRequest:
     custom_id: str           # alphanumeric + _-, max 64 chars (OpenAI constraint)
     system_prompt: str
     user_prompt: str
+    response_schema: dict | None = None  # JSON schema the reply must match
 
 
 @dataclass(frozen=True)
