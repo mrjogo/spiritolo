@@ -101,7 +101,18 @@ class ModelPrice:
 
 _ANTHROPIC_TABLE = "Anthropic model table"
 _OPENAI_PAGE = "OpenAI pricing page (Standard), supplied by Ruddick"
-_CARRIED = "carried over from the pre-2026-10 inline estimate; not re-verified"
+
+# DeepSeek bills peak hours at twice the off-peak rate: 01:00-04:00 and
+# 06:00-10:00 UTC, Monday to Friday. (Chinese public holidays are off-peak in
+# full; they aren't modelled, so a holiday call is over-counted, never under.)
+_WEEKDAYS = frozenset(range(5))
+_DEEPSEEK_FLASH = ModelPrice(
+    0.15, 0.60, "2026-10-25", "DeepSeek Models & Pricing page, supplied by Ruddick",
+    windows=(
+        RateWindow("peak", _WEEKDAYS, time(1), time(4), 0.30, 1.20),
+        RateWindow("peak", _WEEKDAYS, time(6), time(10), 0.30, 1.20),
+    ),
+)
 
 MODEL_PRICES: dict[tuple[str, str], ModelPrice] = {
     ("anthropic", "claude-haiku-5-5"): ModelPrice(
@@ -113,14 +124,16 @@ MODEL_PRICES: dict[tuple[str, str], ModelPrice] = {
     # Standard tier, short context. Long-context rates not yet supplied.
     ("openai", "gpt-6-luna"): ModelPrice(0.10, 0.50, "2026-10-25", _OPENAI_PAGE),
     ("openai", "gpt-5.4-mini"): ModelPrice(0.75, 4.50, "2026-10-25", _OPENAI_PAGE),
-    ("deepseek", "deepseek-v4-flash"): ModelPrice(0.14, 0.28, None, _CARRIED),
+    ("deepseek", "deepseek-flash"): _DEEPSEEK_FLASH,
+    # Retired name, still accepted and billed as deepseek-flash.
+    ("deepseek", "deepseek-v4-flash"): _DEEPSEEK_FLASH,
 }
 
 # The model a provider runs when a run names none.
 DEFAULT_MODEL: dict[str, str] = {
     "anthropic": "claude-haiku-5-5",
     "openai": "gpt-6-luna",
-    "deepseek": "deepseek-v4-flash",
+    "deepseek": "deepseek-flash",
     LOCAL_PROVIDER: LOCAL_DEFAULT_MODEL,
 }
 

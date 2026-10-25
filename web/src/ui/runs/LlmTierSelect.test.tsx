@@ -15,7 +15,7 @@ import { defaultTier, findTier, rawTier, useLlmTiers, type LlmTier } from './llm
 const TIERS = [
   { provider: 'local', model: 'qwen3:14b', label: 'Local · qwen3:14b — free (local)', short_label: 'Local · qwen3:14b', metered: false, available: true, price: null },
   {
-    provider: 'deepseek', model: 'deepseek-v4-flash', label: 'DeepSeek · deepseek-v4-flash — metered', short_label: 'DeepSeek · deepseek-v4-flash',
+    provider: 'deepseek', model: 'deepseek-flash', label: 'DeepSeek · deepseek-flash — metered', short_label: 'DeepSeek · deepseek-flash',
     metered: true, available: false,
     price: { input_per_mtok: 0.14, output_per_mtok: 0.28, as_of: null, source: 's', current_window: null, windows: [] },
   },
@@ -46,7 +46,7 @@ describe('llm tiers', () => {
   it('reads tiers from /api/ops/llm-tiers', async () => {
     const tiers = await loadTiers();
     expect(apiMock).toHaveBeenCalledWith('/api/ops/llm-tiers');
-    expect(tiers.map((t) => t.shortLabel)).toEqual(['Local · qwen3:14b', 'DeepSeek · deepseek-v4-flash', 'Claude · claude-haiku-5-5']);
+    expect(tiers.map((t) => t.shortLabel)).toEqual(['Local · qwen3:14b', 'DeepSeek · deepseek-flash', 'Claude · claude-haiku-5-5']);
   });
 
   it('finds old run rows by their former provider ids', async () => {

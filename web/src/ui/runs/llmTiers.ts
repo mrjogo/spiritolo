@@ -32,9 +32,9 @@ export interface LlmTierPrice {
 export interface LlmTier {
   provider: string;
   model: string;
-  /** Display name in the picker, e.g. "DeepSeek · deepseek-v4-flash — metered". */
+  /** Display name in the picker, e.g. "DeepSeek · deepseek-flash — metered". */
   label: string;
-  /** Short name for the confirm modal / run header, e.g. "DeepSeek · deepseek-v4-flash". */
+  /** Short name for the confirm modal / run header, e.g. "DeepSeek · deepseek-flash". */
   shortLabel: string;
   metered: boolean;
   available: boolean;

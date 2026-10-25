@@ -145,3 +145,17 @@ def test_gpt6_luna_is_the_openai_default_at_its_listed_price():
     assert pricing.DEFAULT_MODEL["openai"] == "gpt-6-luna"
     # Same list price as Haiku 5.5: 1200 * 0.10 + 200 * 0.50 per MTok.
     assert pricing.estimate_item_cents("openai", None, 1) == pytest.approx(0.022)
+
+
+@pytest.mark.parametrize("model", ["deepseek-flash", "deepseek-v4-flash", None])
+def test_deepseek_flash_doubles_in_weekday_peak_hours(model):
+    utc = lambda d, h: datetime(2026, 10, d, h, 30, tzinfo=timezone.utc)  # noqa: E731
+    per_mtok_in = lambda at: pricing.estimate_call_cents("deepseek", model, 1_000_000, 0, at=at)  # noqa: E731
+    assert per_mtok_in(utc(21, 0)) == pytest.approx(15)   # Wed 00:30 off-peak
+    assert per_mtok_in(utc(21, 2)) == pytest.approx(30)   # Wed 02:30 peak
+    assert per_mtok_in(utc(21, 5)) == pytest.approx(15)   # Wed 05:30 between windows
+    assert per_mtok_in(utc(21, 9)) == pytest.approx(30)   # Wed 09:30 peak
+    assert per_mtok_in(utc(21, 10)) == pytest.approx(15)  # Wed 10:30 off-peak
+    assert per_mtok_in(utc(24, 2)) == pytest.approx(15)   # Sat 02:30 off-peak
+    out = pricing.estimate_call_cents("deepseek", model, 0, 1_000_000, at=utc(21, 2))
+    assert out == pytest.approx(120)

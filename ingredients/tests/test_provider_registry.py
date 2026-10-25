@@ -61,7 +61,7 @@ def test_claude_falls_back_to_default_model():
 def test_deepseek_builds_an_openai_compatible_provider():
     prov = build_provider_for_run("deepseek", None, env={"DEEPSEEK_API_KEY": "sk-d"})
     assert isinstance(prov, OpenAIProvider)
-    assert prov.model_id == "deepseek-v4-flash"  # DEFAULT
+    assert prov.model_id == "deepseek-flash"  # DEFAULT
 
 
 def test_deepseek_without_key_is_none():
