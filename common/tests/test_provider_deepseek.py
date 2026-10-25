@@ -43,3 +43,21 @@ def test_non_gpt5_model_omits_reasoning_effort(monkeypatch):
     kwargs = client.chat.completions.create.call_args.kwargs
     assert "reasoning_effort" not in kwargs
     assert kwargs["response_format"] == {"type": "json_object"}
+
+
+def test_deepseek_turns_thinking_off(monkeypatch):
+    from unittest.mock import MagicMock
+
+    import openai
+
+    client = MagicMock()
+    choice = MagicMock()
+    choice.message.content = "{}"
+    client.chat.completions.create.return_value = MagicMock(choices=[choice])
+    monkeypatch.setattr(openai, "OpenAI", lambda **kw: client)
+
+    build_deepseek_provider(api_key="sk").resolve(system_prompt="s", user_prompt="u")
+
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
+    assert "reasoning_effort" not in kwargs
