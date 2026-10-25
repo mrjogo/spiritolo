@@ -95,7 +95,9 @@ LOG_LEVEL=INFO
 Reference variables from the buckets (step 2): the `LITESTREAM_*` set and the
 `CORPUS_*` set (+ optional `CORPUS_URL_STYLE=path`).
 
-Optional: `OLLAMA_BASE_URL=http://barbot:11434` for a tailnet Ollama; the
+Optional: `LOCAL_LLM_BASE_URL=http://barbot:1234` and `LOCAL_LLM_MODEL` for
+barbot's LM Studio (the free `local` tier, see
+[pipeline.md](pipeline.md#local-llm-tier-lm-studio-on-barbot)); the
 entrypoint only starts tailscaled when `TAILSCALE_AUTHKEY` resolves from the
 vault.
 
@@ -138,7 +140,7 @@ The staging Supabase data was exported (2026-10-24) with the since-removed
 
 ## 8. Smoke the loop
 
-1. `/ops → Runs` → create a `parse-ingredients` run on local `ollama` (free),
+1. `/ops → Runs` → create a `parse-ingredients` run on the `local` tier (free),
    add a handful of recipes, **Start**.
 2. Expect: items go `pending → applied`, `recipe_ingredients` rows appear, the
    audit log records each mutation with `actor_kind = worker`, and
