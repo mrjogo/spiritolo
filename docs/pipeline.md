@@ -122,10 +122,14 @@ run of a few items in `/ops` should end with items `applied`.
 
 ### Thinking
 
-Qwen3 thinks by default, which burns tokens on these structured prompts. The
-old Ollama client sent `think: false`; `/v1/chat/completions` has no portable
-switch, so it is per runtime: turn thinking off in LM Studio's model settings
-for that model, or put the runtime's request flag in `LOCAL_LLM_EXTRA_BODY`
-(for servers that honour chat-template kwargs that is
-`{"chat_template_kwargs": {"enable_thinking": false}}`). The recipe that
-works on barbot is not recorded yet: record it here once tested.
+A thinking model spends its token budget reasoning before it answers, and with
+the 2048-token cap the visible answer can come back empty. The simplest fix is a
+model that does not think by default: Qwen3.5 0.8B–9B ship with reasoning off
+(Qwen3 14B and the larger Qwen3.5 models have it on). For a model that thinks,
+there is no request flag LM Studio reliably honours on `/v1/chat/completions`:
+`chat_template_kwargs: {"enable_thinking": false}` and `enableThinking: false`
+are both reported ignored there ([lmstudio-bug-tracker#1990](https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1990)).
+Turn it off per model in LM Studio instead: in the model's *Inference →
+Prompt Template*, add `{%- set enable_thinking = false %}` as the first line
+and reload the model. `LOCAL_LLM_EXTRA_BODY` stays available for runtimes
+that do honour a request flag (Ollama, llama.cpp `llama-server`, vLLM).
