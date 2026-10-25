@@ -1,8 +1,10 @@
-"""Provider-agnostic prompt building and response parsing.
+"""Provider-agnostic prompt building and response parsing for map-ingredient.
 
-Both providers (claude, ollama) speak the same JSON-out contract so the
-provider modules stay thin. The system prompt names the legal actions
-and the JSON shapes; the user prompt assembles per-string context.
+The map stage sends each unresolved name to the LLM tier as one packed item
+whose ``input`` is ``build_item_input``'s dict (name, unit, site, candidates);
+``SYSTEM_PROMPT`` describes that input and the per-item answer, and
+``MAP_ANSWER_SCHEMA`` is the answer's JSON schema. ``build_user_prompt`` is the
+same input as a standalone prompt string, for one-name callers.
 """
 
 from __future__ import annotations
@@ -15,28 +17,64 @@ from typing import Any
 SYSTEM_PROMPT = """\
 You map free-text cocktail-recipe ingredient strings to canonical taxonomy nodes.
 
-You receive:
-- A normalized ingredient string (e.g. "tanqueray gin", "lemon juice", "Buffalo Trace bourbon").
-- The unit the recipe used (oz, ml, dash, none, ...). Helpful for distinguishing fruit-as-juice from fruit-as-garnish.
-- Optionally a source site name.
-- A list of plausible candidate nodes already in the taxonomy, each with its slug, immediate parent names, and a similarity score.
+Each item's `input` is an object with:
+- "name": a normalized ingredient string (e.g. "tanqueray gin", "lemon juice", "buffalo trace bourbon").
+- "parser_unit": the unit recipes use it with (oz, ml, dash, or null). Helpful for distinguishing fruit-as-juice from fruit-as-garnish.
+- "site": the source site name, or null.
+- "candidates": plausible nodes already in the taxonomy, highest similarity first, each with its slug, display_name, similarity score, and immediate parent names.
 
 You may ONLY attach the string to a node that already exists. You do NOT create,
 propose, or place new nodes — anything without a confident existing match is
-handled downstream. Choose ONE of two actions and reply with a single JSON
-object, no commentary:
+handled downstream. Each item's `answer` is ONE of these two JSON objects:
 
 1. CHOOSE an existing candidate node (return its slug):
    {"action": "chose_slug", "slug": "<existing-candidate-slug>"}
 
 2. ABSTAIN when no candidate confidently fits:
-   {"action": "abstain"}
+   {"action": "abstain", "slug": null}
 
 Rules:
-- Only ever return a slug that appears among the candidates.
+- Only ever return a slug that appears among that item's candidates.
+- Choose a candidate only when it names the same ingredient, or the exact
+  category the string names (e.g. "dry gin" -> "gin"); a merely related node
+  (lemon for lime, rye for bourbon) is an abstain.
 - Prefer "abstain" over guessing.
-- Output JSON only. No prose, no markdown fences.
 """
+
+# The per-item answer's JSON schema (strict-mode shaped: every key required).
+MAP_ANSWER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["chose_slug", "abstain"]},
+        "slug": {"type": ["string", "null"]},
+    },
+    "required": ["action", "slug"],
+    "additionalProperties": False,
+}
+
+
+def build_item_input(
+    *,
+    normalized_name: str,
+    parser_unit: str | None,
+    site: str | None,
+    candidates: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """One name's LLM input: the name, its context, and its candidate nodes."""
+    return {
+        "name": normalized_name,
+        "parser_unit": parser_unit,
+        "site": site,
+        "candidates": [
+            {
+                "slug": c.get("slug"),
+                "display_name": c["display_name"],
+                "similarity": round(float(c.get("similarity", 0.0)), 3),
+                "parents": c.get("parents") or [],
+            }
+            for c in candidates
+        ],
+    }
 
 
 def build_user_prompt(
@@ -46,25 +84,11 @@ def build_user_prompt(
     site: str | None,
     candidates: list[dict[str, Any]],
 ) -> str:
-    cand_lines = [
-        json.dumps({
-            "slug": c.get("slug"),
-            "display_name": c["display_name"],
-            "similarity": round(float(c.get("similarity", 0.0)), 3),
-            "parents": c.get("parents") or [],
-        })
-        for c in candidates
-    ]
-    context = json.dumps({
-        "name": normalized_name,
-        "parser_unit": parser_unit,
-        "site": site,
-    })
-    return (
-        "INPUT:\n" + context + "\n\n"
-        "CANDIDATES (highest similarity first):\n"
-        + ("\n".join(cand_lines) if cand_lines else "(none)")
-    )
+    """``build_item_input`` as a standalone JSON prompt string."""
+    return json.dumps(build_item_input(
+        normalized_name=normalized_name, parser_unit=parser_unit, site=site,
+        candidates=candidates,
+    ))
 
 
 _FENCE_RE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL)

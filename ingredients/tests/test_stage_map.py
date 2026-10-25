@@ -97,7 +97,24 @@ def test_unresolved_name_mints_provisional_node(conn):
     assert outcome == "resolved"
 
 
+def _amaro(conn):
+    """A live 'amaro' node under a 'liqueur' parent, so 'fancy amaro' has a
+    candidate the lexical tier won't accept on its own."""
+    parent = conn.execute(
+        "insert into taxonomy_nodes (slug, display_name) values ('liqueur', 'Liqueur') "
+        "returning id"
+    ).fetchone()[0]
+    child = conn.execute(
+        "insert into taxonomy_nodes (slug, display_name) values ('amaro', 'Amaro') "
+        "returning id"
+    ).fetchone()[0]
+    conn.execute(
+        "insert into taxonomy_edges (parent_id, child_id) values (?, ?)", (parent, child)
+    )
+
+
 def test_llm_tier_resolves_misses(conn):
+    _amaro(conn)
     rid = _recipe(conn, "https://ex.test/l", ["Fancy Amaro"])
     chain = _FakeChain({"fancy amaro": "amaro"})
     counts = map_stage_fn(_job(), conn, chain)
@@ -106,6 +123,60 @@ def test_llm_tier_resolves_misses(conn):
         "select taxonomy_slug, method from ingredient_resolutions where normalized_name='fancy amaro'"
     ).fetchone()
     assert row == ("amaro", "llm")
+    method = conn.execute(
+        "select method from job_items where entity_id=? and stage='map-ingredient'", (rid,)
+    ).fetchone()[0]
+    assert method == "llm"
+
+
+class _RecordingChain(_FakeChain):
+    def __init__(self, mapping):
+        super().__init__(mapping)
+        self.calls: list[dict] = []
+
+    def resolve(self, items, **kw):
+        self.calls.append({"items": list(items), **kw})
+        return super().resolve(items, **kw)
+
+
+def test_llm_items_carry_candidates_and_the_mapping_prompt(conn):
+    from ingredients.mapping.prompt import MAP_ANSWER_SCHEMA, SYSTEM_PROMPT
+
+    _amaro(conn)
+    rid = _recipe(conn, "https://ex.test/p", ["Fancy Amaro"])
+    conn.execute("update recipe_ingredients set unit = 'oz' where recipe_id = ?", (rid,))
+    chain = _RecordingChain({})
+    map_stage_fn(_job(), conn, chain)
+
+    (call,) = chain.calls
+    assert call["system_prompt"] == SYSTEM_PROMPT
+    assert call["answer_schema"] == MAP_ANSWER_SCHEMA
+    (item,) = call["items"]
+    assert item.id == "fancy amaro"
+    assert item.payload["name"] == "fancy amaro"
+    assert item.payload["parser_unit"] == "oz"
+    assert item.payload["site"] == "ex"
+    amaro = next(c for c in item.payload["candidates"] if c["slug"] == "amaro")
+    assert amaro["parents"] == ["Liqueur"]
+    assert amaro["display_name"] == "Amaro"
+
+
+def test_llm_skips_names_with_no_live_candidate(conn):
+    chain = _RecordingChain({})
+    _recipe(conn, "https://ex.test/z", ["Xyzzyq"])
+    map_stage_fn(_job(), conn, chain)
+    assert chain.calls == []  # nothing to choose from -> no paid call, straight to mint
+
+
+def test_chose_slug_outside_candidates_is_abstain(conn):
+    _amaro(conn)
+    _recipe(conn, "https://ex.test/o", ["Fancy Amaro"])
+    chain = _FakeChain({"fancy amaro": {"action": "chose_slug", "slug": "bourbon"}})
+    map_stage_fn(_job(), conn, chain)
+    row = conn.execute(
+        "select taxonomy_slug, method from ingredient_resolutions where normalized_name='fancy amaro'"
+    ).fetchone()
+    assert row == ("fancy-amaro", "provisional")  # abstained, then minted
 
 
 def test_map_is_idempotent_via_ledger(conn):

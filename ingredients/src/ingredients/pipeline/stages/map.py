@@ -19,9 +19,14 @@ from typing import Any
 from common.db import Connection, jlist
 from common.providers.packing import Item
 from ingredients.mapping.alias_layer import fetch_aliases_dict
-from ingredients.mapping.lexical_layer import TaxonomyIndex, resolve_lexical
+from ingredients.mapping.lexical_layer import (
+    TaxonomyIndex,
+    bulk_lexical_candidates,
+    resolve_lexical,
+)
 from ingredients.mapping.llm_actions import apply_llm_action
 from ingredients.mapping.mint import mint_provisional_node
+from ingredients.mapping.prompt import MAP_ANSWER_SCHEMA, SYSTEM_PROMPT, build_item_input
 from ingredients.mapping.resolutions import write_abstain, write_resolution
 from ingredients.mapping.types import Resolved
 from ingredients.pipeline.stages import base
@@ -29,7 +34,84 @@ from ingredients.pipeline.stages import base
 STAGE = "map-ingredient"
 # v2: map no longer proposes/auto-creates taxonomy structure. Unresolved names
 # now mint a provisional node (deterministic) instead of parking as pending.
-MAPPER_VERSION = "v2"
+# v3: the LLM tier gets the real mapping prompt with live candidates, and a
+# chosen slug outside those candidates is an abstain.
+MAPPER_VERSION = "v3"
+
+# Candidate nodes shown to the LLM per name (live nodes only, best first).
+LLM_CANDIDATE_LIMIT = 10
+
+
+def _most_common(conn: Connection, names: list[str], column: str) -> dict[str, str | None]:
+    """Each name's most frequent non-null ``column`` value across the recipes
+    that use it (``unit`` or ``site``) — context for the LLM prompt."""
+    rows = conn.execute(
+        f"select lower(trim(ri.name)), {column}, count(*) as n "
+        "from recipe_ingredients ri join recipes r on r.id = ri.recipe_id "
+        "where lower(trim(ri.name)) in (select value from json_each(?)) "
+        f"and {column} is not null "
+        "group by 1, 2 order by n desc, 2",
+        (jlist(names),),
+    ).fetchall()
+    out: dict[str, str | None] = {}
+    for name, value, _ in rows:
+        out.setdefault(name, value)
+    return out
+
+
+def _llm_inputs(
+    conn: Connection, names: list[str], index: TaxonomyIndex | None
+) -> dict[str, dict[str, Any]]:
+    """The LLM item input for each name that has at least one live candidate.
+
+    A name with no live candidate can only be abstained on, so it gets no LLM
+    call at all and goes straight to the mint pass."""
+    raw = bulk_lexical_candidates(conn, names, limit=LLM_CANDIDATE_LIMIT * 3, index=index)
+    node_ids = sorted({c["node_id"] for cands in raw.values() for c in cands})
+    live = {
+        r[0]: r[1]
+        for r in conn.execute(
+            "select id, slug from taxonomy_nodes where status = 'live' "
+            "and id in (select value from json_each(?))",
+            (jlist(node_ids),),
+        ).fetchall()
+    }
+    parents: dict[int, list[str]] = {}
+    for child_id, parent_name in conn.execute(
+        "select e.child_id, p.display_name from taxonomy_edges e "
+        "join taxonomy_nodes p on p.id = e.parent_id "
+        "where e.child_id in (select value from json_each(?)) order by p.display_name",
+        (jlist(list(live)),),
+    ).fetchall():
+        parents.setdefault(child_id, []).append(parent_name)
+    units = _most_common(conn, names, "ri.unit")
+    sites = _most_common(conn, names, "r.site")
+
+    out: dict[str, dict[str, Any]] = {}
+    for name in names:
+        cands = [
+            {**c, "slug": live[c["node_id"]], "parents": parents.get(c["node_id"], [])}
+            for c in raw.get(name, [])
+            if c["node_id"] in live
+        ][:LLM_CANDIDATE_LIMIT]
+        if cands:
+            out[name] = build_item_input(
+                normalized_name=name, parser_unit=units.get(name),
+                site=sites.get(name), candidates=cands,
+            )
+    return out
+
+
+def _within_candidates(answer: Any, candidate_slugs: set[str]) -> Any:
+    """An answer naming a slug outside the item's candidates becomes an abstain:
+    the prompt forbids it, and the schema can't enforce it."""
+    slug = answer if isinstance(answer, str) else (
+        answer.get("slug") if isinstance(answer, dict)
+        and answer.get("action") == "chose_slug" else None
+    )
+    if slug is not None and slug not in candidate_slugs:
+        return {"action": "abstain", "slug": None}
+    return answer
 
 
 def _slug_for_node(conn: Connection, node_id: int) -> str | None:
@@ -54,9 +136,10 @@ def _already_resolved(conn: Connection, names: list[str]) -> set[str]:
 def _resolve_names(
     conn: Connection, names: list[str], aliases: dict[str, int], providers: Any,
     index: TaxonomyIndex | None = None,
-) -> None:
+) -> set[str]:
     """Resolve every name lacking a resolution at MAPPER_VERSION into the shared
     table: alias -> lexical -> LLM tier (existing node only) -> mint provisional.
+    Returns the names the LLM tier attached to a node.
 
     The LLM tier may only attach a name to an *existing* node (``chose_slug``) or
     abstain; it never proposes or creates structure. Any name the three tiers
@@ -85,16 +168,31 @@ def _resolve_names(
         llm_names.append(name)
 
     resolved_by_llm: dict[str, Any] = {}
+    inputs: dict[str, dict[str, Any]] = {}
     if llm_names and providers is not None:
-        result = providers.resolve([Item(id=n, payload=n) for n in llm_names])
-        resolved_by_llm = result.resolved
+        inputs = _llm_inputs(conn, llm_names, index)
+        if inputs:
+            result = providers.resolve(
+                [Item(id=n, payload=p) for n, p in inputs.items()],
+                system_prompt=SYSTEM_PROMPT,
+                answer_schema=MAP_ANSWER_SCHEMA,
+            )
+            resolved_by_llm = result.resolved
+    chosen: set[str] = set()
     for name in llm_names:
-        apply_llm_action(
-            conn, normalized_name=name, answer=resolved_by_llm.get(name),
-            version=MAPPER_VERSION,
+        answer = resolved_by_llm.get(name)
+        if name in inputs:
+            answer = _within_candidates(
+                answer, {c["slug"] for c in inputs[name]["candidates"]}
+            )
+        action = apply_llm_action(
+            conn, normalized_name=name, answer=answer, version=MAPPER_VERSION,
         )
+        if action == "chose":
+            chosen.add(name)
 
     _mint_unresolved(conn, pending)
+    return chosen
 
 
 def _mint_unresolved(conn: Connection, names: list[str]) -> None:
@@ -174,7 +272,7 @@ def map_stage_fn(
         #    outside the chunk transaction: the shared resolution helpers own
         #    their own writes on the autocommit connection, exactly as when the
         #    per-recipe loop ran them.
-        _resolve_names(conn, union_names, aliases, providers, index)
+        by_llm = _resolve_names(conn, union_names, aliases, providers, index)
 
         # Pin: re-stamp any human overrides the auto-resolution just clobbered,
         # supersede machine proposals now resolved, and point map's live version.
@@ -206,7 +304,9 @@ def map_stage_fn(
                         "stage": STAGE,
                         "version": MAPPER_VERSION,
                         "outcome": outcome,
-                        "method": "deterministic",
+                        "method": (
+                            "llm" if by_llm.intersection(names) else "deterministic"
+                        ),
                         "job_id": job.get("id"),
                         "payload": {"names": len(names), "resolved": resolved_slugs},
                     }
