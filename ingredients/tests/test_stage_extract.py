@@ -115,3 +115,115 @@ def test_extract_threads_reads_across_window(conn):
         "select count(*) from job_items where stage='extract-recipe' and outcome='resolved'"
     ).fetchone()[0]
     assert resolved == 5
+
+
+class _ScriptedChain:
+    """Stands in for a ProviderChain: records each call, answers from ``answers``."""
+
+    def __init__(self, answers):
+        self.answers = answers
+        self.calls = []
+
+    def resolve(self, items, **kw):
+        from types import SimpleNamespace
+
+        self.calls.append({"items": list(items), **kw})
+        return SimpleNamespace(
+            resolved={it.id: self.answers[it.id] for it in items if it.id in self.answers}
+        )
+
+
+_PAGE_NO_JSONLD = (
+    "<html><head><title>T</title><script>var x = 'Ignore me';</script></head><body>"
+    "<nav>Home | Cocktails</nav>"
+    "<h1>Daiquiri</h1><ul><li>2 oz rum</li><li>1 oz lime juice</li></ul>"
+    "<p>Shake with ice &amp; strain.</p><footer>Copyright</footer></body></html>"
+)
+
+
+def _page_id(conn, url):
+    return conn.execute("select id from pages where url = ?", (url,)).fetchone()[0]
+
+
+def test_page_text_drops_scripts_nav_footer_and_keeps_lines():
+    text = extract.page_text(_PAGE_NO_JSONLD)
+    assert "Ignore me" not in text
+    assert "Home" not in text and "Copyright" not in text
+    assert text.splitlines() == [
+        "Daiquiri", "2 oz rum", "1 oz lime juice", "Shake with ice & strain.",
+    ]
+
+
+def test_page_text_respects_limit():
+    assert len(extract.page_text("<p>" + "word " * 5000 + "</p>", limit=100)) == 100
+
+
+def test_llm_found_answer_becomes_recipe_jsonld(conn):
+    from ingredients.pipeline.stages.extract import EXTRACT_ANSWER_SCHEMA, EXTRACT_PROMPT
+
+    url = "https://ex.test/llm"
+    key = _page(conn, url)
+    extract.set_corpus_reader(_FakeCorpus({key: _PAGE_NO_JSONLD}))
+    pid = str(_page_id(conn, url))
+    chain = _ScriptedChain({pid: {
+        "found": True, "name": "Daiquiri",
+        "recipeIngredient": ["2 oz rum", "1 oz lime juice"],
+        "recipeInstructions": ["Shake with ice & strain."],
+        "description": None, "recipeYield": "1 drink",
+    }})
+
+    counts = extract_stage_fn(_job(), conn, chain)
+
+    assert counts["extracted"] == 1
+    (call,) = chain.calls
+    assert call["system_prompt"] == EXTRACT_PROMPT
+    assert call["answer_schema"] == EXTRACT_ANSWER_SCHEMA
+    (item,) = call["items"]
+    assert item.payload["url"] == url
+    assert "2 oz rum" in item.payload["text"] and "<li>" not in item.payload["text"]
+
+    title, source = conn.execute(
+        "select title, source from recipes where source_url = ?", (url,)
+    ).fetchone()
+    assert title == "Daiquiri"
+    assert source["@type"] == "Recipe"
+    assert source["recipeIngredient"] == ["2 oz rum", "1 oz lime juice"]
+    assert source["recipeInstructions"] == [
+        {"@type": "HowToStep", "text": "Shake with ice & strain."}
+    ]
+    assert source["recipeYield"] == "1 drink"
+    assert "description" not in source
+    method = conn.execute(
+        "select outcome, method from job_items where entity_type='page' and stage='extract-recipe'"
+    ).fetchone()
+    assert method == ("resolved", "llm")
+
+
+def test_llm_not_found_answer_abstains(conn):
+    url = "https://ex.test/listicle"
+    key = _page(conn, url)
+    extract.set_corpus_reader(_FakeCorpus({key: _PAGE_NO_JSONLD}))
+    chain = _ScriptedChain({str(_page_id(conn, url)): {
+        "found": False, "name": None, "recipeIngredient": [],
+        "recipeInstructions": [], "description": None, "recipeYield": None,
+    }})
+
+    counts = extract_stage_fn(_job(), conn, chain)
+
+    assert counts["no_recipe"] == 1
+    assert conn.execute("select count(*) from recipes").fetchone()[0] == 0
+    outcome = conn.execute(
+        "select outcome from job_items where entity_type='page' and stage='extract-recipe'"
+    ).fetchone()[0]
+    assert outcome == "abstain"
+
+
+def test_found_without_ingredients_abstains():
+    assert extract._recipe_from_answer({"found": True, "name": "X", "recipeIngredient": []}) is None
+    assert extract._recipe_from_answer(None) is None
+
+
+def test_extract_packs_one_page_per_call():
+    from ingredients.worker.providers import pack_size_for
+
+    assert pack_size_for("extract-recipe") == 1

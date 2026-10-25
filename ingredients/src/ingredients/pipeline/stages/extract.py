@@ -4,8 +4,10 @@ For each queued page (classified as a recipe, with a corpus key) it reads the
 cached HTML from the object store, finds the Schema.org Recipe JSON-LD, and
 UPSERTs a `recipes` row (raw `source` jsonb verbatim + derived
 title/author/image; equipment stays empty until the convert stage). A page
-with no Recipe JSON-LD falls through to the LLM tier (provider chain) which
-synthesizes the recipe source from the page; with no provider it abstains. One
+with no Recipe JSON-LD falls through to the LLM tier (provider chain): the page
+is reduced to bounded readable text (``page_text``) and the tier answers with
+the recipe it finds there (``EXTRACT_PROMPT``), which becomes a Schema.org
+Recipe source; ``found: false``, no answer, or no provider abstains. One
 `job_items` row per page records the outcome at `EXTRACTOR_VERSION` (the page
 is the entity here — extract consumes pages and produces recipes).
 
@@ -16,7 +18,9 @@ runtime it defaults to the env-configured object-store reader.
 from __future__ import annotations
 
 import functools
+import re
 from concurrent.futures import ThreadPoolExecutor
+from html.parser import HTMLParser
 from typing import Any
 
 from common.db import Connection, jdump, jlist
@@ -27,7 +31,106 @@ from ingredients.pipeline.stages import base
 from . import jsonld
 
 STAGE = "extract-recipe"
-EXTRACTOR_VERSION = "v1"
+# v2: the LLM tier gets a real synthesis prompt over bounded page text.
+EXTRACTOR_VERSION = "v2"
+
+# Readable page text sent to the LLM tier is cut at this many characters
+# (~3K tokens), which holds a recipe block on every site we crawl.
+PAGE_TEXT_LIMIT = 12_000
+
+EXTRACT_PROMPT = """\
+You extract a cocktail recipe from the readable text of a web page.
+
+Each item's `input` is {"url": "<page url>", "text": "<the page's visible text>"}.
+Each item's `answer` is ONE of these two JSON objects:
+
+1. FOUND — the page presents exactly one drink recipe:
+   {"found": true,
+    "name": "<the drink's name>",
+    "recipeIngredient": ["<one ingredient line, with its amount>", ...],
+    "recipeInstructions": ["<one step>", ...],
+    "description": "<a one-sentence description from the page>" or null,
+    "recipeYield": "<the yield as the page states it>" or null}
+
+2. NOT FOUND — the page is not a single drink recipe (an article, a list of
+   many drinks, a product page, or the recipe is missing from the text):
+   {"found": false, "name": null, "recipeIngredient": [],
+    "recipeInstructions": [], "description": null, "recipeYield": null}
+
+Rules:
+- Copy ingredient lines and steps as they appear in the text; keep amounts and
+  units exactly. Never invent an ingredient, amount, or step.
+- One ingredient per recipeIngredient entry, in the page's order.
+- recipeIngredient must be non-empty when found is true; otherwise answer not found.
+- Prefer not found over guessing.
+"""
+
+EXTRACT_ANSWER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "found": {"type": "boolean"},
+        "name": {"type": ["string", "null"]},
+        "recipeIngredient": {"type": "array", "items": {"type": "string"}},
+        "recipeInstructions": {"type": "array", "items": {"type": "string"}},
+        "description": {"type": ["string", "null"]},
+        "recipeYield": {"type": ["string", "null"]},
+    },
+    "required": [
+        "found", "name", "recipeIngredient", "recipeInstructions",
+        "description", "recipeYield",
+    ],
+    "additionalProperties": False,
+}
+
+# Elements whose content is never part of the readable page.
+_SKIP_TAGS = frozenset(
+    {"script", "style", "noscript", "template", "svg", "iframe", "nav", "footer", "head"}
+)
+# Elements that start a new line of text.
+_BLOCK_TAGS = frozenset(
+    {"p", "div", "br", "li", "ul", "ol", "tr", "table", "section", "article",
+     "header", "main", "aside", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote",
+     "figcaption", "dd", "dt", "pre"}
+)
+_WS_RE = re.compile(r"[ \t\r\f\v\xa0]+")
+
+
+class _TextParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag, attrs):
+        if tag in _SKIP_TAGS:
+            self._skip += 1
+        elif tag in _BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_startendtag(self, tag, attrs):
+        if tag in _BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag):
+        if tag in _SKIP_TAGS:
+            self._skip = max(0, self._skip - 1)
+        elif tag in _BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data):
+        if not self._skip:
+            self.parts.append(data)
+
+
+def page_text(html: str, limit: int = PAGE_TEXT_LIMIT) -> str:
+    """The page's visible text: scripts, styles, navigation and footers
+    dropped, whitespace collapsed to one space per run and one line per block,
+    cut at ``limit`` characters. Stdlib only (no new HTML dependency)."""
+    parser = _TextParser()
+    parser.feed(html)
+    parser.close()
+    lines = (_WS_RE.sub(" ", line).strip() for line in "".join(parser.parts).split("\n"))
+    return "\n".join(line for line in lines if line)[:limit]
 
 # Page classification labels the extract queue accepts — the Zone-1 classifier's
 # recipe verdicts. Duplicated here rather than imported: ingredients doesn't
@@ -208,7 +311,44 @@ def extract_stage_fn(
 
 
 def _llm_synthesize(providers: Any, page: dict[str, Any], html: str) -> dict[str, Any] | None:
-    """Route a page with no Recipe JSON-LD through the provider chain; the tier
-    returns a recipe-source dict or abstains."""
-    result = providers.resolve([Item(id=str(page["id"]), payload=html)])
-    return result.resolved.get(str(page["id"]))
+    """Route a page with no Recipe JSON-LD through the provider chain (one page
+    per call) and turn a ``found`` answer into a Schema.org Recipe source dict;
+    anything else abstains (None)."""
+    text = page_text(html)
+    if not text:
+        return None
+    result = providers.resolve(
+        [Item(id=str(page["id"]), payload={"url": page["url"], "text": text})],
+        system_prompt=EXTRACT_PROMPT,
+        answer_schema=EXTRACT_ANSWER_SCHEMA,
+    )
+    return _recipe_from_answer(result.resolved.get(str(page["id"])))
+
+
+def _recipe_from_answer(answer: Any) -> dict[str, Any] | None:
+    """A Schema.org Recipe JSON-LD dict from the tier's answer, or None."""
+    if not isinstance(answer, dict) or answer.get("found") is not True:
+        return None
+    ingredients = [
+        s.strip() for s in answer.get("recipeIngredient") or []
+        if isinstance(s, str) and s.strip()
+    ]
+    name = answer.get("name")
+    if not ingredients or not isinstance(name, str) or not name.strip():
+        return None
+    recipe: dict[str, Any] = {
+        "@context": "https://schema.org",
+        "@type": "Recipe",
+        "name": name.strip(),
+        "recipeIngredient": ingredients,
+        "recipeInstructions": [
+            {"@type": "HowToStep", "text": s.strip()}
+            for s in answer.get("recipeInstructions") or []
+            if isinstance(s, str) and s.strip()
+        ],
+    }
+    for key in ("description", "recipeYield"):
+        value = answer.get(key)
+        if isinstance(value, str) and value.strip():
+            recipe[key] = value.strip()
+    return recipe

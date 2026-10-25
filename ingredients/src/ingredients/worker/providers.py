@@ -81,7 +81,7 @@ def _provider_unavailable(provider_id: str, exc: Exception) -> "ProviderUnavaila
 # knob the removed external chain config carried — now a code constant.)
 DEFAULT_PACK_SIZE = 10
 STAGE_PACK_SIZE: dict[str, int] = {
-    "extract-recipe": DEFAULT_PACK_SIZE,
+    "extract-recipe": 1,  # one page of text per call
     "parse-ingredients": DEFAULT_PACK_SIZE,
     "map-ingredient": DEFAULT_PACK_SIZE,
     "combine-nodes": DEFAULT_PACK_SIZE,
