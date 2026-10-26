@@ -35,6 +35,14 @@ class Settings:
     # shape, where Litestream must see the swap from a cold start), or swap
     # in place and reopen (local runs with no supervisor).
     import_restart: bool = False
+    # Passkey-free sign-in for a local preview (scripts/preview.sh): set by
+    # DEV_LOGIN=1, and honoured only while the origin is plain http, so the
+    # https deploy can never turn it on.
+    dev_login_requested: bool = False
+
+    @property
+    def dev_login(self) -> bool:
+        return self.dev_login_requested and self.public_origin.startswith("http://")
 
     @property
     def rp_id(self) -> str:
@@ -71,4 +79,5 @@ def from_env(env: dict[str, str] | None = None) -> Settings:
         executor_poll_seconds=float(e.get("EXECUTOR_POLL_SECONDS", "5")),
         extra_origins=extra,
         import_restart=e.get("IMPORT_RESTART", "0") not in ("0", "false", "no", ""),
+        dev_login_requested=e.get("DEV_LOGIN", "0") not in ("0", "false", "no", ""),
     )

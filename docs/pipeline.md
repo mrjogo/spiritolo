@@ -80,28 +80,39 @@ Every Zone-2 LLM tier speaks one packed contract: the chain sends
 prompt (`common/providers/packing.py`), and reads back
 `{"results": [{"id", "answer"}]}`. Unit tests cover that contract
 (`ingredients/tests/test_llm_contract.py`) but no cloud session has an API key,
-so a tier counts as working only after a real run from `/ops`:
+so a tier counts as working only after a run against a real model.
 
-1. **map-ingredient, ~20 recipes.** Create a run for `map-ingredient`, add about
-   20 recipes by filter (pick ones whose last outcome left a `provisional`
-   ingredient, so there is LLM residue), choose the DeepSeek tier (cheapest
-   metered), set the hard cost cap to $0.50, Start.
-   - Expected: the run ends `done`; some items record `method = 'llm'`, and
-     `/ops → Query` on `ingredient_resolutions` filtered to `method = 'llm'`
-     shows names attached to existing live slugs, all at version `v3`.
-2. **extract-recipe, 5 pages.** Create a run for `extract-recipe` over five pages
-   with no Recipe JSON-LD (their last outcome is `abstain`), same tier and cap.
-   - Expected: pages that carry a recipe end `applied` with `method = 'llm'` and
-     a new `recipes` row whose `source` is `@type: Recipe`; article and listicle
-     pages end `abstain`.
+**Headless (preferred).** On a machine with `op` access to the vault (barbot):
 
-What a failure looks like:
+```bash
+scripts/preview.sh --smoke <branch>                       # deepseek, 20 map recipes + 5 extract pages, 50¢ cap
+scripts/preview.sh --smoke --provider openai --extract 0 <branch>
+```
 
-- The run ends `failed` with `error_code = 'provider_unavailable'` and an `error_detail`
-  naming the provider and HTTP status (`deepseek error 400: …`): a request the
-  API rejected. Paste the detail. `error_code = 'stage_error'` is a bug in the
-  stage itself; its `error_detail` carries the traceback.
-- The run ends `done` but no item has `method = 'llm'`: the model answered and
-  nothing decoded. Look for `LLM pack … failed` lines in the service log, and
-  check the run's actual cost: a non-zero cost with zero `llm` items means
-  replies came back in a shape the envelope decoder couldn't read.
+It restores a fresh copy of the live database from Litestream into a scratch
+file, runs `python -m ingredients.smoke` there (the same runs `/ops` would
+build, executed through the real executor path), prints a markdown report and
+saves it under `data/`, then deletes the copy. Nothing touches the live
+database. The map residue is recipes with an ingredient the deterministic tiers
+left `provisional`/`abstain`; the extract sample is pages whose last extract
+abstained (no Recipe JSON-LD).
+
+**In the browser.** `scripts/preview.sh <branch>` serves the same kind of copy
+at `http://<host>:8000`; open `/api/auth/dev-login` to sign in without a passkey
+(`DEV_LOGIN`, honoured on plain-http origins only), then assemble runs in
+`/ops` as usual. Queued runs inherited from the live copy are cancelled first so
+the preview never spends on them. Ctrl-C cleans up.
+
+`scripts/preview.env` lists the 1Password items both modes read: the LLM keys,
+plus read-only copies of the two Railway buckets' credentials
+(`LITESTREAM_*`, `CORPUS_*`).
+
+What a failure looks like in the report:
+
+- The run ends `failed` with `error_code = 'provider_unavailable'` and an
+  `error_detail` naming the provider and HTTP status (`deepseek error 400: …`):
+  a request the API rejected. `stage_error` is a bug in the stage itself; its
+  `error_detail` carries the traceback.
+- The run ends `done` with zero names attached by the model and a non-zero
+  cost: replies came back in a shape the envelope decoder couldn't read. Look
+  for `LLM pack … failed` lines in the output.
