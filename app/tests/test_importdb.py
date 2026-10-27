@@ -105,3 +105,19 @@ def test_inspect_rejects_unknown_migrations(tmp_path):
         assert "9999_future.sql" in str(exc)
     else:
         raise AssertionError("expected rejection")
+
+
+def test_export_requires_admin(client, operator):
+    assert client.get("/api/ops/export-db").status_code == 403
+
+
+def test_export_downloads_a_consistent_copy_and_cleans_up(client, admin, db, settings, tmp_path):
+    seed_recipe(db, "Exported Negroni")
+    r = client.get("/api/ops/export-db")
+    assert r.status_code == 200, r.text
+    assert r.headers["content-disposition"].startswith('attachment; filename="spiritolo-')
+    out = tmp_path / "downloaded.db"
+    out.write_bytes(r.content)
+    # The download is a database the import path accepts as-is.
+    assert importdb.inspect(out)["counts"]["recipes"] == 1
+    assert not list(Path(settings.db_path).parent.glob("*.export-*"))

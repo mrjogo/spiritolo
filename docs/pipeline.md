@@ -108,9 +108,11 @@ the preview never spends on them. Ctrl-C cleans up.
 
 **Secrets.** The preview machine holds no prod credentials: `scripts/preview.env`
 lists only the LLM keys (1Password references for `op run`), or
-`PREVIEW_ENV_FILE` names a private file of plain values. The snapshot is the
-one thing that needs the replica bucket's credentials, so fetch it where you
-hold those (your laptop) and copy it over:
+`PREVIEW_ENV_FILE` names a private file of plain values. Get the snapshot from
+`/ops → Import → Download database` (`GET /api/ops/export-db`, a `VACUUM INTO`
+copy of the live file) and copy it to `data/live-snapshot.db`. Before that
+button is deployed, the cold-start path needs the replica bucket's credentials,
+so run it where you hold those (your laptop) and copy the file over:
 
 ```bash
 scripts/fetch-snapshot.sh                                 # litestream restore → data/live-snapshot.db

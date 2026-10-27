@@ -3,10 +3,13 @@ curation, executor health. Every route requires an admin session."""
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from common.db import Connection, IntegrityError
@@ -354,3 +357,18 @@ def import_apply(request: Request) -> dict[str, Any]:
         if st.executor is not None:
             st.executor.start()
     return {"applied": True, "restarting": False}
+
+
+@router.get("/export-db")
+async def export_db(request: Request) -> FileResponse:
+    """Download a snapshot of the live database (for a local preview)."""
+    st: AppState = state(request)
+    try:
+        path = await run_in_threadpool(importdb.snapshot, _paths(st))
+    except importdb.ImportError_ as exc:
+        raise HTTPException(500, str(exc)) from None
+    stamp = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+    return FileResponse(
+        path, media_type="application/vnd.sqlite3", filename=f"spiritolo-{stamp}.db",
+        background=BackgroundTask(path.unlink, missing_ok=True),
+    )

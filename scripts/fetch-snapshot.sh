@@ -4,7 +4,7 @@
 #   scripts/fetch-snapshot.sh [out.db]       default: data/live-snapshot.db in the main checkout
 #
 # The cold-start path for scripts/preview.sh, which only ever reads a local
-# snapshot; once /ops can hand out a download, prefer that. Run it where you
+# snapshot; prefer /ops → Import → Download database. Run this where you
 # are willing to hold the replica bucket's credentials (your laptop), then
 # copy the file to the preview machine. Restore only: nothing is written to the
 # replica.
