@@ -13,7 +13,8 @@ to whatever ``--db`` names, so never point it at the live file.
 
 The provider's API key comes from the environment (``DEEPSEEK_API_KEY`` …), as
 in the service. ``--extract`` reads page HTML through the corpus reader, so it
-also needs the ``CORPUS_*`` variables; pass ``--extract 0`` without them.
+also needs ``CORPUS_DIR`` (the scraper's local cache; what preview.sh sets) or
+the ``CORPUS_*`` bucket variables; pass ``--extract 0`` without either.
 """
 
 from __future__ import annotations

@@ -35,7 +35,7 @@ cd web && npm run dev                           # Vite on :5173, proxies /api �
 
 First visit to `/login` with an empty `operators` table offers **first-time passkey setup** (registers you as admin). `SESSION_SECRET` unset → a random per-process secret, so sessions die on restart — fine locally. `RUN_EXECUTOR=0` turns the executor thread off. To get realistic data locally, build a file from a staging dump with `scripts/pg_to_sqlite` (see [docs/migration.md](docs/migration.md)) or copy a Litestream restore / `VACUUM INTO` snapshot to `data/spiritolo.db`.
 
-**Preview a branch against live data** (on barbot or any machine with `op` access to the vault): `scripts/preview.sh <branch>` serves it on a scratch Litestream restore with passkey-free `/api/auth/dev-login`; `scripts/preview.sh --smoke <branch>` runs the headless LLM smoke test (`python -m ingredients.smoke`) instead and prints a report. See [docs/pipeline.md](docs/pipeline.md#smoke-testing-an-llm-tier).
+**Preview a branch against live data** (on barbot, which has the scraper's HTML cache): `scripts/preview.sh <branch>` serves it on a scratch copy of `data/live-snapshot.db` (made by `scripts/fetch-snapshot.sh` wherever you hold the replica credentials) with passkey-free `/api/auth/dev-login`; `scripts/preview.sh --smoke <branch>` runs the headless LLM smoke test (`python -m ingredients.smoke`) instead and prints a report. The preview machine needs only an LLM key. See [docs/pipeline.md](docs/pipeline.md#smoke-testing-an-llm-tier).
 
 **Tests** need no services: every suite uses a fresh SQLite file under pytest's `tmp_path` (or in-memory).
 

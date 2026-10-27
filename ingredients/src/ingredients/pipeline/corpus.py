@@ -68,6 +68,41 @@ class CorpusReader:
         return gzip.decompress(raw).decode("utf-8")
 
 
+class LocalCorpusReader(CorpusReader):
+    """Reads the corpus from the scraper's own cache instead of the bucket.
+
+    The bucket was loaded from that cache (``data/html/<site>/<id>.html``,
+    plain HTML, located by ``pages.html_path`` in ``data/scraper.db``), so a
+    machine that holds it needs no bucket credentials. The ``sha256(url)`` →
+    file index is built once, up front; lookups are then dict reads, safe from
+    the extract stage's read threads.
+    """
+
+    def __init__(self, html_root: str | os.PathLike, index_db: str | os.PathLike):
+        import sqlite3
+
+        self._root = os.fspath(html_root)
+        conn = sqlite3.connect(f"file:{os.fspath(index_db)}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                "select url, html_path from pages where html_path is not null"
+            ).fetchall()
+        finally:
+            conn.close()
+        self._paths = {key_for(url): path for url, path in rows}
+
+    def read_html(self, key: str) -> str:
+        path = self._paths.get(key)
+        if path is None:
+            raise CorpusMiss(key)
+        try:
+            with open(os.path.join(self._root, path), "rb") as f:
+                raw = f.read()
+        except FileNotFoundError:
+            raise CorpusMiss(key) from None
+        return raw.decode("utf-8")
+
+
 def _s3_config():
     """boto3 client config for an S3-compatible store that isn't AWS S3.
 
@@ -97,9 +132,20 @@ def default_reader() -> CorpusReader:
     the bucket's purpose so they never collide with Litestream's
     ``LITESTREAM_*`` set. Any S3-compatible object store works.
 
-    Not exercised by any test — those inject a fake client instead (see
-    ingredients/tests/test_corpus_reader.py). Used by the worker at runtime.
+    ``CORPUS_DIR`` set instead reads the scraper's local cache
+    (``LocalCorpusReader``), indexed by ``CORPUS_INDEX`` (default: the
+    ``scraper.db`` beside that directory). ``scripts/preview.sh`` uses this.
+
+    The bucket path is not exercised by any test — those inject a fake client
+    instead (see ingredients/tests/test_corpus_reader.py). Used by the worker
+    at runtime.
     """
+    if local := os.environ.get("CORPUS_DIR"):
+        index = os.environ.get("CORPUS_INDEX") or os.path.join(
+            os.path.dirname(local.rstrip("/")), "scraper.db"
+        )
+        return LocalCorpusReader(local, index)
+
     import boto3
 
     raw = boto3.client(
