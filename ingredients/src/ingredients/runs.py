@@ -23,7 +23,7 @@ STAGE_ENTITY = {
     "combine-nodes": "taxonomy_node",
     "connect-nodes": "taxonomy_node",
 }
-RECIPE_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink")
+RECIPE_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink", "likely_unstructured_drink_recipe")
 TERMINAL_ITEM_STATES = ("applied", "flagged", "failed")
 
 
