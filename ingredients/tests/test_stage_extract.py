@@ -81,6 +81,7 @@ def test_extract_abstains_when_no_recipe_jsonld(conn):
     counts = extract_stage_fn(_job(), conn, None)
     assert counts["no_recipe"] == 1
     assert conn.execute("select count(*) from recipes").fetchone()[0] == 0
+    assert conn.execute("select method from job_items").fetchone()[0] == "deterministic"
 
 
 def test_extract_records_html_missing(conn):
@@ -212,10 +213,11 @@ def test_llm_not_found_answer_abstains(conn):
 
     assert counts["no_recipe"] == 1
     assert conn.execute("select count(*) from recipes").fetchone()[0] == 0
-    outcome = conn.execute(
-        "select outcome from job_items where entity_type='page' and stage='extract-recipe'"
-    ).fetchone()[0]
-    assert outcome == "abstain"
+    row = conn.execute(
+        "select outcome, method from job_items where entity_type='page' and stage='extract-recipe'"
+    ).fetchone()
+    # The model was asked, so the abstain is the LLM tier's, not the parser's.
+    assert tuple(row) == ("abstain", "llm")
 
 
 def test_found_without_ingredients_abstains():

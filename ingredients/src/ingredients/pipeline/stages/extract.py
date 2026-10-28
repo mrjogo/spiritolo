@@ -300,7 +300,7 @@ def extract_stage_fn(
 
                 if recipe is None:
                     counts["no_recipe"] += 1
-                    _record(conn, page["id"], outcome="abstain", method="deterministic", job=job)
+                    _record(conn, page["id"], outcome="abstain", method=method, job=job)
                     continue
 
                 _upsert_recipe(conn, page, recipe)
