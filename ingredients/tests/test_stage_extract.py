@@ -155,6 +155,12 @@ def test_page_text_drops_scripts_nav_footer_and_keeps_lines():
     ]
 
 
+def test_page_text_drops_a_line_repeating_the_previous_one():
+    # Punch renders each ingredient twice in a row; a repeat further down stays.
+    html = "<li>2 oz rum</li><li><span>2 oz rum</span></li><li>1 oz lime</li><p>2 oz rum</p>"
+    assert extract.page_text(html).splitlines() == ["2 oz rum", "1 oz lime", "2 oz rum"]
+
+
 def test_page_text_respects_limit():
     assert len(extract.page_text("<p>" + "word " * 5000 + "</p>", limit=100)) == 100
 

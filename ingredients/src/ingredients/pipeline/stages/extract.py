@@ -18,6 +18,7 @@ runtime it defaults to the env-configured object-store reader.
 from __future__ import annotations
 
 import functools
+import itertools
 import re
 from concurrent.futures import ThreadPoolExecutor
 from html.parser import HTMLParser
@@ -125,12 +126,14 @@ class _TextParser(HTMLParser):
 def page_text(html: str, limit: int = PAGE_TEXT_LIMIT) -> str:
     """The page's visible text: scripts, styles, navigation and footers
     dropped, whitespace collapsed to one space per run and one line per block,
-    cut at ``limit`` characters. Stdlib only (no new HTML dependency)."""
+    a line repeating the one before it dropped (Punch renders each ingredient
+    twice, and the model copied both), cut at ``limit`` characters. Stdlib only
+    (no new HTML dependency)."""
     parser = _TextParser()
     parser.feed(html)
     parser.close()
     lines = (_WS_RE.sub(" ", line).strip() for line in "".join(parser.parts).split("\n"))
-    return "\n".join(line for line in lines if line)[:limit]
+    return "\n".join(line for line, _ in itertools.groupby(filter(None, lines)))[:limit]
 
 # Page classification labels the extract queue accepts — the Zone-1 classifier's
 # recipe verdicts. Duplicated here rather than imported: ingredients doesn't
