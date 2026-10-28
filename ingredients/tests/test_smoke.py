@@ -91,3 +91,19 @@ def test_smoke_leaves_other_queued_runs_alone(db_conn):
     smoke.smoke(db_conn, provider="deepseek", n_map=5, n_extract=0,
                 providers_builder=lambda job: None)
     assert db_conn.execute("select state from jobs where id = ?", (other,)).fetchone()[0] == "queued"
+
+
+def test_pick_extract_pages_prefers_confirmed_drinks(db_conn):
+    ids = {}
+    for url, ctype in (("https://ex/hub", "likely_drink_recipe"),
+                       ("https://ex/recipe", "confirmed_drink")):
+        ids[url] = db_conn.execute(
+            "insert into pages (url, site, corpus_key, content_type) values (?, 'ex', ?, ?) "
+            "returning id", (url, url, ctype),
+        ).fetchone()[0]
+        ledger.record_run(db_conn, entity_type="page", entity_id=ids[url],
+                          stage="extract-recipe", version="v1", outcome="abstain",
+                          method="deterministic", state="applied", job_id=None)
+
+    assert smoke.pick_extract_pages(db_conn, 1) == [ids["https://ex/recipe"]]
+    assert smoke.pick_extract_pages(db_conn, 2) == [ids["https://ex/recipe"], ids["https://ex/hub"]]

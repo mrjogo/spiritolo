@@ -98,7 +98,8 @@ HTML from the scraper's cache (`CORPUS_DIR`, see
 `ingredients.pipeline.corpus.LocalCorpusReader`) instead of the bucket. The map
 residue is recipes with an ingredient the deterministic tiers left
 `provisional`/`abstain`; the extract sample is pages whose last extract
-abstained (no Recipe JSON-LD).
+abstained (no Recipe JSON-LD), `confirmed_drink` pages first so it hits real
+recipes rather than hub pages.
 
 **In the browser.** `scripts/preview.sh <branch>` serves the same kind of copy
 at `http://<host>:8000`; open `/api/auth/dev-login` to sign in without a passkey

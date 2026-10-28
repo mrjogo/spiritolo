@@ -47,16 +47,19 @@ def pick_map_recipes(conn: Connection, n: int) -> list[int]:
 
 
 def pick_extract_pages(conn: Connection, n: int) -> list[int]:
-    """Pages whose latest extract outcome was an abstain (no Recipe JSON-LD)."""
+    """Pages whose latest extract outcome was an abstain (no Recipe JSON-LD),
+    confirmed drink recipes first. Most other abstains are hubs and articles
+    with no single recipe on them (Difford's /g/ guides), where abstaining is
+    right and says nothing about the LLM tier's synthesis."""
     rows = conn.execute(
         """
-        select i.entity_id from job_items i
+        select i.entity_id from job_items i join pages p on p.id = i.entity_id
         where i.stage = 'extract-recipe' and i.entity_type = 'page'
           and i.id = (select max(j.id) from job_items j
                       where j.stage = i.stage and j.entity_id = i.entity_id
                         and j.state in ('applied', 'flagged', 'failed'))
           and i.outcome = 'abstain'
-        order by i.entity_id limit ?
+        order by p.content_type = 'confirmed_drink' desc, i.entity_id limit ?
         """,
         (n,),
     ).fetchall()
