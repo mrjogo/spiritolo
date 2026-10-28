@@ -154,6 +154,17 @@ export function ImportDatabase() {
         )}
       </section>
 
+      <section className="ops-import__step">
+        <h3>Export</h3>
+        <p>
+          Download a snapshot of the live database, e.g. to load into a local preview
+          (<code>scripts/preview.sh</code>). It can be uploaded here again as-is.
+        </p>
+        <a className="ops-import__export" href="/api/ops/export-db" download>
+          Download database
+        </a>
+      </section>
+
       {phase.kind === 'restarting' && (
         <p role="status" className="ops-import__notice">Restarting the service… waiting for it to come back.</p>
       )}

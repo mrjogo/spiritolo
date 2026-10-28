@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
 from common.db import Connection
 
@@ -93,6 +93,27 @@ def login_verify(body: dict[str, Any], request: Request, c: Connection = Depends
     except HTTPException as exc:
         return _failed(st, exc)
     return _signed_in(st, op)
+
+
+@router.get("/dev-login")
+def dev_login(request: Request, c: Connection = Depends(conn)) -> Response:
+    """Local previews only (``Settings.dev_login``): sign in as the first admin
+    without a passkey — a preview runs on a copy of the live database, whose
+    passkeys are bound to the live hostname — creating a ``preview`` admin when
+    the copy has none. Everywhere else this route does not exist (404)."""
+    st: AppState = state(request)
+    if not st.settings.dev_login:
+        raise HTTPException(404, "not found")
+    row = c.execute(
+        "select id from operators where is_admin order by id limit 1"
+    ).fetchone()
+    op_id = row[0] if row else c.execute(
+        "insert into operators (handle, display_name, is_admin) "
+        "values ('preview', 'Preview', 1) returning id"
+    ).fetchone()[0]
+    resp = RedirectResponse("/ops", status_code=303)
+    st.sessions.set_session(resp, op_id)
+    return resp
 
 
 @router.post("/logout")

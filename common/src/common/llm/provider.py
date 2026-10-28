@@ -23,7 +23,12 @@ class LLMProvider(Protocol):
 
     def resolve(
         self, *, system_prompt: str, user_prompt: str,
-    ) -> ProviderResult: ...
+        response_schema: dict | None = None,
+    ) -> ProviderResult:
+        """Answer one prompt. ``response_schema``, when given, is the JSON
+        schema the reply must match; a provider maps it to its native
+        structured-output mode where it has one."""
+        ...
 
     @property
     def model_id(self) -> str: ...

@@ -38,7 +38,10 @@ class OllamaProvider:
         client = httpx.Client(timeout=DEFAULT_TIMEOUT)
         return cls(client=client, model_id=model_id, base_url=base_url)
 
-    def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+    def resolve(
+        self, *, system_prompt: str, user_prompt: str,
+        response_schema: dict | None = None,
+    ) -> ProviderResult:
         resp = self._generate(system_prompt, user_prompt)
         if getattr(resp, "status_code", None) == 404 and self.auto_pull:
             self._pull()

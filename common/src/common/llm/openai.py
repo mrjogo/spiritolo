@@ -32,6 +32,9 @@ class OpenAIProvider:
     client: object               # openai.OpenAI; typed as object so tests can pass a Mock.
     model_id: str = DEFAULT_MODEL
     max_tokens: int = DEFAULT_MAX_TOKENS
+    # Vendor-specific request fields sent as the SDK's ``extra_body`` (e.g. a
+    # thinking-mode switch on an OpenAI-compatible API).
+    extra_body: dict | None = None
 
     @classmethod
     def from_env(
@@ -64,7 +67,10 @@ class OpenAIProvider:
             client_kwargs["http_client"] = http_client
         return cls(client=openai.OpenAI(**client_kwargs), model_id=model_id)
 
-    def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+    def resolve(
+        self, *, system_prompt: str, user_prompt: str,
+        response_schema: dict | None = None,
+    ) -> ProviderResult:
         kwargs = {
             "model": self.model_id,
             "max_completion_tokens": self.max_tokens,
@@ -76,6 +82,8 @@ class OpenAIProvider:
         }
         if _is_gpt5_family(self.model_id):
             kwargs["reasoning_effort"] = "none"  # reasoning off for structured retrieval
+        if self.extra_body:
+            kwargs["extra_body"] = dict(self.extra_body)
         resp = self.client.chat.completions.create(**kwargs)
         text = resp.choices[0].message.content or ""
         # See common.llm.openai_batch._strip_nul_from_json_text for why.

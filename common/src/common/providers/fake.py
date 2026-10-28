@@ -1,7 +1,7 @@
 """FakeProvider — the hermetic LLM seam for the provider chain.
 
 Implements the existing `common.llm.provider.LLMProvider` Protocol
-(`resolve(*, system_prompt, user_prompt) -> ProviderResult`) so the chain and
+(`resolve(*, system_prompt, user_prompt, response_schema=None) -> ProviderResult`) so the chain and
 its packing path exercise real code with zero network / live model. Answers a
 packed prompt from `canned_map` (id -> structured output); ids in `raises_for`
 come back errored so the chain parks exactly them; `cost_per_call` is what the
@@ -30,7 +30,10 @@ class FakeProvider:
     def __post_init__(self) -> None:
         self.raises_for = frozenset(self.raises_for)
 
-    def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+    def resolve(
+        self, *, system_prompt: str, user_prompt: str,
+        response_schema: dict[str, Any] | None = None,
+    ) -> ProviderResult:
         self.calls += 1
         ids = packing.decode_request(user_prompt)
         rows: list[dict[str, Any]] = []

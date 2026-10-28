@@ -18,6 +18,12 @@ Railway volume is a two-step operator action in ``/ops → Import``:
 
 Nothing here deletes the old database until a verified replacement exists,
 and the entrypoint only performs the rename when the staged file is present.
+
+The reverse direction is ``GET /api/ops/export-db``: ``snapshot`` writes a
+``VACUUM INTO`` copy of the live file next to it (safe while the executor
+writes; the same copy ``scripts/snapshot-sqlite.sh`` takes) for the browser to
+download and a local preview to load. No table holds a secret: passkeys are
+public keys and invites store only a token hash.
 """
 
 from __future__ import annotations
@@ -234,6 +240,26 @@ def swap_files(paths: Paths) -> None:
         Path(str(paths.live) + suffix).unlink(missing_ok=True)
     os.replace(paths.staged, paths.live)
     paths.info.unlink(missing_ok=True)
+
+
+def snapshot(paths: Paths) -> Path:
+    """A consistent, compacted copy of the live database, integrity-checked.
+    The caller deletes it once it has been sent."""
+    out = paths.live.with_name(f"{paths.live.name}.export-{os.getpid()}-{time.time_ns()}")
+    src = sqlite3.connect(f"file:{paths.live}?mode=ro", uri=True)
+    try:
+        src.execute("vacuum into ?", (str(out),))
+    finally:
+        src.close()
+    check = sqlite3.connect(out)
+    try:
+        ok = check.execute("pragma integrity_check").fetchone()[0]
+    finally:
+        check.close()
+    if ok != "ok":
+        out.unlink(missing_ok=True)
+        raise ImportError_(f"snapshot failed integrity_check: {ok}")
+    return out
 
 
 def schedule_exit(delay: float = 0.75, code: int = RESTART_EXIT_CODE) -> None:

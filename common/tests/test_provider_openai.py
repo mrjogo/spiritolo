@@ -94,3 +94,16 @@ def test_from_env_accepts_base_url_http_client_and_explicit_key(monkeypatch):
     assert captured["base_url"] == "https://api.deepseek.com"
     assert captured["http_client"] is http
     assert p.model_id == "deepseek-chat"
+
+
+def test_extra_body_is_passed_through():
+    client = _fake_openai_client("{}")
+    p = OpenAIProvider(client=client, model_id="m", extra_body={"vendor_flag": False})
+    p.resolve(system_prompt="s", user_prompt="u")
+    assert client.chat.completions.create.call_args.kwargs["extra_body"] == {"vendor_flag": False}
+
+
+def test_no_extra_body_by_default():
+    client = _fake_openai_client("{}")
+    OpenAIProvider(client=client, model_id="m").resolve(system_prompt="s", user_prompt="u")
+    assert "extra_body" not in client.chat.completions.create.call_args.kwargs

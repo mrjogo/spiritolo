@@ -34,7 +34,8 @@ from ingredients.reviews.model import insert_review
 from ingredients.taxonomy import TaxonomyError, combine_merge
 
 STAGE = "combine-nodes"
-COMBINE_VERSION = "v1"
+# v2: per-item prompt + answer schema for the packed envelope.
+COMBINE_VERSION = "v2"
 
 # How many candidate nodes to surface per node, and the trigram-similarity floor
 # for the lexical candidate signal. Kept small so each LLM item stays cheap.
@@ -46,16 +47,17 @@ You deduplicate a cocktail-ingredient taxonomy. Each node names one substance a
 recipe can call for (a spirit, juice, syrup, bitters, garnish, ...). Freshly
 minted provisional nodes are often synonyms of a node that already exists.
 
-You receive a node (its display name + slug) and a list of candidate nodes, each
-with a slug, display name, and status ('live' = established, 'provisional' = also
-freshly minted). Decide whether the node names the SAME underlying substance as
-exactly one candidate. Reply with a single JSON object, no commentary:
+Each item's `input` is a node — {"name", "slug", "candidates"} — where each
+candidate node has a slug, display name, and status ('live' = established,
+'provisional' = also freshly minted). Decide whether the node names the SAME
+underlying substance as exactly one candidate. Each item's `answer` is ONE of
+these two JSON objects:
 
 1. MERGE — the node is a true synonym of one candidate (same substance):
    {"action": "merge", "survivor_slug": "<that candidate's slug>"}
 
 2. DISTINCT — no candidate is the same substance:
-   {"action": "distinct"}
+   {"action": "distinct", "survivor_slug": null}
 
 Rules:
 - Merge only TRUE SYNONYMS — different names for the identical substance, e.g.
@@ -66,8 +68,17 @@ Rules:
   'provisional' one — the established node should absorb the duplicate.
 - `survivor_slug` MUST be one of the candidate slugs exactly.
 - Prefer "distinct" over a guess.
-- Output JSON only. No prose, no markdown fences.
 """
+
+COMBINE_ANSWER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["merge", "distinct"]},
+        "survivor_slug": {"type": ["string", "null"]},
+    },
+    "required": ["action", "survivor_slug"],
+    "additionalProperties": False,
+}
 
 
 def _tokens(name: str) -> list[str]:
@@ -274,7 +285,9 @@ def combine_stage_fn(
     llm_attempted = providers is not None and bool(items)
     if llm_attempted:
         for chunk in base.chunked(items, chunk_size):
-            result = providers.resolve(chunk, system_prompt=COMBINE_PROMPT)
+            result = providers.resolve(
+                chunk, system_prompt=COMBINE_PROMPT, answer_schema=COMBINE_ANSWER_SCHEMA
+            )
             resolved_by_llm.update(result.resolved)
 
     # Pass 3: apply each verdict (merge / distinct / park). A node the merge just

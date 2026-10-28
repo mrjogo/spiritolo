@@ -69,3 +69,52 @@ def test_reader_is_read_only():
     for name in ("put_object", "write_html", "delete_html", "put_html"):
         assert not hasattr(corpus, name)
         assert not hasattr(corpus.CorpusReader, name)
+
+
+def _scraper_cache(tmp_path, pages: dict[str, str | None]):
+    """A scraper.db + data/html pair as the scraper leaves them: plain HTML
+    under html_root, located by pages.html_path (None = not fetched)."""
+    import sqlite3
+
+    root = tmp_path / "html"
+    db = tmp_path / "scraper.db"
+    conn = sqlite3.connect(db)
+    conn.execute("create table pages (url text, html_path text)")
+    for i, (url, html) in enumerate(pages.items()):
+        path = None
+        if html is not None:
+            path = f"site/{i}.html"
+            (root / "site").mkdir(parents=True, exist_ok=True)
+            (root / path).write_text(html)
+        conn.execute("insert into pages values (?, ?)", (url, path))
+    conn.commit()
+    conn.close()
+    return root, db
+
+
+def test_local_reader_reads_by_sha256_of_url(tmp_path):
+    root, db = _scraper_cache(tmp_path, {"https://example.com/negroni": "<p>Negroni</p>"})
+    reader = corpus.LocalCorpusReader(root, db)
+
+    assert reader.read_html(corpus.key_for("https://example.com/negroni")) == "<p>Negroni</p>"
+
+
+def test_local_reader_unfetched_or_deleted_page_is_a_miss(tmp_path):
+    root, db = _scraper_cache(tmp_path, {"https://a.example/": None, "https://b.example/": "x"})
+    (root / "site" / "1.html").unlink()
+    reader = corpus.LocalCorpusReader(root, db)
+
+    for url in ("https://a.example/", "https://b.example/", "https://c.example/"):
+        with pytest.raises(corpus.CorpusMiss):
+            reader.read_html(corpus.key_for(url))
+
+
+def test_default_reader_uses_corpus_dir_and_sibling_index(tmp_path, monkeypatch):
+    root, _ = _scraper_cache(tmp_path, {"https://example.com/": "<p>hi</p>"})
+    monkeypatch.setenv("CORPUS_DIR", str(root))
+    monkeypatch.delenv("CORPUS_INDEX", raising=False)
+
+    reader = corpus.default_reader()
+
+    assert isinstance(reader, corpus.LocalCorpusReader)
+    assert reader.read_html(corpus.key_for("https://example.com/")) == "<p>hi</p>"

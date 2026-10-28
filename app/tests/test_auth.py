@@ -1,5 +1,6 @@
 from spiritolo.auth import SESSION_COOKIE
 
+from fastapi.testclient import TestClient
 from softauth import SoftPasskey
 
 
@@ -178,3 +179,37 @@ def test_cannot_remove_another_operators_passkey(app, client, db):
     db.execute("insert into passkeys (credential_id, operator_id, public_key) values ('k3', ?, x'00')", (other,))
     client.cookies.set(SESSION_COOKIE, app.state.spiritolo.sessions.token(other))
     assert client.delete(f"/api/auth/passkeys/{theirs}").status_code == 404
+
+
+def _dev_client(tmp_path, origin):
+    from spiritolo.main import create_app
+    from spiritolo.settings import Settings
+
+    s = Settings(db_path=str(tmp_path / "dev.db"), session_secret="s", public_origin=origin,
+                 run_executor=False, dev_login_requested=True)
+    return TestClient(create_app(s))
+
+
+def test_dev_login_signs_in_as_admin_on_http_preview(tmp_path):
+    with _dev_client(tmp_path, "http://barbot:8000") as c:
+        r = c.get("/api/auth/dev-login", follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/ops"
+        me = c.get("/api/auth/me").json()
+        assert me["operator"]["handle"] == "preview" and me["operator"]["is_admin"]
+
+
+def test_dev_login_is_absent_on_https_even_when_requested(tmp_path):
+    with _dev_client(tmp_path, "https://spiritolo.com") as c:
+        assert c.get("/api/auth/dev-login", follow_redirects=False).status_code == 404
+
+
+def test_dev_login_is_absent_by_default(client):
+    assert client.get("/api/auth/dev-login", follow_redirects=False).status_code == 404
+
+
+def test_dev_login_env_flag():
+    from spiritolo.settings import from_env
+
+    assert from_env({"DEV_LOGIN": "1", "PUBLIC_ORIGIN": "http://localhost:8000"}).dev_login
+    assert not from_env({"DEV_LOGIN": "1", "PUBLIC_ORIGIN": "https://spiritolo.com"}).dev_login
+    assert not from_env({"PUBLIC_ORIGIN": "http://localhost:8000"}).dev_login
