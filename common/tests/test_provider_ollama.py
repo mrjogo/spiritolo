@@ -79,3 +79,18 @@ def test_no_auto_pull_when_disabled_surfaces_the_404():
         p.resolve(system_prompt="s", user_prompt="u")
     # Only the generate call — never a pull.
     assert client.post.call_count == 1
+
+
+def test_response_schema_is_sent_as_format():
+    client = _fake_httpx_client("{}")
+    schema = {"type": "object", "properties": {"a": {"type": "string"}}}
+    OllamaProvider(client=client).resolve(
+        system_prompt="s", user_prompt="u", response_schema=schema
+    )
+    assert client.post.call_args.kwargs["json"]["format"] == schema
+
+
+def test_no_schema_sends_no_format():
+    client = _fake_httpx_client("{}")
+    OllamaProvider(client=client).resolve(system_prompt="s", user_prompt="u")
+    assert "format" not in client.post.call_args.kwargs["json"]

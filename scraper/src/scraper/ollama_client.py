@@ -13,6 +13,7 @@ from common.llm.provider import LLMProvider
 
 from scraper.classify_prompt import (
     LABELS,
+    RESPONSE_SCHEMA,
     SYSTEM_PROMPT,
     build_user_message,
 )
@@ -39,7 +40,9 @@ def classify_url(
     """
     user = build_user_message(url, sitemap_source)
     start = time.monotonic()
-    result = provider.resolve(system_prompt=SYSTEM_PROMPT, user_prompt=user)
+    result = provider.resolve(
+        system_prompt=SYSTEM_PROMPT, user_prompt=user, response_schema=RESPONSE_SCHEMA
+    )
     latency_ms = int((time.monotonic() - start) * 1000)
     raw = result.raw_text
 

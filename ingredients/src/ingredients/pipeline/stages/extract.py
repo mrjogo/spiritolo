@@ -136,9 +136,11 @@ def page_text(html: str, limit: int = PAGE_TEXT_LIMIT) -> str:
     return "\n".join(line for line, _ in itertools.groupby(filter(None, lines)))[:limit]
 
 # Page classification labels the extract queue accepts — the Zone-1 classifier's
-# recipe verdicts. Duplicated here rather than imported: ingredients doesn't
+# recipe verdicts, plus the hand-set label for recipe pages with no Recipe
+# JSON-LD (scraper/scripts/manual_reclassification.py), which only the LLM
+# tier can read. Duplicated here rather than imported: ingredients doesn't
 # depend on scraper.
-RECIPE_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink")
+RECIPE_CONTENT_TYPES = ("likely_drink_recipe", "confirmed_drink", "likely_unstructured_drink_recipe")
 
 # Corpus GETs are the extract bottleneck (one network round-trip per page), so
 # they run across a thread pool, `_READ_WINDOW` pages at a time — the window

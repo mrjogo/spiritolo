@@ -85,3 +85,19 @@ def test_ingest_writes_classify_runs(tmp_db, tmp_path):
         assert counts["ok"] == 2
     finally:
         db.close()
+
+
+def test_submit_carries_the_response_schema(tmp_db, tmp_path):
+    from scraper.classify_prompt import RESPONSE_SCHEMA
+    from scraper.db import Database
+    db = Database(tmp_db)
+    try:
+        db.add_url("punch", "https://punch/a")
+        provider = _stub_batch_provider()
+        submit_classify_batch(
+            db, provider=provider, batches_dir=tmp_path, site="punch", limit=None,
+        )
+        (requests,) = provider.submit.call_args.args
+        assert [r.response_schema for r in requests] == [RESPONSE_SCHEMA]
+    finally:
+        db.close()

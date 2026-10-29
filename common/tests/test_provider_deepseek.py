@@ -61,3 +61,27 @@ def test_deepseek_turns_thinking_off(monkeypatch):
     kwargs = client.chat.completions.create.call_args.kwargs
     assert kwargs["extra_body"] == {"thinking": {"type": "disabled"}}
     assert "reasoning_effort" not in kwargs
+
+
+def test_deepseek_keeps_json_mode_and_sends_schema_as_text(monkeypatch):
+    """DeepSeek has no json_schema response_format: JSON mode stays on and the
+    schema rides in the system prompt."""
+    import json
+    from unittest.mock import MagicMock
+
+    import openai
+
+    client = MagicMock()
+    choice = MagicMock()
+    choice.message.content = '{"a": "x"}'
+    client.chat.completions.create.return_value = MagicMock(choices=[choice])
+    monkeypatch.setattr(openai, "OpenAI", lambda **kw: client)
+    schema = {"type": "object", "properties": {"a": {"type": "string"}}}
+
+    provider = build_deepseek_provider(api_key="sk")
+    assert provider.supports_json_schema is False
+    provider.resolve(system_prompt="sys", user_prompt="u", response_schema=schema)
+
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["response_format"] == {"type": "json_object"}
+    assert json.dumps(schema) in kwargs["messages"][0]["content"]

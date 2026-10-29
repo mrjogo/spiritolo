@@ -4,7 +4,10 @@ Thinking is disabled (`think: false`): qwen3 (our default) ships with thinking
 mode ON by default, which burns tokens reasoning about structured-retrieval
 prompts that don't need it — and can wrap the JSON answer in a <think> preamble
 that breaks parsing. `think` is Ollama's per-request toggle for thinking-capable
-models."""
+models.
+
+A ``response_schema`` is sent as ``format``: Ollama (0.5+) constrains the reply
+to a JSON schema given there."""
 
 from __future__ import annotations
 
@@ -42,25 +45,27 @@ class OllamaProvider:
         self, *, system_prompt: str, user_prompt: str,
         response_schema: dict | None = None,
     ) -> ProviderResult:
-        resp = self._generate(system_prompt, user_prompt)
+        resp = self._generate(system_prompt, user_prompt, response_schema)
         if getattr(resp, "status_code", None) == 404 and self.auto_pull:
             self._pull()
-            resp = self._generate(system_prompt, user_prompt)
+            resp = self._generate(system_prompt, user_prompt, response_schema)
         resp.raise_for_status()
         text = resp.json().get("response", "")
         return ProviderResult(raw_text=text, model_id=self.model_id)
 
-    def _generate(self, system_prompt: str, user_prompt: str):
-        return self.client.post(
-            self.base_url.rstrip("/") + "/api/generate",
-            json={
-                "model": self.model_id,
-                "system": system_prompt,
-                "prompt": user_prompt,
-                "stream": False,
-                "think": False,  # disable qwen3's default-on thinking mode
-            },
-        )
+    def _generate(
+        self, system_prompt: str, user_prompt: str, response_schema: dict | None = None,
+    ):
+        body = {
+            "model": self.model_id,
+            "system": system_prompt,
+            "prompt": user_prompt,
+            "stream": False,
+            "think": False,  # disable qwen3's default-on thinking mode
+        }
+        if response_schema is not None:
+            body["format"] = response_schema
+        return self.client.post(self.base_url.rstrip("/") + "/api/generate", json=body)
 
     def _pull(self) -> None:
         """Download the model onto the Ollama host (blocking, ~minutes first

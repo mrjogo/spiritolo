@@ -235,3 +235,17 @@ def test_extract_packs_one_page_per_call():
     from ingredients.worker.providers import pack_size_for
 
     assert pack_size_for("extract-recipe") == 1
+
+
+def test_unstructured_recipe_pages_are_queued_for_the_llm_tier(conn):
+    """Pages hand-labelled as recipes without Recipe JSON-LD are what the LLM
+    tier exists for, so the extract queue takes them."""
+    url = "https://ex.test/story"
+    key = _page(conn, url, content_type="likely_unstructured_drink_recipe")
+    extract.set_corpus_reader(_FakeCorpus({key: _PAGE_NO_JSONLD}))
+    chain = _ScriptedChain({str(_page_id(conn, url)): {
+        "found": True, "name": "Daiquiri", "recipeIngredient": ["2 oz rum"],
+        "recipeInstructions": [], "description": None, "recipeYield": None,
+    }})
+
+    assert extract_stage_fn(_job(), conn, chain)["extracted"] == 1
