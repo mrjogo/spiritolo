@@ -209,10 +209,11 @@ the Tailscale IP. Spiritolo uses it as is:
 - Model `qwen3.5-9b` (Qwen3.5 9B, Q8_0, about 9 GB of VRAM once loaded on the
   16 GB RTX 4060 Ti). The jail cannot download, so models are fetched into
   `~/.lmstudio/models/` by hand, not with `lms get`.
-- JIT loading on, previous JIT model unloaded on a new load; both are
-  server-wide settings owned by the forecash setup. Spiritolo's own settings
-  (the 5-minute idle TTL, thinking off) travel with each request, so nothing
-  server-wide is tuned for spiritolo. A cold first request loads the model in
+- JIT loading on, idle TTL 5 minutes server-wide (`developer.jitModelTTL` in
+  `~/.lmstudio/settings.json`), previous JIT model unloaded on a new load.
+  Spiritolo also sends its TTL and thinking-off with each request, so it does
+  not depend on those. No presets or per-model configs apply to `qwen3.5-9b`
+  (context 8192, the server default). A cold first request loads the model in
   about 15 s.
 - The GPU fits one model at a time: if forecash or another LM Studio holds a
   model, a JIT load of `qwen3.5-9b` may not fit.
