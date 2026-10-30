@@ -34,6 +34,8 @@ DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
 DEFAULT_EVAL_PATH = Path(__file__).resolve().parent.parent / "eval" / "classify-urls.jsonl"
 
+DEFAULT_OLLAMA_MODEL = "qwen3:14b"
+
 log = logging.getLogger(__name__)
 
 
@@ -68,6 +70,7 @@ def classify_one(
         raw_response=result.raw_response,
         latency_ms=result.latency_ms,
         pages_content_type_before=row.get("content_type"),
+        confidence=result.confidence,
     )
     return True
 
@@ -117,14 +120,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--concurrency", type=int, default=4,
                    help="Concurrent in-flight provider requests (default: 4).")
     p.add_argument(
-        "--provider", choices=["ollama", "claude", "openai"], default="ollama",
-        help="LLM provider for classification (default: ollama, free local).",
+        "--provider", choices=["ollama", "claude", "openai", "openai-decisions"],
+        default="ollama",
+        help="LLM provider for classification (default: ollama, free local). "
+             "openai-decisions uses the Decisions API (gpt-6-luna), which also "
+             "reports a per-label probability stored as confidence.",
     )
     p.add_argument(
-        "--model", default="qwen3:14b",
+        "--model", default=None,
         help=(
-            "Model id for the chosen provider (default: qwen3:14b for ollama). "
-            "For claude pass e.g. claude-haiku-4-5; for openai pass e.g. gpt-5-mini."
+            "Model id for the chosen provider. Defaults per provider: ollama "
+            f"{DEFAULT_OLLAMA_MODEL}, claude/openai their library defaults, "
+            "openai-decisions gpt-6-luna."
         ),
     )
     p.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Path to scraper.db.")
@@ -132,6 +139,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="Rows pulled from DB per batch (keeps task-object memory bounded). Default: 1000.")
     p.add_argument("--review", action="store_true",
                    help="Run the prompt against the checked-in eval set instead of the DB.")
+    p.add_argument("--eval-path", type=Path, default=DEFAULT_EVAL_PATH,
+                   help="For --review: the eval JSONL to score (default: the checked-in set).")
     p.add_argument("--sample", action="store_true",
                    help="Print N random (site, url, label, raw) rows. Optionally filter "
                         "with --site and/or --category, or look up specific URLs with --urls.")
@@ -173,7 +182,10 @@ def _build_provider(args: argparse.Namespace):
     model = getattr(args, "model", None)
     if provider_name == "ollama":
         from common.llm.ollama import OllamaProvider
-        return OllamaProvider.from_env(model_id=model) if model else OllamaProvider.from_env()
+        return OllamaProvider.from_env(model_id=model or DEFAULT_OLLAMA_MODEL)
+    if provider_name == "openai-decisions":
+        from common.llm.openai_decisions import DecisionsProvider
+        return DecisionsProvider.from_env(model_id=model) if model else DecisionsProvider.from_env()
     if provider_name == "claude":
         from common.llm.claude import ClaudeProvider
         return ClaudeProvider.from_env(model_id=model) if model else ClaudeProvider.from_env()
@@ -374,9 +386,76 @@ def load_eval_set(path: Path) -> list[dict]:
     return entries
 
 
+def review_metrics(rows: list[tuple[str, str]]) -> dict:
+    """Per-label precision / recall / F1 and a confusion table over
+    ``(expected, predicted)`` pairs. A failed call shows up as the predicted
+    label it was recorded as (``ERROR: …``), counting against recall."""
+    expected_labels = sorted({e for e, _ in rows})
+    predicted_labels = sorted({p for _, p in rows})
+    labels = sorted(set(expected_labels) | {p for p in predicted_labels if p in LABELS})
+    confusion = Counter(rows)
+    per_label = {}
+    for lab in labels:
+        tp = confusion[(lab, lab)]
+        support = sum(confusion[(lab, p)] for p in predicted_labels)
+        predicted = sum(confusion[(e, lab)] for e in expected_labels)
+        precision = tp / predicted if predicted else None
+        recall = tp / support if support else None
+        f1 = (
+            2 * precision * recall / (precision + recall)
+            if precision and recall else (0.0 if support or predicted else None)
+        )
+        per_label[lab] = {
+            "support": support, "predicted": predicted, "tp": tp,
+            "precision": precision, "recall": recall, "f1": f1,
+        }
+    scored = [m["f1"] for m in per_label.values() if m["support"] and m["f1"] is not None]
+    return {
+        "total": len(rows),
+        "correct": sum(1 for e, p in rows if e == p),
+        "labels": labels,
+        "per_label": per_label,
+        "macro_f1": sum(scored) / len(scored) if scored else None,
+        "confusion": confusion,
+    }
+
+
+def _short(label: str) -> str:
+    return label[len("likely_"):] if label.startswith("likely_") else label
+
+
+def _pct(x: float | None) -> str:
+    return "   -  " if x is None else f"{100 * x:5.1f}%"
+
+
+def print_review_report(metrics: dict, failures: list[tuple[dict, str]]) -> None:
+    total, correct = metrics["total"], metrics["correct"]
+    print(f"{correct}/{total} correct ({100 * correct / total:.1f}%)"
+          + (f", macro F1 {100 * metrics['macro_f1']:.1f}%" if metrics["macro_f1"] is not None else ""))
+    print()
+    print(f"{'label':<26} {'n':>4} {'precision':>9} {'recall':>7} {'f1':>7}")
+    for lab in metrics["labels"]:
+        m = metrics["per_label"][lab]
+        print(f"{_short(lab):<26} {m['support']:>4} {_pct(m['precision']):>9} "
+              f"{_pct(m['recall']):>7} {_pct(m['f1']):>7}")
+    if failures:
+        print("\nConfusion (expected -> predicted: count):")
+        for (e, p), n in sorted(metrics["confusion"].items(), key=lambda kv: (-kv[1], kv[0])):
+            if e != p:
+                print(f"  {_short(e)} -> {_short(p)}: {n}")
+        print("\nFailures:")
+        for e, predicted in failures:
+            print(f"  {e['url']}")
+            print(f"    expected:  {e['expected']}")
+            print(f"    predicted: {predicted}")
+
+
 def run_review(eval_path: Path, provider) -> int:
     entries = load_eval_set(eval_path)
-    correct = 0
+    if not entries:
+        print(f"ERROR: no eval rows in {eval_path}", file=sys.stderr)
+        return 2
+    rows: list[tuple[str, str]] = []
     failures: list[tuple[dict, str]] = []
     for e in entries:
         try:
@@ -385,23 +464,20 @@ def run_review(eval_path: Path, provider) -> int:
                 provider=provider,
             )
             predicted = result.label
+            if result.confidence is not None:
+                predicted_shown = f"{predicted} (p={result.confidence:.2f})"
+            else:
+                predicted_shown = predicted
         except Exception as err:
-            predicted = f"ERROR: {err}"
+            predicted = predicted_shown = f"ERROR: {err}"
         expected = e["expected"]
-        if predicted == expected:
-            correct += 1
-        else:
-            failures.append((e, predicted))
+        rows.append((expected, predicted))
+        if predicted != expected:
+            failures.append((e, predicted_shown))
 
-    total = len(entries)
-    print(f"{correct}/{total} correct ({100*correct/total:.1f}%)")
-    if failures:
-        print("\nFailures:")
-        for e, predicted in failures:
-            print(f"  {e['url']}")
-            print(f"    expected:  {e['expected']}")
-            print(f"    predicted: {predicted}")
-    return 0 if correct == total else 1
+    metrics = review_metrics(rows)
+    print_review_report(metrics, failures)
+    return 0 if metrics["correct"] == metrics["total"] else 1
 
 
 def run_sample(
@@ -448,7 +524,7 @@ def _run_sample(args: argparse.Namespace) -> int:
 
 
 def _run_review(args: argparse.Namespace) -> int:
-    return run_review(eval_path=DEFAULT_EVAL_PATH, provider=_build_provider(args))
+    return run_review(eval_path=args.eval_path, provider=_build_provider(args))
 
 
 # ---------------------------------------------------------------------------
@@ -606,11 +682,7 @@ def run_batch(args: argparse.Namespace) -> int:
 
     db = Database(args.db)
     try:
-        provider_kwargs = (
-            {"model_id": args.model}
-            if args.model and args.model != "qwen3:14b"
-            else {}
-        )
+        provider_kwargs = {"model_id": args.model} if args.model else {}
         provider = OpenAIBatchProvider.from_env(**provider_kwargs)
 
         if args.ingest:
