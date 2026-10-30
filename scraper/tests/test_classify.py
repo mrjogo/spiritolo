@@ -681,3 +681,9 @@ def test_build_provider_deepseek_requires_key(monkeypatch):
     monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     with pytest.raises(RuntimeError):
         _build_provider(build_arg_parser().parse_args(["--provider", "deepseek"]))
+
+
+def test_default_eval_path_points_at_the_checked_in_set():
+    from scraper.classify import DEFAULT_EVAL_PATH
+    assert DEFAULT_EVAL_PATH.is_file(), DEFAULT_EVAL_PATH
+    assert len(load_eval_set(DEFAULT_EVAL_PATH)) > 300

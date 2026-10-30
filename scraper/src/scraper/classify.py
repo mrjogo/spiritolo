@@ -32,7 +32,7 @@ from scraper.ollama_client import classify_url
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
-DEFAULT_EVAL_PATH = Path(__file__).resolve().parent.parent / "eval" / "classify-urls.jsonl"
+DEFAULT_EVAL_PATH = Path(__file__).resolve().parent.parent.parent / "eval" / "classify-urls.jsonl"
 
 DEFAULT_OLLAMA_MODEL = "qwen3:14b"
 
