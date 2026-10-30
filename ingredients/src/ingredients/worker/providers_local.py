@@ -50,7 +50,7 @@ LOCAL_TIMEOUT = 600.0
 # LM Studio's default server port. Ollama is http://<host>:11434.
 DEFAULT_LOCAL_BASE_URL = "http://localhost:1234"
 # Used when neither the run nor LOCAL_LLM_MODEL names a model.
-DEFAULT_LOCAL_MODEL = "qwen3:14b"
+DEFAULT_LOCAL_MODEL = "qwen3.5-9b"
 # Idle unload for a model this client JIT-loads (see local_ttl_seconds).
 DEFAULT_LOCAL_TTL_SECONDS = 300
 # Thinking off by default (see local_reasoning_effort).

@@ -34,6 +34,8 @@ from ingredients.worker.providers_local import (
 )
 
 _HOSTED = (build_openai_http_client, build_claude_http_client)
+# A model with no checked-in profile: requests go straight to /v1/chat/completions.
+PLAIN_MODEL = "plain-test-model"
 
 
 class RecordingFactory:
@@ -83,7 +85,7 @@ def test_local_client_uses_ts_proxy():
         "LOCAL_LLM_BASE_URL": "http://barbot:1234",
     }
     fac = RecordingFactory()
-    provider = build_local_provider(client_factory=fac, env=env)
+    provider = build_local_provider(client_factory=fac, env=env, model_id=PLAIN_MODEL)
 
     assert fac.kwargs["proxy"] == "socks5://localhost:1055"
     assert str(provider.client.base_url).rstrip("/") == "http://barbot:1234/v1"
@@ -124,7 +126,7 @@ def test_no_global_all_proxy_leak():
     # The local client tunnels ONLY when TS_LOCAL_PROXY is set; it never inherits
     # a global ALL_PROXY either.
     fac = RecordingFactory()
-    build_local_provider(client_factory=fac, env=env)
+    build_local_provider(client_factory=fac, env=env, model_id=PLAIN_MODEL)
     assert "proxy" not in fac.kwargs
     assert fac.kwargs.get("trust_env") is False
 
@@ -156,7 +158,7 @@ def test_local_and_ollama_ids_build_the_same_openai_compatible_provider():
 def test_local_model_falls_back_to_env_then_default():
     assert build_local_provider(env={"LOCAL_LLM_MODEL": "qwen/qwen3-14b"}).model_id == "qwen/qwen3-14b"
     assert build_local_provider(env={"LOCAL_LLM_MODEL": "x"}, model_id="y").model_id == "y"
-    assert build_local_provider(env={}).model_id == "qwen3:14b"
+    assert build_local_provider(env={}).model_id == "qwen3.5-9b"
 
 
 def test_local_provider_posts_chat_completions():
@@ -184,7 +186,7 @@ def test_local_provider_posts_chat_completions():
 
 def test_local_provider_passes_a_json_schema_through():
     fac = TransportFactory()
-    prov = build_local_provider(client_factory=fac, env={})
+    prov = build_local_provider(client_factory=fac, env={}, model_id=PLAIN_MODEL)
     schema = {"type": "json_schema",
               "json_schema": {"name": "answer", "schema": {"type": "object",
                               "properties": {"a": {"type": "string"}}}, "strict": True}}
@@ -197,7 +199,7 @@ def test_local_provider_passes_a_json_schema_through():
 def test_local_extra_body_is_merged_into_every_request():
     fac = TransportFactory()
     env = {"LOCAL_LLM_EXTRA_BODY": '{"chat_template_kwargs": {"enable_thinking": false}}'}
-    prov = build_local_provider(client_factory=fac, env=env)
+    prov = build_local_provider(client_factory=fac, env=env, model_id=PLAIN_MODEL)
     prov.resolve(system_prompt="s json", user_prompt="u")
     assert fac.body()["chat_template_kwargs"] == {"enable_thinking": False}
 
@@ -216,30 +218,30 @@ def test_available_providers_lists_local_always():
 
 def test_local_provider_turns_reasoning_off_by_default():
     fac = TransportFactory()
-    build_local_provider(client_factory=fac, env={}).resolve(system_prompt="s json", user_prompt="u")
+    build_local_provider(client_factory=fac, env={}, model_id=PLAIN_MODEL).resolve(system_prompt="s json", user_prompt="u")
     assert fac.body()["reasoning_effort"] == "none"
 
 
 def test_local_reasoning_effort_is_configurable_and_omittable():
     fac = TransportFactory()
     env = {"LOCAL_LLM_REASONING_EFFORT": "low"}
-    build_local_provider(client_factory=fac, env=env).resolve(system_prompt="s json", user_prompt="u")
+    build_local_provider(client_factory=fac, env=env, model_id=PLAIN_MODEL).resolve(system_prompt="s json", user_prompt="u")
     assert fac.body()["reasoning_effort"] == "low"
 
     fac = TransportFactory()
     env = {"LOCAL_LLM_REASONING_EFFORT": ""}
-    build_local_provider(client_factory=fac, env=env).resolve(system_prompt="s json", user_prompt="u")
+    build_local_provider(client_factory=fac, env=env, model_id=PLAIN_MODEL).resolve(system_prompt="s json", user_prompt="u")
     assert "reasoning_effort" not in fac.body()
 
 
 def test_local_ttl_is_sent_per_request():
     fac = TransportFactory()
-    build_local_provider(client_factory=fac, env={}).resolve(system_prompt="s json", user_prompt="u")
+    build_local_provider(client_factory=fac, env={}, model_id=PLAIN_MODEL).resolve(system_prompt="s json", user_prompt="u")
     assert fac.body()["ttl"] == 300
 
     fac = TransportFactory()
     env = {"LOCAL_LLM_TTL": ""}
-    build_local_provider(client_factory=fac, env=env).resolve(system_prompt="s json", user_prompt="u")
+    build_local_provider(client_factory=fac, env=env, model_id=PLAIN_MODEL).resolve(system_prompt="s json", user_prompt="u")
     assert "ttl" not in fac.body()
 
 
@@ -274,7 +276,7 @@ def test_server_down_fails_the_run_once_with_that_message():
     # Fatal, so the chain neither retries nor parks pack after pack: the first
     # pack raises ProviderUnavailable carrying the explanation.
     fac = HandlerFactory(_refuse)
-    prov = build_local_provider(client_factory=fac, env={"LOCAL_LLM_BASE_URL": "http://barbot:1234"})
+    prov = build_local_provider(client_factory=fac, env={"LOCAL_LLM_BASE_URL": "http://barbot:1234"}, model_id=PLAIN_MODEL)
     chain = ProviderChain(tiers=[("local", prov)], pack_size=1)
     from common.providers.packing import Item
 
@@ -298,7 +300,7 @@ def test_server_error_is_retryable():
     def boom(request):
         return httpx.Response(500, json={"error": {"message": "oops"}})
 
-    prov = build_local_provider(client_factory=HandlerFactory(boom), env={})
+    prov = build_local_provider(client_factory=HandlerFactory(boom), env={}, model_id=PLAIN_MODEL)
     with pytest.raises(LocalLLMError) as info:
         prov.resolve(system_prompt="s json", user_prompt="u")
     assert not info.value.fatal
@@ -310,7 +312,7 @@ def test_reply_that_only_thought_is_reported_as_thinking():
         reply["choices"][0]["finish_reason"] = "length"
         return httpx.Response(200, json=reply)
 
-    prov = build_local_provider(client_factory=HandlerFactory(thought), env={})
+    prov = build_local_provider(client_factory=HandlerFactory(thought), env={}, model_id=PLAIN_MODEL)
     with pytest.raises(LocalLLMError, match="without answering: it is thinking") as info:
         prov.resolve(system_prompt="s json", user_prompt="u")
     assert info.value.fatal
