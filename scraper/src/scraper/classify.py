@@ -20,7 +20,13 @@ from common.cli_common import (
 from common.progress import make_progress
 from common.summary import print_summary
 
-from scraper.classify_prompt import LABELS, PROMPT_VERSION, SYSTEM_PROMPT, build_user_message
+from scraper.classify_prompt import (
+    LABELS,
+    PROMPT_VERSION,
+    RESPONSE_SCHEMA,
+    SYSTEM_PROMPT,
+    build_user_message,
+)
 from scraper.db import Database
 from scraper.ollama_client import classify_url
 
@@ -480,6 +486,7 @@ def submit_classify_batch(
         provider=provider, rows=payload,
         to_request=lambda i, p: BatchRequest(
             custom_id=f"r{i}", system_prompt=p[1], user_prompt=p[2],
+            response_schema=RESPONSE_SCHEMA,
         ),
         row_to_id=lambda p: p[0],     # the URL
         flow="scraper.classify.url",

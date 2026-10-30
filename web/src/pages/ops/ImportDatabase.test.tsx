@@ -51,6 +51,14 @@ describe('<ImportDatabase>', () => {
     expect(apiMock).toHaveBeenCalledWith('/api/ops/import-db');
   });
 
+  it('links the database download', async () => {
+    apiMock.mockResolvedValue({ staged: null, restart_on_apply: false });
+    renderPage();
+    const link = await screen.findByRole('link', { name: /download database/i });
+    expect(link).toHaveAttribute('href', '/api/ops/export-db');
+    expect(link).toHaveAttribute('download');
+  });
+
   it('renders the staged summary and applies on confirm', async () => {
     apiMock.mockImplementation((path: string, init?: { body?: unknown }) => {
       if (path === '/api/ops/import-db') return Promise.resolve({ staged, restart_on_apply: false });

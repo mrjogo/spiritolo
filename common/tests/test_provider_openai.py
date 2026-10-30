@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock
 
 from common.llm.openai import OpenAIProvider
@@ -94,3 +95,41 @@ def test_from_env_accepts_base_url_http_client_and_explicit_key(monkeypatch):
     assert captured["base_url"] == "https://api.deepseek.com"
     assert captured["http_client"] is http
     assert p.model_id == "deepseek-chat"
+
+
+def test_extra_body_is_passed_through():
+    client = _fake_openai_client("{}")
+    p = OpenAIProvider(client=client, model_id="m", extra_body={"vendor_flag": False})
+    p.resolve(system_prompt="s", user_prompt="u")
+    assert client.chat.completions.create.call_args.kwargs["extra_body"] == {"vendor_flag": False}
+
+
+def test_no_extra_body_by_default():
+    client = _fake_openai_client("{}")
+    OpenAIProvider(client=client, model_id="m").resolve(system_prompt="s", user_prompt="u")
+    assert "extra_body" not in client.chat.completions.create.call_args.kwargs
+_SCHEMA = {"type": "object", "properties": {"a": {"type": "string"}},
+           "required": ["a"], "additionalProperties": False}
+
+
+def test_response_schema_uses_strict_json_schema_format():
+    client = _fake_openai_client('{"a": "x"}')
+    p = OpenAIProvider(client=client, model_id="gpt-5-mini")
+    p.resolve(system_prompt="sys", user_prompt="u", response_schema=_SCHEMA)
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["response_format"] == {
+        "type": "json_schema",
+        "json_schema": {"name": "answer", "schema": _SCHEMA, "strict": True},
+    }
+    assert kwargs["messages"][0] == {"role": "system", "content": "sys"}
+
+
+def test_json_mode_only_endpoint_gets_schema_as_text():
+    client = _fake_openai_client('{"a": "x"}')
+    p = OpenAIProvider(client=client, model_id="m", supports_json_schema=False)
+    p.resolve(system_prompt="sys", user_prompt="u", response_schema=_SCHEMA)
+    kwargs = client.chat.completions.create.call_args.kwargs
+    assert kwargs["response_format"] == {"type": "json_object"}
+    system = kwargs["messages"][0]["content"]
+    assert system.startswith("sys") and json.dumps(_SCHEMA) in system
+    assert "json" in system

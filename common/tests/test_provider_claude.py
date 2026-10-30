@@ -63,3 +63,20 @@ def test_from_env_accepts_http_client_and_explicit_key(monkeypatch):
     assert captured["api_key"] == "sk-explicit"
     assert captured["http_client"] is http
     assert p.model_id == "claude-haiku-4-5"
+
+
+def test_response_schema_sets_output_config_format():
+    client = _fake_anthropic_client('{"a": "x"}')
+    schema = {"type": "object", "properties": {"a": {"type": "string"}},
+              "required": ["a"], "additionalProperties": False}
+    ClaudeProvider(client=client).resolve(
+        system_prompt="sys", user_prompt="u", response_schema=schema
+    )
+    kwargs = client.messages.create.call_args.kwargs
+    assert kwargs["output_config"] == {"format": {"type": "json_schema", "schema": schema}}
+
+
+def test_no_schema_sends_no_output_config():
+    client = _fake_anthropic_client("{}")
+    ClaudeProvider(client=client).resolve(system_prompt="s", user_prompt="u")
+    assert "output_config" not in client.messages.create.call_args.kwargs

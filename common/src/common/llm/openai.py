@@ -9,10 +9,17 @@ trace entirely (GPT-5.1+, including the default gpt-5.4-mini) rather than merely
 minimizing it. That also frees the whole 2048-token budget for the JSON output;
 without disabling it, gpt-5.4-mini routinely returned empty content with
 finish_reason='length'.
+
+Structured output: with a ``response_schema`` the request carries
+``response_format={"type": "json_schema", ..., "strict": True}``, so the reply
+is guaranteed to match it. An endpoint that only has JSON mode (DeepSeek, see
+deepseek.py) sets ``supports_json_schema=False``: it keeps ``json_object`` and
+gets the schema as text appended to the system prompt instead.
 """
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 
@@ -27,11 +34,38 @@ def _is_gpt5_family(model_id: str) -> bool:
     return model_id.startswith("gpt-5")
 
 
+def response_format_for(response_schema: dict | None) -> dict:
+    """The Chat Completions ``response_format`` for a schema (strict structured
+    output), or plain JSON mode when there is none."""
+    if response_schema is None:
+        return {"type": "json_object"}
+    return {
+        "type": "json_schema",
+        "json_schema": {"name": "answer", "schema": response_schema, "strict": True},
+    }
+
+
+def schema_as_text(system_prompt: str, response_schema: dict | None) -> str:
+    """``system_prompt`` with the schema spelled out, for JSON-mode-only APIs."""
+    if response_schema is None:
+        return system_prompt
+    return (
+        system_prompt
+        + "\n\nYour reply must be a json object matching this JSON schema:\n"
+        + json.dumps(response_schema)
+    )
+
+
 @dataclass
 class OpenAIProvider:
     client: object               # openai.OpenAI; typed as object so tests can pass a Mock.
     model_id: str = DEFAULT_MODEL
     max_tokens: int = DEFAULT_MAX_TOKENS
+    # Vendor-specific request fields sent as the SDK's ``extra_body`` (e.g. a
+    # thinking-mode switch on an OpenAI-compatible API).
+    extra_body: dict | None = None
+    # False for an OpenAI-compatible API without json_schema response_format.
+    supports_json_schema: bool = True
 
     @classmethod
     def from_env(
@@ -64,7 +98,15 @@ class OpenAIProvider:
             client_kwargs["http_client"] = http_client
         return cls(client=openai.OpenAI(**client_kwargs), model_id=model_id)
 
-    def resolve(self, *, system_prompt: str, user_prompt: str) -> ProviderResult:
+    def resolve(
+        self, *, system_prompt: str, user_prompt: str,
+        response_schema: dict | None = None,
+    ) -> ProviderResult:
+        if self.supports_json_schema:
+            response_format = response_format_for(response_schema)
+        else:
+            system_prompt = schema_as_text(system_prompt, response_schema)
+            response_format = response_format_for(None)
         kwargs = {
             "model": self.model_id,
             "max_completion_tokens": self.max_tokens,
@@ -72,10 +114,12 @@ class OpenAIProvider:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
-            "response_format": {"type": "json_object"},
+            "response_format": response_format,
         }
         if _is_gpt5_family(self.model_id):
             kwargs["reasoning_effort"] = "none"  # reasoning off for structured retrieval
+        if self.extra_body:
+            kwargs["extra_body"] = dict(self.extra_body)
         resp = self.client.chat.completions.create(**kwargs)
         text = resp.choices[0].message.content or ""
         # See common.llm.openai_batch._strip_nul_from_json_text for why.

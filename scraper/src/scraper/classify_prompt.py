@@ -1,8 +1,23 @@
 """Prompt constants for the URL classifier. Kept isolated so prompt iteration
 means editing one file and bumping PROMPT_VERSION."""
 
-PROMPT_VERSION = "v4"
+# v5: the reply is schema-constrained to MODEL_LABELS, and the prompt no longer
+# hardcodes a category count.
+PROMPT_VERSION = "v5"
 
+# The labels the model chooses from; SYSTEM_PROMPT documents exactly these.
+MODEL_LABELS = (
+    "likely_drink_recipe",
+    "likely_food_recipe",
+    "likely_drink_article",
+    "likely_food_article",
+    "likely_junk",
+    "likely_user_generated",
+)
+
+# Every label a page can carry. The two extra ones are assigned only by the
+# operator's rule-based relabelling (scripts/manual_reclassification.py), never
+# by the model, so the prompt does not describe them.
 LABELS = (
     "likely_drink_recipe",
     "likely_food_recipe",
@@ -14,18 +29,20 @@ LABELS = (
     "likely_user_generated",
 )
 
+# Strict-mode shaped (OpenAI structured outputs needs additionalProperties).
 RESPONSE_SCHEMA = {
     "type": "object",
     "properties": {
         "label": {
             "type": "string",
-            "enum": list(LABELS),
+            "enum": list(MODEL_LABELS),
         }
     },
     "required": ["label"],
+    "additionalProperties": False,
 }
 
-SYSTEM_PROMPT = """You classify a URL into exactly one of six categories by reading the URL like English. Do not match keywords in the slug — read it as a sentence and decide what the page at that URL is most likely to be.
+SYSTEM_PROMPT = """You classify a URL into exactly one of the categories below by reading the URL like English. Do not match keywords in the slug — read it as a sentence and decide what the page at that URL is most likely to be.
 
 Categories:
 - likely_drink_recipe: an individual drink recipe (alcoholic or non-alcoholic). A single drink name, with a mixing method or drink ingredients.
@@ -147,7 +164,7 @@ URL: https://www.diffordsguide.com/producer/1100/hendricks-gin-palace-distillery
 Sitemap: https://www.diffordsguide.com/sitemap/gb.xml
 Answer: likely_drink_article   (brand story under a producer path — substantive editorial, not a landing page)
 
-Return JSON of the form {"label": "<one of the six labels>"}. Return only one label."""
+Return JSON of the form {"label": "<one of the category labels above>"}. Return only one label."""
 
 
 def build_user_message(url: str, sitemap_source: str | None) -> str:

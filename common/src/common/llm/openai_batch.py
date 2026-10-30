@@ -18,6 +18,7 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 
 from .batch_provider import BatchRequest, BatchResult, BatchStatus, BatchSubmission
+from .openai import response_format_for
 
 DEFAULT_MODEL = "gpt-5.4-mini"
 # gpt-5-family charges reasoning tokens against max_completion_tokens; see
@@ -57,7 +58,6 @@ class OpenAIBatchProvider:
         body_kwargs: dict = {
             "model": self.model_id,
             "max_completion_tokens": self.max_tokens,
-            "response_format": {"type": "json_object"},
         }
         if _is_gpt5_family(self.model_id):
             body_kwargs["reasoning_effort"] = "none"  # reasoning off for structured retrieval
@@ -68,6 +68,7 @@ class OpenAIBatchProvider:
                 "url": "/v1/chat/completions",
                 "body": {
                     **body_kwargs,
+                    "response_format": response_format_for(r.response_schema),
                     "messages": [
                         {"role": "system", "content": r.system_prompt},
                         {"role": "user", "content": r.user_prompt},

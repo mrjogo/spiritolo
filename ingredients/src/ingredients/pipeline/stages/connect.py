@@ -34,7 +34,8 @@ from ingredients.reviews.model import insert_review
 from ingredients.taxonomy import TaxonomyError, connect_place
 
 STAGE = "connect-nodes"
-CONNECT_VERSION = "v1"
+# v2: per-item prompt + answer schema for the packed envelope.
+CONNECT_VERSION = "v2"
 
 # How many candidate parents to surface to the model per node.
 _CANDIDATE_LIMIT = 8
@@ -51,21 +52,23 @@ categories and definitional types at the top (e.g. "spirits", "whiskey",
 "lime juice", "demerara syrup"), and manufacturer brands / specific product
 releases at the leaves (e.g. "buffalo trace", "eagle rare 10").
 
-You receive one node to place:
-- its name and slug,
-- a list of CANDIDATE PARENT nodes already live in the taxonomy, each with a slug
-  and display name — plausible broader categories the node could sit under.
+Each item's `input` is one node to place — {"name", "slug",
+"candidate_parents"} — where candidate_parents lists nodes already live in the
+taxonomy, each with a slug and display name: plausible broader categories the
+node could sit under.
 
-Return a single JSON object, no commentary, choosing ONE of:
+Each item's `answer` is ONE of these two JSON objects:
 
 1. PLACE the node — give the parent slug(s) it belongs directly under, its
    node_kind, and whether it is a cluster-identity node:
-   {"node_kind": "brand"|"expression"|null,
+   {"action": "place",
+    "node_kind": "brand"|"expression"|null,
     "parent_slugs": ["<parent-slug>", ...],
     "is_cluster_node": false}
 
 2. ABSTAIN when you cannot confidently place it (no good parent, unsure of kind):
-   {"action": "uncertain"}
+   {"action": "uncertain", "node_kind": null, "parent_slugs": [],
+    "is_cluster_node": false}
 
 Rules:
 - node_kind is STRUCTURAL: "brand" for a manufacturer's brand line, "expression"
@@ -77,9 +80,20 @@ Rules:
 - is_cluster_node is almost always false. The cluster antichain is
   curator-controlled — default false and only set true when you are certain the
   node is itself a drink-identity category with no cluster ancestor.
-- Prefer {"action": "uncertain"} over guessing.
-- Output JSON only. No prose, no markdown fences.
+- Prefer "uncertain" over guessing.
 """
+
+CONNECT_ANSWER_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "action": {"type": "string", "enum": ["place", "uncertain"]},
+        "node_kind": {"type": ["string", "null"], "enum": ["brand", "expression", None]},
+        "parent_slugs": {"type": "array", "items": {"type": "string"}},
+        "is_cluster_node": {"type": "boolean"},
+    },
+    "required": ["action", "node_kind", "parent_slugs", "is_cluster_node"],
+    "additionalProperties": False,
+}
 
 
 def _tokens(name: str) -> list[str]:
@@ -300,7 +314,9 @@ def connect_stage_fn(
 
         answers: dict[str, Any] = {}
         if providers is not None and items:
-            answers = providers.resolve(items, system_prompt=CONNECT_PROMPT).resolved
+            answers = providers.resolve(
+                items, system_prompt=CONNECT_PROMPT, answer_schema=CONNECT_ANSWER_SCHEMA
+            ).resolved
 
         for nid in chunk:
             if nid not in cand_by_node:
