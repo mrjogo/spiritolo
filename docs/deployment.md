@@ -65,7 +65,7 @@ Non-secret configuration is plain Railway variables on the service:
 | `LOG_LEVEL` | `INFO` |
 | `LITESTREAM_BUCKET`, `LITESTREAM_ENDPOINT`, `LITESTREAM_REGION`, `LITESTREAM_ACCESS_KEY_ID`, `LITESTREAM_SECRET_ACCESS_KEY` | reference variables → `${{spiritolo-litestream.BUCKET}}` etc., read by `litestream.yml` (replica under `spiritolo/`); unset `LITESTREAM_BUCKET` boots without replication |
 | `CORPUS_BUCKET`, `CORPUS_ENDPOINT`, `CORPUS_REGION`, `CORPUS_ACCESS_KEY_ID`, `CORPUS_SECRET_ACCESS_KEY`, optional `CORPUS_URL_STYLE` | reference variables → `${{spiritolo-corpus.*}}`, read by the extract stage |
-| `OLLAMA_BASE_URL`, `TAILSCALE_AUTHKEY` | only if a tailnet Ollama is used |
+| `LOCAL_LLM_BASE_URL`, `LOCAL_LLM_MODEL`, optional `LOCAL_LLM_EXTRA_BODY` | the free `local` tier: barbot's LM Studio over the tailnet, e.g. `http://barbot:1234` and `qwen/qwen3-14b` (see [pipeline.md](pipeline.md#local-llm-tier-lm-studio-on-barbot)); needs `TAILSCALE_AUTHKEY` in the vault. `OLLAMA_BASE_URL` is still read as a fallback for one release |
 
 Secrets never live in Railway variables. [`secrets.env`](../secrets.env) holds
 `op://vault/item/field` references; the entrypoint runs the app under

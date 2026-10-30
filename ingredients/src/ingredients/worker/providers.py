@@ -68,6 +68,8 @@ class ProviderUnavailable(Exception):
 
 def _is_fatal(exc: Exception) -> bool:
     """A provider error not worth retrying — an explicit non-retryable status."""
+    if getattr(exc, "fatal", None) is not None:
+        return bool(exc.fatal)  # the provider classified it (e.g. LocalLLMError)
     return getattr(exc, "status_code", None) in _FATAL_STATUS_CODES
 
 

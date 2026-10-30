@@ -132,3 +132,125 @@ What a failure looks like in the report:
 - The run ends `done` with zero names attached by the model and a non-zero
   cost: replies came back in a shape the envelope decoder couldn't read. Look
   for `LLM pack … failed` lines in the output.
+
+## Local LLM tier (LM Studio on barbot)
+
+The free `local` LLM tier is any **OpenAI-compatible** server: the executor
+posts to `<LOCAL_LLM_BASE_URL>/v1/chat/completions` and knows nothing about
+which runtime answers ([providers_local.py](../ingredients/src/ingredients/worker/providers_local.py)).
+Barbot, the GPU box on the tailnet, runs LM Studio, so that is the setup below;
+an Ollama host works the same way at port 11434. Runs assembled before this
+tier carry `llm_provider = 'ollama'`, which is still accepted as an alias for
+`local`.
+
+| Variable (Railway, plain) | Meaning |
+|---|---|
+| `LOCAL_LLM_BASE_URL` | Server root, without `/v1`: `http://barbot:1234` (LM Studio) or `http://barbot:11434` (Ollama). Falls back to `OLLAMA_BASE_URL` for one release, then to `http://localhost:1234`. |
+| `LOCAL_LLM_MODEL` | Model a `local` run uses when it names none, in the runtime's own naming (LM Studio `qwen/qwen3-14b`, Ollama `qwen3:14b`). |
+| `LOCAL_LLM_TTL` | Idle seconds before LM Studio unloads a model this client JIT-loaded, sent per request as `ttl` so the server-wide default is untouched; default `300`, empty omits it. |
+| `LOCAL_LLM_REASONING_EFFORT` | Sent as `reasoning_effort`; default `none` (thinking off, see *Thinking* below). Empty string omits it. |
+| `LOCAL_LLM_EXTRA_BODY` | Optional JSON object merged into every request, for runtime-specific switches (see *Thinking* below). |
+| `TAILSCALE_AUTHKEY` (vault) | Joins the container to the tailnet; the entrypoint then sets `TS_LOCAL_PROXY`, and only the local client uses it. |
+
+The client also adapts two request details so the stock OpenAI provider works
+against either runtime: `response_format: json_object`, which LM Studio
+rejects, is sent as a JSON schema for "any object", and `max_completion_tokens`
+is mirrored to `max_tokens`. Its timeout is 10 minutes, since the first request
+for a model may wait for it to load.
+
+### Setting up barbot
+
+1. **Install LM Studio** and its `lms` CLI (the app installs it; `lms --help`
+   lists the commands your version has).
+2. **Run it headless at boot.** Start the background service with
+   `lms daemon up` (the headless "llmster" daemon) from a startup task, so the
+   server is up without anyone logging in, then `lms server start`. Check with
+   `lms status`.
+3. **Serve on the tailnet.** In *Developer → Server Settings*, enable *Serve on
+   Local Network* so the server listens beyond `localhost`, and keep the port
+   at 1234. Barbot's Tailscale ACL must let `tag:worker` (the Railway
+   container's tag, see `scripts/entrypoint.sh`) reach `barbot:1234`.
+4. **Enable JIT loading** (*Just-in-Time Model Loading*) and *Auto unload unused
+   JIT loaded models* with an idle TTL (e.g. 30 minutes). A run then loads its
+   model on the first request and frees the VRAM after it.
+5. **Download the model** in the app or with `lms get <model>`, and copy its id
+   from `lms ls` (or `curl http://barbot:1234/v1/models`) into `LOCAL_LLM_MODEL`.
+6. **If Ollama stays installed**, set `OLLAMA_KEEP_ALIVE=0` on barbot so it
+   never holds VRAM while LM Studio needs it.
+
+**Check from any tailnet machine:**
+`curl http://barbot:1234/v1/models` lists the downloaded models, then a `local`
+run of a few items in `/ops` should end with items `applied`.
+
+### Model profiles
+
+Settings for a model spiritolo uses live in the repo, in
+[local_profiles.py](../ingredients/src/ingredients/worker/local_profiles.py),
+not in LM Studio's defaults (which are server-wide and can change). For a
+profiled model the client, before every request, checks
+`GET /api/v1/models` and, if the model is not loaded, loads it with the
+profile's settings through `POST /api/v1/models/load` (context length, flash
+attention, parallel slots, KV offload, the idle TTL). It then sends the
+profile's sampling on each request. If the model is already loaded with other
+settings (someone loaded it by hand), the run fails with the difference;
+unload it (`lms unload <model>` inside the jail) and retry. KV-cache type and
+GPU layer count cannot be set over HTTP and stay at LM Studio's defaults (F16,
+full offload). LM Studio ignores `presence_penalty`, so Qwen's recommended 1.5
+has no effect there. A model with no profile runs on the server's defaults.
+
+To add a model: download it, add its id to `LOCAL_MODEL_PROFILES` with the
+model card's non-thinking sampling and a context length, and set
+`LOCAL_LLM_MODEL`.
+
+### Thinking
+
+A thinking model spends its token budget reasoning before it answers; with the
+2048-token cap the visible answer can come back empty. The local client
+therefore sends `reasoning_effort: "none"` on every request
+(`LOCAL_LLM_REASONING_EFFORT`; set it to an empty string to omit the field for
+a runtime that rejects it). Tested on barbot 2026-10-30 with LM Studio and
+Qwen3.5 9B: `reasoning_effort: "none"` gives zero reasoning tokens and a clean
+JSON answer, while `chat_template_kwargs: {"enable_thinking": false}` and
+`reasoning: {"effort": "none"}` are ignored (the model thinks through the whole
+budget and returns empty content; see also
+[lmstudio-bug-tracker#1990](https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1990)).
+LM Studio returns any reasoning separately in `reasoning_content`, never inside
+`content`. `LOCAL_LLM_EXTRA_BODY` stays available for other runtime flags.
+
+### Barbot as configured (2026-10-30)
+
+Barbot's LM Studio engine is shared with the forecash project and set up by
+that repo (`forecash/docs/lms-on-barbot.md`): a headless `llmster` in a
+network-less firejail, with `socat` forwarding port 1234 on `127.0.0.1` and
+the Tailscale IP. Spiritolo uses it as is:
+
+- Endpoint `http://100.91.131.62:1234` (`barbot.dace-barb.ts.net`; the bare
+  name `barbot` needs MagicDNS on the client). Not exposed on the LAN.
+- Model `qwen3.5-9b` (Qwen3.5 9B, Q8_0, about 9 GB of VRAM once loaded on the
+  16 GB RTX 4060 Ti). The jail cannot download, so models are fetched into
+  `~/.lmstudio/models/` by hand, not with `lms get`.
+- JIT loading on, idle TTL 5 minutes server-wide (`developer.jitModelTTL` in
+  `~/.lmstudio/settings.json`), previous JIT model unloaded on a new load.
+  Spiritolo also sends its TTL and thinking-off with each request, so it does
+  not depend on those. No presets or per-model configs apply to `qwen3.5-9b`
+  (context 8192, the server default). A cold first request loads the model in
+  about 15 s.
+- The GPU fits one model at a time: if forecash or another LM Studio holds a
+  model, a JIT load of `qwen3.5-9b` may not fit.
+- The engine does **not** start at boot. After a reboot run
+  `~/code-projects/forecash/scripts/lms-ros.sh up`.
+
+### When a local run fails
+
+The local client turns each failure into a message on the run
+(`error_code = 'provider_unavailable'`, `error_detail`), failing the run at
+once rather than retrying every pack:
+
+- *local LLM server not reachable at …* — LM Studio is not running (or the
+  tailnet path is down). Start it as above and retry the run.
+- *returned 400/404: model … could not be found or loaded* — the model id is
+  wrong, not downloaded, or does not fit in VRAM next to another loaded model.
+- *used its whole token budget without answering: it is thinking* — the model
+  ignored `reasoning_effort`; see *Thinking*.
+- *timed out* — the model is still loading or the GPU is busy; these are
+  retried, and only fail the run after three packs in a row.

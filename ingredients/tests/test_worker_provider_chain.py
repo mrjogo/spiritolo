@@ -166,10 +166,10 @@ def test_build_providers_uses_the_runs_provider_and_model():
 def test_available_providers_reflects_present_keys():
     from ingredients.worker.providers_local import available_providers
 
-    # ollama (local) is always available; hosted providers only with their key.
-    assert available_providers({}) == ["ollama"]
+    # local is always available; hosted providers only with their key.
+    assert available_providers({}) == ["local"]
     got = available_providers({"DEEPSEEK_API_KEY": "x", "OPENAI_API_KEY": "y"})
-    assert got[0] == "ollama"
+    assert got[0] == "local"
     assert "deepseek" in got and "openai" in got and "claude" not in got
 
 

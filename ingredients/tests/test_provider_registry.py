@@ -19,7 +19,7 @@ def test_ollama_always_available_even_with_no_keys():
     # `ollama` is the one id for the local LLM tier; always available, no key.
     prov = build_provider_for_run("ollama", None, env={})
     assert prov is not None
-    assert prov.model_id == "qwen3:14b"  # DEFAULT when the run named no model
+    assert prov.model_id == "qwen3.5-9b"  # DEFAULT when the run named no model
 
 
 def test_ollama_threads_the_runs_model():
