@@ -46,6 +46,8 @@ LOCAL_TIMEOUT = 600.0
 DEFAULT_LOCAL_BASE_URL = "http://localhost:1234"
 # Used when neither the run nor LOCAL_LLM_MODEL names a model.
 DEFAULT_LOCAL_MODEL = "qwen3:14b"
+# Idle unload for a model this client JIT-loads (see local_ttl_seconds).
+DEFAULT_LOCAL_TTL_SECONDS = 300
 # Thinking off by default (see local_reasoning_effort).
 DEFAULT_LOCAL_REASONING_EFFORT = "none"
 # Provider ids that select the local tier. `ollama` is what runs assembled
@@ -117,13 +119,90 @@ def local_reasoning_effort(env: Env | None = None) -> str | None:
     return value or None
 
 
+def local_ttl_seconds(env: Env | None = None) -> int | None:
+    """``LOCAL_LLM_TTL``: idle seconds before LM Studio unloads a model this
+    client JIT-loaded, sent per request as ``ttl`` so spiritolo's setting never
+    touches the server-wide default. Defaults to 300; an empty string omits it."""
+    raw = _env(env).get("LOCAL_LLM_TTL", str(DEFAULT_LOCAL_TTL_SECONDS))
+    if not raw:
+        return None
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise ValueError(f"LOCAL_LLM_TTL must be a number of seconds, got {raw!r}") from exc
+
+
+class LocalLLMError(Exception):
+    """A local-tier failure with a message that says what to check.
+
+    ``fatal`` errors (server not running, model can't load, the model spends its
+    whole budget thinking) fail the run at once with this message instead of
+    being retried pack after pack; ``status_code`` keeps an HTTP error's code."""
+
+    def __init__(self, message: str, *, fatal: bool, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.fatal = fatal
+        self.status_code = status_code
+
+
+_RUNBOOK = "see docs/pipeline.md#local-llm-tier-lm-studio-on-barbot"
+
+
+def _translate_error(exc: Exception, base_url: str, model: str) -> Exception:
+    import openai
+
+    if isinstance(exc, openai.APITimeoutError):
+        return LocalLLMError(
+            f"local LLM server at {base_url} timed out (model {model!r} may still be "
+            "loading, or the GPU is busy); retrying", fatal=False,
+        )
+    if isinstance(exc, openai.APIConnectionError):
+        return LocalLLMError(
+            f"local LLM server not reachable at {base_url}: is LM Studio running "
+            f"and reachable over the tailnet? ({_RUNBOOK}; underlying error: "
+            f"{exc.__cause__ or exc})", fatal=True,
+        )
+    if isinstance(exc, openai.APIStatusError):
+        code = exc.status_code
+        hint = (
+            f"model {model!r} could not be found or loaded: is it downloaded, and "
+            "does it fit in VRAM next to whatever else is loaded?"
+            if code in (400, 404) else "the local server rejected the request"
+        )
+        return LocalLLMError(
+            f"local LLM server at {base_url} returned {code}: {hint} ({exc.message})",
+            fatal=code < 500, status_code=code,
+        )
+    return exc
+
+
+def _check_answered(resp: Any, model: str) -> None:
+    """A reply cut off with no content at all means the model reasoned through the
+    whole token budget, not that it wrote bad JSON."""
+    choice = (getattr(resp, "choices", None) or [None])[0]
+    if choice is None:
+        return
+    content = getattr(choice.message, "content", None)
+    if not content and getattr(choice, "finish_reason", None) == "length":
+        raise LocalLLMError(
+            f"local model {model!r} used its whole token budget without answering: "
+            "it is thinking. Set LOCAL_LLM_REASONING_EFFORT=none (the default) or "
+            f"turn thinking off for the model ({_RUNBOOK})", fatal=True,
+        )
+
+
 class _Completions:
     def __init__(
-        self, inner: Any, extra_body: dict[str, Any], reasoning_effort: str | None = None
+        self,
+        inner: Any,
+        extra_body: dict[str, Any],
+        reasoning_effort: str | None = None,
+        base_url: str = "",
     ) -> None:
         self._inner = inner
         self._extra_body = extra_body
         self._reasoning_effort = reasoning_effort
+        self._base_url = base_url
 
     def create(self, **kwargs: Any) -> Any:
         fmt = kwargs.get("response_format")
@@ -135,7 +214,16 @@ class _Completions:
             kwargs["reasoning_effort"] = self._reasoning_effort
         if self._extra_body:
             kwargs["extra_body"] = {**self._extra_body, **(kwargs.get("extra_body") or {})}
-        return self._inner.create(**kwargs)
+        model = kwargs.get("model", "")
+        try:
+            resp = self._inner.create(**kwargs)
+        except Exception as exc:
+            translated = _translate_error(exc, self._base_url, model)
+            if translated is exc:
+                raise
+            raise translated from exc
+        _check_answered(resp, model)
+        return resp
 
 
 class _Chat:
@@ -155,14 +243,24 @@ class _LocalChatClient:
       OpenAI-compatible servers read instead.
     - ``reasoning_effort`` (``LOCAL_LLM_REASONING_EFFORT``, default ``none``) is
       added unless the caller set one, so a thinking model answers directly.
-    - ``LOCAL_LLM_EXTRA_BODY`` is merged in as ``extra_body``.
+    - ``ttl`` (``LOCAL_LLM_TTL``, default 300 s) and ``LOCAL_LLM_EXTRA_BODY``
+      are merged in as ``extra_body``.
+    - Transport and HTTP errors become a ``LocalLLMError`` that names what to
+      check (server down, model not loadable), and a reply that spent the whole
+      budget thinking is reported as such rather than as malformed JSON.
     """
 
     def __init__(
-        self, inner: Any, extra_body: dict[str, Any], reasoning_effort: str | None = None
+        self,
+        inner: Any,
+        extra_body: dict[str, Any],
+        reasoning_effort: str | None = None,
+        base_url: str = "",
     ) -> None:
         self._inner = inner
-        self.chat = _Chat(_Completions(inner.chat.completions, extra_body, reasoning_effort))
+        self.chat = _Chat(
+            _Completions(inner.chat.completions, extra_body, reasoning_effort, base_url)
+        )
 
     @property
     def base_url(self) -> Any:
@@ -186,18 +284,22 @@ def build_local_provider(
 
     e = _env(env)
     extra_body = local_extra_body(e)
+    ttl = local_ttl_seconds(e)
+    if ttl is not None:
+        extra_body = {"ttl": ttl, **extra_body}
+    base_url = local_base_url(e)
     factory = httpx.Client if client_factory is None else client_factory
     sdk = openai.OpenAI(
         # Neither runtime checks the key, but the SDK requires one.
         api_key=e.get("LOCAL_LLM_API_KEY") or "local",
-        base_url=local_base_url(e) + "/v1",
+        base_url=base_url + "/v1",
         http_client=factory(**local_client_kwargs(e)),
         # The chain retries a pack itself; an SDK retry would re-send a long
         # local generation that timed out.
         max_retries=0,
     )
     provider = OpenAIProvider(
-        client=_LocalChatClient(sdk, extra_body, local_reasoning_effort(e)),
+        client=_LocalChatClient(sdk, extra_body, local_reasoning_effort(e), base_url),
         model_id=model_id or e.get("LOCAL_LLM_MODEL") or DEFAULT_LOCAL_MODEL,
     )
     provider.cost_per_call = 0  # type: ignore[attr-defined]  # local is unmetered

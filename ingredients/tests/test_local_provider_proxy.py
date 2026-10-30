@@ -21,7 +21,9 @@ import json
 import httpx
 import pytest
 from common.llm.openai import OpenAIProvider
+from ingredients.worker.providers import ProviderChain, ProviderUnavailable
 from ingredients.worker.providers_local import (
+    LocalLLMError,
     available_providers,
     build_claude_http_client,
     build_local_provider,
@@ -227,3 +229,87 @@ def test_local_reasoning_effort_is_configurable_and_omittable():
     env = {"LOCAL_LLM_REASONING_EFFORT": ""}
     build_local_provider(client_factory=fac, env=env).resolve(system_prompt="s json", user_prompt="u")
     assert "reasoning_effort" not in fac.body()
+
+
+def test_local_ttl_is_sent_per_request():
+    fac = TransportFactory()
+    build_local_provider(client_factory=fac, env={}).resolve(system_prompt="s json", user_prompt="u")
+    assert fac.body()["ttl"] == 300
+
+    fac = TransportFactory()
+    env = {"LOCAL_LLM_TTL": ""}
+    build_local_provider(client_factory=fac, env=env).resolve(system_prompt="s json", user_prompt="u")
+    assert "ttl" not in fac.body()
+
+
+class HandlerFactory(TransportFactory):
+    """A transport whose answer (or failure) is a callable of the request."""
+
+    def __init__(self, handler) -> None:
+        super().__init__()
+        self._handler = handler
+
+    def _handle(self, request: httpx.Request) -> httpx.Response:
+        self.requests.append(request)
+        return self._handler(request)
+
+
+def _refuse(request):
+    raise httpx.ConnectError("[Errno 111] Connection refused", request=request)
+
+
+def test_server_down_is_a_clear_fatal_error():
+    prov = build_local_provider(
+        client_factory=HandlerFactory(_refuse), env={"LOCAL_LLM_BASE_URL": "http://barbot:1234"}
+    )
+    with pytest.raises(LocalLLMError) as info:
+        prov.resolve(system_prompt="s json", user_prompt="u")
+    assert info.value.fatal
+    assert "not reachable at http://barbot:1234" in str(info.value)
+    assert "LM Studio running" in str(info.value)
+
+
+def test_server_down_fails_the_run_once_with_that_message():
+    # Fatal, so the chain neither retries nor parks pack after pack: the first
+    # pack raises ProviderUnavailable carrying the explanation.
+    fac = HandlerFactory(_refuse)
+    prov = build_local_provider(client_factory=fac, env={"LOCAL_LLM_BASE_URL": "http://barbot:1234"})
+    chain = ProviderChain(tiers=[("local", prov)], pack_size=1)
+    from common.providers.packing import Item
+
+    with pytest.raises(ProviderUnavailable, match="LM Studio running"):
+        chain.resolve([Item(id=str(i), payload="x") for i in range(5)], system_prompt="p")
+    assert len(fac.requests) == 1
+
+
+def test_model_that_cannot_load_names_the_model():
+    def not_found(request):
+        return httpx.Response(404, json={"error": {"message": "Model qwen9 not found"}})
+
+    prov = build_local_provider(client_factory=HandlerFactory(not_found), env={}, model_id="qwen9")
+    with pytest.raises(LocalLLMError) as info:
+        prov.resolve(system_prompt="s json", user_prompt="u")
+    assert info.value.fatal and info.value.status_code == 404
+    assert "'qwen9' could not be found or loaded" in str(info.value)
+
+
+def test_server_error_is_retryable():
+    def boom(request):
+        return httpx.Response(500, json={"error": {"message": "oops"}})
+
+    prov = build_local_provider(client_factory=HandlerFactory(boom), env={})
+    with pytest.raises(LocalLLMError) as info:
+        prov.resolve(system_prompt="s json", user_prompt="u")
+    assert not info.value.fatal
+
+
+def test_reply_that_only_thought_is_reported_as_thinking():
+    def thought(request):
+        reply = _chat_reply("")
+        reply["choices"][0]["finish_reason"] = "length"
+        return httpx.Response(200, json=reply)
+
+    prov = build_local_provider(client_factory=HandlerFactory(thought), env={})
+    with pytest.raises(LocalLLMError, match="without answering: it is thinking") as info:
+        prov.resolve(system_prompt="s json", user_prompt="u")
+    assert info.value.fatal

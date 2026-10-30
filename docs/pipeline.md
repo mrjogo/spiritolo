@@ -147,6 +147,7 @@ tier carry `llm_provider = 'ollama'`, which is still accepted as an alias for
 |---|---|
 | `LOCAL_LLM_BASE_URL` | Server root, without `/v1`: `http://barbot:1234` (LM Studio) or `http://barbot:11434` (Ollama). Falls back to `OLLAMA_BASE_URL` for one release, then to `http://localhost:1234`. |
 | `LOCAL_LLM_MODEL` | Model a `local` run uses when it names none, in the runtime's own naming (LM Studio `qwen/qwen3-14b`, Ollama `qwen3:14b`). |
+| `LOCAL_LLM_TTL` | Idle seconds before LM Studio unloads a model this client JIT-loaded, sent per request as `ttl` so the server-wide default is untouched; default `300`, empty omits it. |
 | `LOCAL_LLM_REASONING_EFFORT` | Sent as `reasoning_effort`; default `none` (thinking off, see *Thinking* below). Empty string omits it. |
 | `LOCAL_LLM_EXTRA_BODY` | Optional JSON object merged into every request, for runtime-specific switches (see *Thinking* below). |
 | `TAILSCALE_AUTHKEY` (vault) | Joins the container to the tailnet; the entrypoint then sets `TS_LOCAL_PROXY`, and only the local client uses it. |
@@ -208,10 +209,27 @@ the Tailscale IP. Spiritolo uses it as is:
 - Model `qwen3.5-9b` (Qwen3.5 9B, Q8_0, about 9 GB of VRAM once loaded on the
   16 GB RTX 4060 Ti). The jail cannot download, so models are fetched into
   `~/.lmstudio/models/` by hand, not with `lms get`.
-- JIT loading on, idle TTL 5 minutes (`developer.jitModelTTL` in
-  `~/.lmstudio/settings.json`), previous JIT model unloaded on a new load. A
-  cold first request loads the model in about 15 s.
+- JIT loading on, previous JIT model unloaded on a new load; both are
+  server-wide settings owned by the forecash setup. Spiritolo's own settings
+  (the 5-minute idle TTL, thinking off) travel with each request, so nothing
+  server-wide is tuned for spiritolo. A cold first request loads the model in
+  about 15 s.
 - The GPU fits one model at a time: if forecash or another LM Studio holds a
   model, a JIT load of `qwen3.5-9b` may not fit.
 - The engine does **not** start at boot. After a reboot run
   `~/code-projects/forecash/scripts/lms-ros.sh up`.
+
+### When a local run fails
+
+The local client turns each failure into a message on the run
+(`error_code = 'provider_unavailable'`, `error_detail`), failing the run at
+once rather than retrying every pack:
+
+- *local LLM server not reachable at …* — LM Studio is not running (or the
+  tailnet path is down). Start it as above and retry the run.
+- *returned 400/404: model … could not be found or loaded* — the model id is
+  wrong, not downloaded, or does not fit in VRAM next to another loaded model.
+- *used its whole token budget without answering: it is thinking* — the model
+  ignored `reasoning_effort`; see *Thinking*.
+- *timed out* — the model is still loading or the GPU is busy; these are
+  retried, and only fail the run after three packs in a row.
