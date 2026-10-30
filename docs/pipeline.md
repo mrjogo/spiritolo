@@ -182,6 +182,26 @@ for a model may wait for it to load.
 `curl http://barbot:1234/v1/models` lists the downloaded models, then a `local`
 run of a few items in `/ops` should end with items `applied`.
 
+### Model profiles
+
+Settings for a model spiritolo uses live in the repo, in
+[local_profiles.py](../ingredients/src/ingredients/worker/local_profiles.py),
+not in LM Studio's defaults (which are server-wide and can change). For a
+profiled model the client, before every request, checks
+`GET /api/v1/models` and, if the model is not loaded, loads it with the
+profile's settings through `POST /api/v1/models/load` (context length, flash
+attention, parallel slots, KV offload, the idle TTL). It then sends the
+profile's sampling on each request. If the model is already loaded with other
+settings (someone loaded it by hand), the run fails with the difference;
+unload it (`lms unload <model>` inside the jail) and retry. KV-cache type and
+GPU layer count cannot be set over HTTP and stay at LM Studio's defaults (F16,
+full offload). LM Studio ignores `presence_penalty`, so Qwen's recommended 1.5
+has no effect there. A model with no profile runs on the server's defaults.
+
+To add a model: download it, add its id to `LOCAL_MODEL_PROFILES` with the
+model card's non-thinking sampling and a context length, and set
+`LOCAL_LLM_MODEL`.
+
 ### Thinking
 
 A thinking model spends its token budget reasoning before it answers; with the

@@ -25,6 +25,7 @@ two places a local runtime differs from OpenAI's API (see its docstring).
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -33,6 +34,10 @@ import httpx
 from common.llm.claude import ClaudeProvider
 from common.llm.deepseek import build_deepseek_provider
 from common.llm.openai import OpenAIProvider
+
+from ingredients.worker.local_profiles import LocalModelProfile, profile_for
+
+log = logging.getLogger("ingredients.worker.providers_local")
 
 Env = Mapping[str, str]
 ClientFactory = Callable[..., Any]
@@ -191,6 +196,92 @@ def _check_answered(resp: Any, model: str) -> None:
         )
 
 
+def _model_key(entry: dict[str, Any]) -> str | None:
+    for k in ("key", "id", "model_key", "modelKey"):
+        if isinstance(entry.get(k), str):
+            return entry[k]
+    return None
+
+
+class _ModelLoader:
+    """Makes sure a profiled model is loaded with its checked-in load settings
+    (``local_profiles``) before each request, over LM Studio's REST API.
+
+    Not loaded → ``POST /api/v1/models/load`` with the profile. Loaded with the
+    profile's settings → nothing to do. Loaded with other settings (someone
+    loaded it by hand, or with the server's defaults) → a fatal error naming the
+    difference: LM Studio has no HTTP unload, and running on settings nobody
+    chose is what the profile exists to prevent. Checked before every request
+    because the idle TTL can unload the model between packs, and a JIT reload
+    would come back on the server's defaults."""
+
+    def __init__(
+        self, http: Any, base_url: str, profile: LocalModelProfile, ttl: int | None
+    ) -> None:
+        self._http = http
+        self._base_url = base_url
+        self._profile = profile
+        self._ttl = ttl
+
+    def _call(self, method: str, path: str, **kwargs: Any) -> Any:
+        try:
+            return self._http.request(method, self._base_url + path, **kwargs)
+        except httpx.TimeoutException as exc:
+            raise LocalLLMError(
+                f"local LLM server at {self._base_url} timed out on {path}; retrying",
+                fatal=False,
+            ) from exc
+        except httpx.TransportError as exc:
+            raise LocalLLMError(
+                f"local LLM server not reachable at {self._base_url}: is LM Studio running "
+                f"and reachable over the tailnet? ({_RUNBOOK}; underlying error: {exc})",
+                fatal=True,
+            ) from exc
+
+    def ensure(self, model: str) -> None:
+        resp = self._call("GET", "/api/v1/models")
+        if resp.status_code >= 400:
+            raise LocalLLMError(
+                f"{self._base_url} has no LM Studio model API (GET /api/v1/models "
+                f"returned {resp.status_code}), so {model!r}'s checked-in load "
+                "settings cannot be applied", fatal=True, status_code=resp.status_code,
+            )
+        body = resp.json()
+        entries = body.get("models", body.get("data", [])) if isinstance(body, dict) else body
+        entry = next((m for m in entries or [] if _model_key(m) == model), None)
+        if entry is None:
+            raise LocalLLMError(
+                f"model {model!r} is not downloaded on {self._base_url} ({_RUNBOOK})",
+                fatal=True,
+            )
+        wanted = self._profile.load
+        instances = entry.get("loaded_instances") or []
+        diffs = []
+        for inst in instances:
+            config = inst.get("config") or {}
+            diff = {k: config.get(k) for k, v in wanted.items() if config.get(k) != v}
+            if not diff:
+                return
+            diffs.append(diff)
+        if diffs:
+            got = ", ".join(f"{k}={v!r} (want {wanted[k]!r})" for k, v in diffs[0].items())
+            raise LocalLLMError(
+                f"model {model!r} is already loaded on {self._base_url} with settings "
+                f"that differ from its checked-in profile: {got}. Unload it "
+                f"(lms unload {model}) and retry the run", fatal=True,
+            )
+        load = {"model": model, **wanted}
+        if self._ttl is not None:
+            load["ttl_seconds"] = self._ttl
+        resp = self._call("POST", "/api/v1/models/load", json=load)
+        if resp.status_code >= 400:
+            raise LocalLLMError(
+                f"model {model!r} could not be loaded with its checked-in profile "
+                f"(returned {resp.status_code}: {resp.text[:300]}): does it fit in VRAM "
+                "next to whatever else is loaded?", fatal=True, status_code=resp.status_code,
+            )
+
+
 class _Completions:
     def __init__(
         self,
@@ -198,11 +289,13 @@ class _Completions:
         extra_body: dict[str, Any],
         reasoning_effort: str | None = None,
         base_url: str = "",
+        loader: _ModelLoader | None = None,
     ) -> None:
         self._inner = inner
         self._extra_body = extra_body
         self._reasoning_effort = reasoning_effort
         self._base_url = base_url
+        self._loader = loader
 
     def create(self, **kwargs: Any) -> Any:
         fmt = kwargs.get("response_format")
@@ -215,6 +308,8 @@ class _Completions:
         if self._extra_body:
             kwargs["extra_body"] = {**self._extra_body, **(kwargs.get("extra_body") or {})}
         model = kwargs.get("model", "")
+        if self._loader is not None:
+            self._loader.ensure(model)
         try:
             resp = self._inner.create(**kwargs)
         except Exception as exc:
@@ -256,10 +351,11 @@ class _LocalChatClient:
         extra_body: dict[str, Any],
         reasoning_effort: str | None = None,
         base_url: str = "",
+        loader: _ModelLoader | None = None,
     ) -> None:
         self._inner = inner
         self.chat = _Chat(
-            _Completions(inner.chat.completions, extra_body, reasoning_effort, base_url)
+            _Completions(inner.chat.completions, extra_body, reasoning_effort, base_url, loader)
         )
 
     @property
@@ -279,28 +375,45 @@ def build_local_provider(
 
     ``model_id`` (the run's ``jobs.llm_model``) selects the model, in the
     runtime's own naming (LM Studio ``qwen/qwen3-14b``, Ollama ``qwen3:14b``);
-    a falsy value falls back to ``LOCAL_LLM_MODEL``, then ``DEFAULT_LOCAL_MODEL``."""
+    a falsy value falls back to ``LOCAL_LLM_MODEL``, then ``DEFAULT_LOCAL_MODEL``.
+
+    A model with a checked-in profile (``local_profiles``) is loaded with the
+    profile's settings and sent its sampling on every request, so nothing
+    depends on the server's defaults; ``LOCAL_LLM_EXTRA_BODY`` still wins."""
     import openai
 
     e = _env(env)
-    extra_body = local_extra_body(e)
+    model = model_id or e.get("LOCAL_LLM_MODEL") or DEFAULT_LOCAL_MODEL
+    profile = profile_for(model)
     ttl = local_ttl_seconds(e)
+    extra_body: dict[str, Any] = {}
     if ttl is not None:
-        extra_body = {"ttl": ttl, **extra_body}
+        extra_body["ttl"] = ttl
+    if profile is not None:
+        extra_body.update(profile.sampling)
+    else:
+        log.warning("local model %r has no checked-in profile; using the server's defaults", model)
+    extra_body.update(local_extra_body(e))
     base_url = local_base_url(e)
     factory = httpx.Client if client_factory is None else client_factory
+    http = factory(**local_client_kwargs(e))
+    loader = (
+        _ModelLoader(http, base_url, profile, ttl)
+        if profile is not None and profile.load
+        else None
+    )
     sdk = openai.OpenAI(
         # Neither runtime checks the key, but the SDK requires one.
         api_key=e.get("LOCAL_LLM_API_KEY") or "local",
         base_url=base_url + "/v1",
-        http_client=factory(**local_client_kwargs(e)),
+        http_client=http,
         # The chain retries a pack itself; an SDK retry would re-send a long
         # local generation that timed out.
         max_retries=0,
     )
     provider = OpenAIProvider(
-        client=_LocalChatClient(sdk, extra_body, local_reasoning_effort(e), base_url),
-        model_id=model_id or e.get("LOCAL_LLM_MODEL") or DEFAULT_LOCAL_MODEL,
+        client=_LocalChatClient(sdk, extra_body, local_reasoning_effort(e), base_url, loader),
+        model_id=model,
     )
     provider.cost_per_call = 0  # type: ignore[attr-defined]  # local is unmetered
     return provider

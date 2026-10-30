@@ -21,6 +21,7 @@ import json
 import httpx
 import pytest
 from common.llm.openai import OpenAIProvider
+from ingredients.worker.local_profiles import LOCAL_MODEL_PROFILES
 from ingredients.worker.providers import ProviderChain, ProviderUnavailable
 from ingredients.worker.providers_local import (
     LocalLLMError,
@@ -313,3 +314,108 @@ def test_reply_that_only_thought_is_reported_as_thinking():
     with pytest.raises(LocalLLMError, match="without answering: it is thinking") as info:
         prov.resolve(system_prompt="s json", user_prompt="u")
     assert info.value.fatal
+
+
+# --- checked-in model profiles (ingredients.worker.local_profiles) ----------
+
+_QWEN = LOCAL_MODEL_PROFILES["qwen3.5-9b"]
+
+
+class FakeLMStudio:
+    """Routes LM Studio's REST model API plus chat completions; ``loaded`` is
+    the config of the loaded instance (None = not loaded)."""
+
+    def __init__(
+        self, loaded: dict | None = None, *, load_status: int = 200, downloaded: bool = True
+    ) -> None:
+        self.loaded = loaded
+        self.downloaded = downloaded
+        self.load_status = load_status
+        self.calls: list[tuple[str, str, dict | None]] = []
+
+    def __call__(self, request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content) if request.content else None
+        self.calls.append((request.method, request.url.path, body))
+        path = request.url.path
+        if path == "/api/v1/models":
+            instances = [] if self.loaded is None else [{"id": "qwen3.5-9b", "config": self.loaded}]
+            models = [{"key": "qwen2.5-14b-instruct", "loaded_instances": []}]
+            if self.downloaded:
+                models.append({"key": "qwen3.5-9b", "loaded_instances": instances})
+            return httpx.Response(200, json={"models": models})
+        if path == "/api/v1/models/load":
+            if self.load_status >= 400:
+                return httpx.Response(self.load_status, json={"error": "out of memory"})
+            self.loaded = {k: v for k, v in body.items() if k not in ("model", "ttl_seconds")}
+            return httpx.Response(200, json={"instance_id": body["model"]})
+        return httpx.Response(200, json=_chat_reply('{"results": []}'))
+
+    def paths(self) -> list[str]:
+        return [p for _, p, _ in self.calls]
+
+
+def _qwen(server: FakeLMStudio, env: dict | None = None):
+    return build_local_provider(
+        client_factory=HandlerFactory(server), env=env or {}, model_id="qwen3.5-9b"
+    )
+
+
+def test_profiled_model_is_loaded_with_its_checked_in_settings():
+    server = FakeLMStudio()
+    _qwen(server).resolve(system_prompt="s json", user_prompt="u")
+
+    assert server.paths() == ["/api/v1/models", "/api/v1/models/load", "/v1/chat/completions"]
+    load = server.calls[1][2]
+    assert load == {"model": "qwen3.5-9b", **_QWEN.load, "ttl_seconds": 300}
+
+
+def test_profiled_model_already_loaded_with_its_settings_is_reused():
+    server = FakeLMStudio(loaded={**_QWEN.load, "eval_batch_size": 2048})
+    _qwen(server).resolve(system_prompt="s json", user_prompt="u")
+    assert server.paths() == ["/api/v1/models", "/v1/chat/completions"]
+
+
+def test_profiled_model_loaded_with_other_settings_fails_clearly():
+    server = FakeLMStudio(loaded={**_QWEN.load, "context_length": 8192})
+    with pytest.raises(LocalLLMError, match=r"context_length=8192 \(want 16384\)") as info:
+        _qwen(server).resolve(system_prompt="s json", user_prompt="u")
+    assert info.value.fatal
+    assert "/v1/chat/completions" not in server.paths()
+
+
+def test_profile_load_failure_is_fatal():
+    server = FakeLMStudio(load_status=500)
+    with pytest.raises(LocalLLMError, match="could not be loaded with its checked-in profile") as info:
+        _qwen(server).resolve(system_prompt="s json", user_prompt="u")
+    assert info.value.fatal
+
+
+def test_profiled_model_not_downloaded_is_fatal():
+    with pytest.raises(LocalLLMError, match="not downloaded") as info:
+        _qwen(FakeLMStudio(downloaded=False)).resolve(system_prompt="s json", user_prompt="u")
+    assert info.value.fatal
+
+
+def test_profiled_model_sends_its_sampling_on_every_request():
+    server = FakeLMStudio()
+    _qwen(server).resolve(system_prompt="s json", user_prompt="u")
+    chat = server.calls[-1][2]
+    for key, value in _QWEN.sampling.items():
+        assert chat[key] == value, key
+    assert chat["reasoning_effort"] == "none"
+
+
+def test_extra_body_overrides_the_profile():
+    server = FakeLMStudio()
+    _qwen(server, env={"LOCAL_LLM_EXTRA_BODY": '{"temperature": 0}'}).resolve(
+        system_prompt="s json", user_prompt="u"
+    )
+    assert server.calls[-1][2]["temperature"] == 0
+
+
+def test_unprofiled_model_skips_the_model_api():
+    server = FakeLMStudio()
+    build_local_provider(
+        client_factory=HandlerFactory(server), env={}, model_id="qwen2.5-14b-instruct"
+    ).resolve(system_prompt="s json", user_prompt="u")
+    assert server.paths() == ["/v1/chat/completions"]
