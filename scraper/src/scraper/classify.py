@@ -120,7 +120,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--concurrency", type=int, default=4,
                    help="Concurrent in-flight provider requests (default: 4).")
     p.add_argument(
-        "--provider", choices=["ollama", "claude", "openai", "openai-decisions"],
+        "--provider",
+        choices=["ollama", "claude", "openai", "openai-decisions", "deepseek"],
         default="ollama",
         help="LLM provider for classification (default: ollama, free local). "
              "openai-decisions uses the Decisions API (gpt-6-luna), which also "
@@ -130,8 +131,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--model", default=None,
         help=(
             "Model id for the chosen provider. Defaults per provider: ollama "
-            f"{DEFAULT_OLLAMA_MODEL}, claude/openai their library defaults, "
-            "openai-decisions gpt-6-luna."
+            f"{DEFAULT_OLLAMA_MODEL}, claude/openai/deepseek their library "
+            "defaults, openai-decisions gpt-6-luna."
         ),
     )
     p.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Path to scraper.db.")
@@ -183,6 +184,14 @@ def _build_provider(args: argparse.Namespace):
     if provider_name == "ollama":
         from common.llm.ollama import OllamaProvider
         return OllamaProvider.from_env(model_id=model or DEFAULT_OLLAMA_MODEL)
+    if provider_name == "deepseek":
+        import os
+        from common.llm.deepseek import build_deepseek_provider
+        key = os.environ.get("DEEPSEEK_API_KEY")
+        if not key:
+            raise RuntimeError("DEEPSEEK_API_KEY not set. Export it before using this provider.")
+        kwargs = {"model_id": model} if model else {}
+        return build_deepseek_provider(api_key=key, **kwargs)
     if provider_name == "openai-decisions":
         from common.llm.openai_decisions import DecisionsProvider
         return DecisionsProvider.from_env(model_id=model) if model else DecisionsProvider.from_env()

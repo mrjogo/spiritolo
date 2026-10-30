@@ -659,3 +659,25 @@ def test_build_provider_ollama_default_model(monkeypatch):
     args = build_arg_parser().parse_args([])
     p = _build_provider(args)
     assert p.model_id == "qwen3:14b"
+
+
+def test_build_provider_deepseek(monkeypatch):
+    import openai
+    captured = {}
+    monkeypatch.setattr(openai, "OpenAI", lambda **kw: captured.update(kw) or object())
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ds")
+    args = build_arg_parser().parse_args(["--provider", "deepseek"])
+    p = _build_provider(args)
+    assert p.model_id == "deepseek-v4-flash"
+    assert p.supports_json_schema is False
+    assert p.extra_body == {"thinking": {"type": "disabled"}}
+    assert captured["base_url"] == "https://api.deepseek.com"
+    assert captured["api_key"] == "sk-ds"
+    args = build_arg_parser().parse_args(["--provider", "deepseek", "--model", "deepseek-flash"])
+    assert _build_provider(args).model_id == "deepseek-flash"
+
+
+def test_build_provider_deepseek_requires_key(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    with pytest.raises(RuntimeError):
+        _build_provider(build_arg_parser().parse_args(["--provider", "deepseek"]))
