@@ -112,10 +112,10 @@ def test_call_cost_self_report_wins_and_local_is_free():
 def test_tiers_are_in_picker_order_with_defaults():
     tiers = pricing.llm_tiers()
     assert [t.provider for t in tiers] == ["local", "deepseek", "openai", "anthropic"]
-    assert tiers[0].model == "qwen3:14b" and not tiers[0].metered
+    assert tiers[0].model == "qwen3.5-9b" and not tiers[0].metered
     assert tiers[-1].model == "claude-haiku-5-5" and tiers[-1].metered
     assert tiers[-1].label == "Claude · claude-haiku-5-5 — metered"
-    assert tiers[0].label == "Local · qwen3:14b — free (local)"
+    assert tiers[0].label == "Local · qwen3.5-9b — free (local)"
     assert pricing.llm_tiers(local_model="qwen/qwen3-14b")[0].model == "qwen/qwen3-14b"
 
 
@@ -159,3 +159,11 @@ def test_deepseek_flash_doubles_in_weekday_peak_hours(model):
     assert per_mtok_in(utc(24, 2)) == pytest.approx(15)   # Sat 02:30 off-peak
     out = pricing.estimate_call_cents("deepseek", model, 0, 1_000_000, at=utc(21, 2))
     assert out == pytest.approx(120)
+
+
+def test_local_default_mirrors_the_worker_default():
+    import importlib.util
+    if importlib.util.find_spec("ingredients") is None:
+        pytest.skip("ingredients not installed")
+    from ingredients.worker.providers_local import DEFAULT_LOCAL_MODEL
+    assert pricing.LOCAL_DEFAULT_MODEL == DEFAULT_LOCAL_MODEL

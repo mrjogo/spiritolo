@@ -28,7 +28,7 @@ LOCAL_PROVIDERS: frozenset[str] = frozenset({"local", "ollama"})
 LOCAL_PROVIDER = "local"
 # What the local tier offers when LOCAL_LLM_MODEL is unset (mirrors
 # ingredients.worker.providers_local.DEFAULT_LOCAL_MODEL).
-LOCAL_DEFAULT_MODEL = "qwen3:14b"
+LOCAL_DEFAULT_MODEL = "qwen3.5-9b"
 
 # The per-item token assumption behind every estimate: a packed LLM call costs
 # roughly this much per item (stage prompt amortized across the pack).
