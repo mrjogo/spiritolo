@@ -1,12 +1,12 @@
-"""OpenAI sync provider. Defaults to gpt-5.4-mini.
+"""OpenAI sync provider. Default model from ``common.providers.pricing``.
 
 For batch (50% off, ~24h SLA), see openai_batch.py.
 
-gpt-5-family models reason by default, charging reasoning tokens against
-`max_completion_tokens`. Our prompts are pure structured retrieval and need no
-reasoning, so we pin `reasoning_effort='none'` — which disables the reasoning
-trace entirely (GPT-5.1+, including the default gpt-5.4-mini) rather than merely
-minimizing it. That also frees the whole 2048-token budget for the JSON output;
+gpt-5- and gpt-6-family models reason by default, charging reasoning tokens
+against `max_completion_tokens`. Our prompts are pure structured retrieval and
+need no reasoning, so we pin `reasoning_effort='none'` — which disables the
+reasoning trace entirely (GPT-5.1+ and gpt-6) rather
+than merely minimizing it. That also frees the whole 2048-token budget for the JSON output;
 without disabling it, gpt-5.4-mini routinely returned empty content with
 finish_reason='length'.
 
@@ -23,15 +23,22 @@ import json
 import os
 from dataclasses import dataclass
 
+from common.providers.pricing import DEFAULT_MODEL as _DEFAULTS
+
 from .provider import ProviderResult
 
-DEFAULT_MODEL = "gpt-5.4-mini"
+DEFAULT_MODEL = _DEFAULTS["openai"]
 DEFAULT_MAX_TOKENS = 2048
 
+# Model-id prefix -> the reasoning_effort value that turns reasoning off.
+# Models outside these families (gpt-4o, DeepSeek's) reject the parameter.
+_REASONING_OFF: dict[str, str] = {"gpt-5": "none", "gpt-6": "none"}
 
-def _is_gpt5_family(model_id: str) -> bool:
-    """gpt-5/gpt-5-mini/gpt-5-nano accept reasoning_effort. Older models error."""
-    return model_id.startswith("gpt-5")
+
+def _reasoning_effort_off(model_id: str) -> str | None:
+    """The reasoning_effort that disables reasoning on ``model_id``, or ``None``
+    when the model takes no reasoning_effort at all."""
+    return next((v for p, v in _REASONING_OFF.items() if model_id.startswith(p)), None)
 
 
 def response_format_for(response_schema: dict | None) -> dict:
@@ -116,8 +123,9 @@ class OpenAIProvider:
             ],
             "response_format": response_format,
         }
-        if _is_gpt5_family(self.model_id):
-            kwargs["reasoning_effort"] = "none"  # reasoning off for structured retrieval
+        effort = _reasoning_effort_off(self.model_id)
+        if effort is not None:
+            kwargs["reasoning_effort"] = effort  # reasoning off for structured retrieval
         if self.extra_body:
             kwargs["extra_body"] = dict(self.extra_body)
         resp = self.client.chat.completions.create(**kwargs)

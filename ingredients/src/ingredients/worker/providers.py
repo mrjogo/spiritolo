@@ -40,6 +40,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from common.providers import ChainResult, TierResult, cost as _cost, packing as _packing
+from common.providers import pricing as _pricing
 from common.providers.packing import Item
 
 from ingredients.worker.cost import CostMeter
@@ -97,6 +98,13 @@ STAGE_PACK_SIZE: dict[str, int] = {
 def pack_size_for(stage: str) -> int:
     """The LLM pack size for ``stage`` (``DEFAULT_PACK_SIZE`` if unlisted)."""
     return STAGE_PACK_SIZE.get(stage, DEFAULT_PACK_SIZE)
+
+
+def _prompt_tokens(group: list[Item], system_prompt: str) -> int:
+    """A high estimate of one packed call's input tokens: the envelope
+    preamble, the stage prompt and the encoded items, as sent."""
+    text = _packing.ENVELOPE_INSTRUCTIONS + system_prompt + _packing.encode_request(group)
+    return _pricing.estimate_tokens(text)
 
 
 @dataclass
@@ -214,13 +222,12 @@ class ProviderChain:
         resolved: dict[str, Any],
         system_prompt: str,
         answer_schema: dict[str, Any] | None = None,
-    ) -> tuple[list[str], list[str], int, int, bool]:
-        unit = _cost.call_cost_cents(provider_id, provider)
-        metered = _cost.is_metered(unit)
+    ) -> tuple[list[str], list[str], int, float, bool]:
+        metered = _cost.is_metered(_cost.call_cost_cents(provider_id, provider))
         newly: list[str] = []
         parked: list[str] = []
         calls = 0
-        tier_cost = 0
+        tier_cost = 0.0
         consecutive_failures = 0
 
         for group in _packing.chunk(pending, self.pack_size):
@@ -230,6 +237,12 @@ class ProviderChain:
                 # pending for a later re-run.
                 parked.extend(it.id for it in group)
                 break
+            # Priced per pack: its measured prompt size and item count, at the
+            # rate in force right now.
+            unit = _cost.call_cost_cents(
+                provider_id, provider, items=len(group),
+                input_tokens=_prompt_tokens(group, system_prompt),
+            )
             if metered:
                 # Cost cap is enforced BEFORE the call, so a breaching chunk is
                 # never spent and its items stay unprocessed (raises out).

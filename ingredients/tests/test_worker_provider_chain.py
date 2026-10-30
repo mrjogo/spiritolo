@@ -144,6 +144,52 @@ def test_metered_tier_surfaces_cost():
     assert tier.metered is True
 
 
+@dataclass
+class _PricedProvider:
+    """A hosted provider with no cost self-report: priced from the table by
+    its model id and each pack's item count."""
+
+    model_id: str = "claude-haiku-5-5"
+
+    def resolve(self, *, system_prompt: str, user_prompt: str, **_: Any) -> ProviderResult:
+        ids = packing.decode_request(user_prompt)
+        rows = [{"id": i, "answer": i} for i in ids]
+        return ProviderResult(raw_text=packing.encode_response(rows), model_id=self.model_id)
+
+
+def test_hosted_tier_is_charged_per_pack_from_the_price_table():
+    # 13 items at pack size 10 -> packs of 10 and 3, each charged for its own
+    # measured prompt and item count, not one flat per-call unit.
+    from common.providers import pricing
+
+    meter = CostMeter(cap_cents=None)
+    chain = ProviderChain(tiers=[("anthropic", _PricedProvider())], pack_size=10, meter=meter)
+
+    res = chain.resolve([Item(str(i)) for i in range(13)])
+
+    from ingredients.worker.providers import _prompt_tokens
+
+    items = [Item(str(i)) for i in range(13)]
+    expected = sum(
+        pricing.estimate_call_cents(
+            "anthropic", "claude-haiku-5-5", _prompt_tokens(g, ""), len(g) * pricing.ITEM_OUTPUT_TOKENS
+        )
+        for g in (items[:10], items[10:])
+    )
+    assert res.metered is True
+    assert res.cost_cents == pytest.approx(expected)
+    assert meter.spent_cents == pytest.approx(expected)
+    assert meter.consultations == 2
+
+
+def test_fractional_charges_still_hit_the_cap():
+    # Sub-cent packs accumulate; the pack that would cross the cap isn't sent.
+    meter = CostMeter(cap_cents=0)
+    chain = ProviderChain(tiers=[("anthropic", _PricedProvider())], pack_size=10, meter=meter)
+    with pytest.raises(Exception, match="cost cap"):
+        chain.resolve([Item("1")])
+
+
 def test_build_providers_uses_the_runs_provider_and_model():
     # A job selecting claude+model builds a chain whose LLM tier carries exactly
     # that provider id and model, at the stage's pack size, bound to the cap.

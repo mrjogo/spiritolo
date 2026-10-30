@@ -13,8 +13,9 @@ The lifecycle mirrors the old loop so the ``jobs`` row reads the same in /ops:
     queued -> running -> done | failed | cancelled
 
 - ``progress`` is the stage_fn's returned counts; ``cost_actual_cents`` is the
-  SUM of the job's ``job_items.cost_cents`` (recomputed, so a re-run overwrites
-  rather than accumulates).
+  larger of the SUM of the job's ``job_items.cost_cents`` (recomputed, so a
+  re-run overwrites rather than accumulates) and what the run's cost meter
+  charged this pass (stages don't attribute LLM cost per item yet), rounded up.
 - Failures never escape: an unknown stage, a cost-cap abort, an unavailable
   provider or a stage exception each finalize the job ``failed`` with an
   ``error_code``.
@@ -27,6 +28,7 @@ The lifecycle mirrors the old loop so the ``jobs`` row reads the same in /ops:
 from __future__ import annotations
 
 import logging
+import math
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -162,6 +164,7 @@ def run_job(
         "running job %s (stage %s, provider %s)",
         job["id"], job["stage"], job.get("llm_provider") or "deterministic",
     )
+    providers = None
     try:
         providers = (
             providers_builder(job) if providers_builder is not None
@@ -171,18 +174,22 @@ def run_job(
             providers.should_stop = control.should_stop
         result = dispatch.run(job, conn, providers, stage_fns=stage_fns)
         if control.event.is_set():
-            _finalize(conn, job, "cancelled")
+            _finalize(conn, job, "cancelled", spent=_spent(providers))
         else:
-            _finalize(conn, job, "done", progress=result if isinstance(result, dict) else {})
+            _finalize(conn, job, "done", progress=result if isinstance(result, dict) else {},
+                      spent=_spent(providers))
     except UnknownStage as exc:
         _finalize(conn, job, "failed", error_code="unknown_stage", detail=str(exc))
     except CostCapExceeded as exc:
-        _finalize(conn, job, "failed", error_code="cost_cap_exceeded", detail=str(exc))
+        _finalize(conn, job, "failed", error_code="cost_cap_exceeded", detail=str(exc),
+                  spent=_spent(providers))
     except ProviderUnavailable as exc:
-        _finalize(conn, job, "failed", error_code="provider_unavailable", detail=str(exc))
+        _finalize(conn, job, "failed", error_code="provider_unavailable", detail=str(exc),
+                  spent=_spent(providers))
     except Exception as exc:  # noqa: BLE001 - a stage error must fail the job, never the executor
         log.exception("job %s (%s) failed", job["id"], job["stage"])
-        _finalize(conn, job, "failed", error_code="stage_error", detail=_error_detail(exc))
+        _finalize(conn, job, "failed", error_code="stage_error", detail=_error_detail(exc),
+                  spent=_spent(providers))
     finally:
         set_actor(conn, "system", None, "executor")
     state = conn.execute("select state from jobs where id = ?", (job["id"],)).fetchone()[0]
@@ -207,6 +214,12 @@ def drain(conn: Connection, **kwargs: Any) -> int:
     return n
 
 
+def _spent(providers: Any) -> float:
+    """What the run's cost meter charged (0 with no metered chain)."""
+    meter = getattr(providers, "meter", None)
+    return float(getattr(meter, "spent_cents", 0) or 0)
+
+
 def _error_detail(exc: BaseException) -> str:
     return f"{type(exc).__name__}: {exc}".splitlines()[0][:500]
 
@@ -219,6 +232,7 @@ def _finalize(
     progress: dict[str, Any] | None = None,
     error_code: str | None = None,
     detail: str | None = None,
+    spent: float = 0.0,
 ) -> None:
     # A stage may have died mid-transaction: roll back the open one first so the
     # finalize commits on its own. Items already committed survive.
@@ -232,10 +246,10 @@ def _finalize(
             progress          = coalesce(?, progress),
             error_code        = ?,
             error_detail      = ?,
-            cost_actual_cents = cast(round(coalesce(
-                (select sum(cost_cents) from job_items where job_id = ?), 0)) as integer)
+            cost_actual_cents = max(cast(round(coalesce(
+                (select sum(cost_cents) from job_items where job_id = ?), 0)) as integer), ?)
         where id = ?
         """,
         (state, jdump(progress) if progress is not None else None, error_code, detail,
-         job["id"], job["id"]),
+         job["id"], math.ceil(spent), job["id"]),
     )

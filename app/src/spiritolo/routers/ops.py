@@ -3,6 +3,7 @@ curation, executor health. Every route requires an admin session."""
 
 from __future__ import annotations
 
+import os
 import time
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
 
 from common.db import Connection, IntegrityError
+from common.providers import pricing
 
 from ingredients import runs as R
 from ingredients.reviews import ops as reviews
@@ -23,6 +25,7 @@ from .. import auth as A
 from .. import importdb
 from ..auth import Operator
 from ..deps import AppState, conn, require_admin, state
+from ..executor import available_providers
 from ..query import columns, decode_row, run_query
 
 router = APIRouter(prefix="/api/ops", tags=["ops"], dependencies=[Depends(require_admin)])
@@ -191,8 +194,21 @@ def eligible_pool_facets(body: dict[str, Any], c: Connection = Depends(conn)) ->
 
 
 @router.get("/estimate")
-def estimate(provider: str | None = None, model: str | None = None, items: int = 0) -> dict[str, Any]:
-    return {"cents": R.estimate_cents(provider, model, items)}
+def estimate(provider: str | None = None, model: str | None = None, items: int = 0,
+             stage: str | None = None) -> dict[str, Any]:
+    return {"cents": R.estimate_cents(provider, model, items, stage)}
+
+
+@router.get("/llm-tiers")
+def llm_tiers(request: Request) -> dict[str, Any]:
+    """The tiers a run may be pointed at, in picker order, priced from the one
+    table at the rate in force now. ``available`` is whether this process holds
+    the key to build that provider (the local tier always)."""
+    st: AppState = state(request)
+    env = st.executor.env if st.executor is not None else os.environ
+    have = {pricing.canonical_provider(p) for p in available_providers(env)}
+    tiers = pricing.llm_tiers(local_model=env.get("LOCAL_LLM_MODEL") or None)
+    return {"tiers": [pricing.tier_payload(t, t.provider in have) for t in tiers]}
 
 
 # ---------------------------------------------------------------- reviews
