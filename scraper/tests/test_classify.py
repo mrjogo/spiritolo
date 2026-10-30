@@ -5,7 +5,7 @@ import pytest
 from common.llm.provider import ProviderResult
 from scraper.classify import classify_one, run_classify_pool
 from scraper.db import Database
-from scraper.ollama_client import ClassificationResult
+from scraper.classify_client import ClassificationResult
 
 
 def _stub_provider(reply: str = '{"label": "likely_drink_recipe"}', model_id: str = "qwen3:14b") -> MagicMock:
@@ -30,7 +30,7 @@ def test_arg_parser_defaults():
     assert args.limit is None
     assert args.concurrency == 4
     assert args.model is None  # per-provider default, resolved in _build_provider
-    assert args.provider == "ollama"
+    assert args.provider == "local"
     assert args.review is False
     assert args.sample is False
 
@@ -655,10 +655,15 @@ def test_build_provider_openai_decisions(monkeypatch):
     assert _build_provider(args).model_id == "gpt-6-luna-2"
 
 
-def test_build_provider_ollama_default_model(monkeypatch):
+def test_build_provider_local_default_model(monkeypatch):
+    monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://barbot:1234")
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "qwen3.5-9b")
     args = build_arg_parser().parse_args([])
     p = _build_provider(args)
-    assert p.model_id == "qwen3:14b"
+    assert p.model_id == "qwen3.5-9b"
+    assert str(p.client.base_url).startswith("http://barbot:1234/v1")
+    p = _build_provider(build_arg_parser().parse_args(["--model", "other"]))
+    assert p.model_id == "other"
 
 
 def test_build_provider_deepseek(monkeypatch):

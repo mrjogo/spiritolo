@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from common.llm.provider import ProviderResult
-from scraper.ollama_client import ClassificationResult, classify_url
+from scraper.classify_client import ClassificationResult, classify_url
 
 
 def _stub_provider(reply: str) -> MagicMock:

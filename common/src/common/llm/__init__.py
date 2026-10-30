@@ -6,7 +6,6 @@ from .batch_provider import (
 from .batch_runner import BatchSubmitOutcome, ingest_batch, submit_batch
 from .claude import ClaudeProvider
 from .deepseek import build_deepseek_provider
-from .ollama import OllamaProvider
 from .openai import OpenAIProvider
 from .openai_batch import OpenAIBatchProvider
 from .provider import LLMProvider, ProviderResult
@@ -15,7 +14,7 @@ from .sidecar import Sidecar, SidecarMismatch, load_sidecar, mark_ingested, writ
 __all__ = [
     "BatchProvider", "BatchRequest", "BatchResult", "BatchStatus",
     "BatchSubmission", "BatchSubmitOutcome",
-    "ClaudeProvider", "LLMProvider", "OllamaProvider", "OpenAIProvider",
+    "ClaudeProvider", "LLMProvider", "OpenAIProvider",
     "OpenAIBatchProvider", "build_deepseek_provider",
     "ProviderResult",
     "Sidecar", "SidecarMismatch", "load_sidecar", "mark_ingested", "write_sidecar",

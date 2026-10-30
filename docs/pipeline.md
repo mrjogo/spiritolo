@@ -137,11 +137,12 @@ What a failure looks like in the report:
 
 The free `local` LLM tier is any **OpenAI-compatible** server: the executor
 posts to `<LOCAL_LLM_BASE_URL>/v1/chat/completions` and knows nothing about
-which runtime answers ([providers_local.py](../ingredients/src/ingredients/worker/providers_local.py)).
+which runtime answers ([common/llm/local.py](../common/src/common/llm/local.py); the executor's per-run factory is [providers_local.py](../ingredients/src/ingredients/worker/providers_local.py)).
+The URL classifier uses the same tier: `classify --provider local` (its default).
 Barbot, the GPU box on the tailnet, runs LM Studio, so that is the setup below;
 an Ollama host works the same way at port 11434. Runs assembled before this
 tier carry `llm_provider = 'ollama'`, which is still accepted as an alias for
-`local`.
+`local`; nothing else in the code speaks Ollama's own API any more.
 
 | Variable (Railway, plain) | Meaning |
 |---|---|
@@ -185,7 +186,7 @@ run of a few items in `/ops` should end with items `applied`.
 ### Model profiles
 
 Settings for a model spiritolo uses live in the repo, in
-[local_profiles.py](../ingredients/src/ingredients/worker/local_profiles.py),
+[local_profiles.py](../common/src/common/llm/local_profiles.py),
 not in LM Studio's defaults (which are server-wide and can change). For a
 profiled model the client, before every request, checks
 `GET /api/v1/models` and, if the model is not loaded, loads it with the

@@ -1,6 +1,7 @@
 // The LLM tiers a run may be pointed at. `provider`/`model` are exactly the
 // two values set_run_llm(job_id, provider, model) takes; `label` is the human
-// string shown in the picker and confirm modal. Only ollama is free (local);
+// string shown in the picker and confirm modal. Only the local tier (LM Studio
+// on barbot) is free;
 // every other tier is metered and routes the run through the approval gate.
 //
 // Cost is NOT modelled here — the estimate is computed server-side by the
@@ -18,10 +19,10 @@ export interface LlmTier {
 
 export const LLM_TIERS: LlmTier[] = [
   {
-    provider: 'ollama',
-    model: 'qwen3:14b',
-    label: 'Ollama · qwen3:14b — free (local)',
-    shortLabel: 'Ollama · qwen3:14b',
+    provider: 'local',
+    model: 'qwen3.5-9b',
+    label: 'LM Studio · qwen3.5-9b — free (local)',
+    shortLabel: 'LM Studio · qwen3.5-9b',
     metered: false,
   },
   {

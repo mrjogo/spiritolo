@@ -66,7 +66,7 @@ def test_build_user_message_handles_null_sitemap():
 
 def test_classify_url_sends_the_response_schema():
     from common.llm.provider import ProviderResult
-    from scraper.ollama_client import classify_url
+    from scraper.classify_client import classify_url
 
     seen = {}
 

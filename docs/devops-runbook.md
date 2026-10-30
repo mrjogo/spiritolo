@@ -75,7 +75,7 @@ var, field `password`, read by `secrets.env`:
 |---|---|
 | `SESSION_SECRET` | a long random string (`openssl rand -base64 48`) |
 | `DEEPSEEK_API_KEY` (and optionally `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`) | hosted LLM keys; `secrets.env` lists only the items that exist, since `op run` fails on a missing reference |
-| `TAILSCALE_AUTHKEY` | the Tailscale OAuth client secret (tag `tag:worker`), if a tailnet Ollama is used |
+| `TAILSCALE_AUTHKEY` | the Tailscale OAuth client secret (tag `tag:worker`), if the tailnet local LLM tier (LM Studio on barbot) is used |
 
 A **service account** (1Password → Developer → Service accounts) with read
 access to that vault only gives `OP_SERVICE_ACCOUNT_TOKEN`.

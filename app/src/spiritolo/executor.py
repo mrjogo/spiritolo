@@ -35,9 +35,9 @@ PROVIDER_KEYS = {
 
 
 def available_providers(env: Mapping[str, str] | None = None) -> list[str]:
-    """Provider ids this process can build a client for (``ollama`` always)."""
+    """Provider ids this process can build a client for (``local`` always)."""
     e = os.environ if env is None else env
-    out = ["ollama"]
+    out = ["local"]
     for pid, key in PROVIDER_KEYS.items():
         if e.get(key) and pid not in out:
             out.append(pid)

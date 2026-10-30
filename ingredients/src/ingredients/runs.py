@@ -43,7 +43,7 @@ def entity_type_for(stage: str) -> str:
 
 def estimate_cents(provider: str | None, model: str | None, items: int | None) -> int:
     """Rough per-item cost: (1200 input + 200 output tokens) at list price.
-    Local ``ollama`` (and no provider) is free."""
+    The local tier (``local``, or the old alias ``ollama``) and no provider are free."""
     n = items or 0
     per_item = {
         "deepseek": (1200 * 0.14 + 200 * 0.28) / 10000.0,

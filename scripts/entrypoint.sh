@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Service entrypoint. In order:
 #   1. (optional) Tailscale in userspace mode, only when TAILSCALE_AUTHKEY is set
-#      — it is the one route to a tailnet Ollama for the free local LLM tier.
+#      — it is the one route to barbot's LM Studio for the free local LLM tier.
 #   2. Restore the SQLite file from the Litestream replica if the volume is
 #      empty (a fresh volume, or a volume swap) — a no-op when the file exists.
 #   3. Hand off to Litestream, which replicates the database continuously and

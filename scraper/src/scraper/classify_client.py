@@ -2,7 +2,8 @@
 
 Prompt assembly stays here (in scraper, where the prompt module lives).
 The LLM call itself goes through common.llm.LLMProvider, so any sync
-provider — Ollama, Claude, OpenAI — can drive classify.
+provider — the local LM Studio tier, Claude, OpenAI, DeepSeek, the OpenAI
+Decisions API — can drive classify.
 """
 
 import json

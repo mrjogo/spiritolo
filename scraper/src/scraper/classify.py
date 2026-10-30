@@ -28,13 +28,11 @@ from scraper.classify_prompt import (
     build_user_message,
 )
 from scraper.db import Database
-from scraper.ollama_client import classify_url
+from scraper.classify_client import classify_url
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
 DEFAULT_EVAL_PATH = Path(__file__).resolve().parent.parent.parent / "eval" / "classify-urls.jsonl"
-
-DEFAULT_OLLAMA_MODEL = "qwen3:14b"
 
 log = logging.getLogger(__name__)
 
@@ -121,18 +119,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="Concurrent in-flight provider requests (default: 4).")
     p.add_argument(
         "--provider",
-        choices=["ollama", "claude", "openai", "openai-decisions", "deepseek"],
-        default="ollama",
-        help="LLM provider for classification (default: ollama, free local). "
+        choices=["local", "claude", "openai", "openai-decisions", "deepseek"],
+        default="local",
+        help="LLM provider for classification (default: local, the free LM Studio "
+             "tier at LOCAL_LLM_BASE_URL). "
              "openai-decisions uses the Decisions API (gpt-6-luna), which also "
              "reports a per-label probability stored as confidence.",
     )
     p.add_argument(
         "--model", default=None,
         help=(
-            "Model id for the chosen provider. Defaults per provider: ollama "
-            f"{DEFAULT_OLLAMA_MODEL}, claude/openai/deepseek their library "
-            "defaults, openai-decisions gpt-6-luna."
+            "Model id for the chosen provider. Defaults per provider: local "
+            "LOCAL_LLM_MODEL, claude/openai/deepseek their library defaults, "
+            "openai-decisions gpt-6-luna."
         ),
     )
     p.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Path to scraper.db.")
@@ -179,11 +178,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def _build_provider(args: argparse.Namespace):
     """Instantiate the chosen sync LLM provider."""
-    provider_name = getattr(args, "provider", "ollama") or "ollama"
+    provider_name = getattr(args, "provider", "local") or "local"
     model = getattr(args, "model", None)
-    if provider_name == "ollama":
-        from common.llm.ollama import OllamaProvider
-        return OllamaProvider.from_env(model_id=model or DEFAULT_OLLAMA_MODEL)
+    if provider_name == "local":
+        from common.llm.local import build_local_provider
+        return build_local_provider(model_id=model)
     if provider_name == "deepseek":
         import os
         from common.llm.deepseek import build_deepseek_provider
@@ -213,7 +212,7 @@ def run_main(args: argparse.Namespace) -> int:
     Batching keeps that bounded and is otherwise indistinguishable from a
     single big run because the work queue is just `content_type IS NULL`.
 
-    If a batch produces zero successful classifications (e.g. ollama is down),
+    If a batch produces zero successful classifications (e.g. the local LLM server is down),
     we abort rather than spin forever on the same NULL rows.
     """
     db = Database(args.db)

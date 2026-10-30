@@ -21,7 +21,7 @@ import json
 import httpx
 import pytest
 from common.llm.openai import OpenAIProvider
-from ingredients.worker.local_profiles import LOCAL_MODEL_PROFILES
+from common.llm.local_profiles import LOCAL_MODEL_PROFILES
 from ingredients.worker.providers import ProviderChain, ProviderUnavailable
 from ingredients.worker.providers_local import (
     LocalLLMError,
@@ -318,7 +318,7 @@ def test_reply_that_only_thought_is_reported_as_thinking():
     assert info.value.fatal
 
 
-# --- checked-in model profiles (ingredients.worker.local_profiles) ----------
+# --- checked-in model profiles (common.llm.local_profiles) -------------------
 
 _QWEN = LOCAL_MODEL_PROFILES["qwen3.5-9b"]
 

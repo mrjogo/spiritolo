@@ -1,7 +1,8 @@
 """Sync LLM provider Protocol used by the per-row resolve loops in the
 ingredient-map and name-normalization LLM tiers and in scraper classify.
 
-Implementations live in sibling modules: claude.py, ollama.py, openai.py.
+Implementations live in sibling modules: claude.py, openai.py (also the
+DeepSeek factory and the local LM Studio tier, deepseek.py / local.py).
 Tests inject stubs via the same Protocol.
 """
 

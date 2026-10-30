@@ -38,7 +38,7 @@ class LocalModelProfile:
 LOCAL_MODEL_PROFILES: dict[str, LocalModelProfile] = {
     # Qwen3.5 9B, Q8_0 GGUF from lmstudio-community. Sampling is the model
     # card's "Instruct (or non-thinking) mode for general tasks" set; thinking
-    # itself is turned off per request (reasoning_effort, see providers_local).
+    # itself is turned off per request (reasoning_effort, see common.llm.local).
     # presence_penalty is sent as the card recommends but LM Studio ignores it;
     # repeat_penalty 1.0 (off) matches the card's repetition_penalty and
     # overrides LM Studio's 1.1 default.
