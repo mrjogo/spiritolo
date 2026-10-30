@@ -34,6 +34,18 @@ LOCAL_DEFAULT_MODEL = "qwen3.5-9b"
 # roughly this much per item (stage prompt amortized across the pack).
 ITEM_INPUT_TOKENS = 1200
 ITEM_OUTPUT_TOKENS = 200
+# Stages whose items are far bigger than that: extract-recipe sends one page's
+# text (up to 12,000 characters) plus its prompt per call, and answers with a
+# whole recipe.
+STAGE_ITEM_TOKENS: dict[str, tuple[int, int]] = {"extract-recipe": (5000, 600)}
+# Characters per token when sizing a prompt we hold as text. Real tokenizers
+# average ~4 on English and less on JSON; 3 errs toward over-charging.
+CHARS_PER_TOKEN = 3
+
+
+def estimate_tokens(text: str) -> int:
+    """A deliberately high token count for ``text``."""
+    return len(text) // CHARS_PER_TOKEN + 1
 # Items per call when the caller doesn't say (mirrors the worker's
 # DEFAULT_PACK_SIZE, which lives in ingredients and can't be imported here).
 DEFAULT_PACK_ITEMS = 10
@@ -208,20 +220,26 @@ def estimate_item_cents(
     model_id: str | None,
     items: int = 1,
     *,
+    stage: str | None = None,
     at: datetime | None = None,
 ) -> float:
-    """Cents for ``items`` items at the per-item token assumption."""
-    per_item = estimate_call_cents(
-        provider_id, model_id, ITEM_INPUT_TOKENS, ITEM_OUTPUT_TOKENS, at=at
-    )
+    """Cents for ``items`` items at the per-item token assumption (the stage's
+    own, when it has one)."""
+    tin, tout = STAGE_ITEM_TOKENS.get(stage or "", (ITEM_INPUT_TOKENS, ITEM_OUTPUT_TOKENS))
+    per_item = estimate_call_cents(provider_id, model_id, tin, tout, at=at)
     return per_item * max(items, 0)
 
 
 def estimate_run_cents(
-    provider_id: str | None, model_id: str | None, items: int | None, *, at: datetime | None = None
+    provider_id: str | None,
+    model_id: str | None,
+    items: int | None,
+    *,
+    stage: str | None = None,
+    at: datetime | None = None,
 ) -> int:
     """Whole cents for a run of ``items`` items; a metered run never rounds to 0."""
-    cents = estimate_item_cents(provider_id, model_id, items or 0, at=at)
+    cents = estimate_item_cents(provider_id, model_id, items or 0, stage=stage, at=at)
     return math.ceil(cents) if cents > 0 else 0
 
 

@@ -131,3 +131,34 @@ def test_aborts_past_max_cost(conn_factory, db_conn):
     assert db_conn.execute(
         "select state from job_items where entity_id=403"
     ).fetchone()[0] == "pending", "the aborted item was never processed"
+
+
+def test_cost_actual_falls_back_to_the_meter(conn_factory, db_conn):
+    # Stages don't attribute LLM cost per item yet (no cost_cents on job_items),
+    # so the job's actual cost comes from what the meter charged, rounded up.
+    db_conn.execute("delete from jobs")
+    db_conn.execute("delete from job_items")
+    fake = FakeProvider(canned_map={"501": "A", "502": "B", "503": "C", "504": "D"},
+                        cost_per_call=0.3)
+    jid = db_conn.execute(
+        "insert into jobs (stage, payload, state, max_cost_cents) values "
+        "('metered', ?, 'queued', 100) returning id",
+        (Json({"entity_ids": [501, 502, 503, 504]}),),
+    ).fetchone()[0]
+
+    def metered_fn(job, conn, providers):
+        for eid in job["payload"]["entity_ids"]:
+            providers.resolve([Item(str(eid))])
+        return {"processed": 4}
+
+    def build_metered_chain(job):
+        return ProviderChain(tiers=[("llm", fake)], pack_size=1,
+                             meter=CostMeter(job.get("max_cost_cents")))
+
+    assert tick(conn_factory(), stage_fns={"metered": metered_fn},
+                providers_builder=build_metered_chain) is True
+    state, cost_actual = db_conn.execute(
+        "select state, cost_actual_cents from jobs where id=?", (jid,)
+    ).fetchone()
+    assert state == "done"
+    assert cost_actual == 2  # 4 calls x 0.3c = 1.2c, rounded up

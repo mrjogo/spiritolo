@@ -43,7 +43,7 @@ export function StartConfirmModal({
       : null;
 
   const draftEstimate = useEstimatedRunCents(
-    tier.provider, tier.model, run.task_count, run.cost_estimate_cents == null,
+    tier.provider, tier.model, run.task_count, run.cost_estimate_cents == null, run.stage,
   );
   const estimateCents = run.cost_estimate_cents ?? draftEstimate;
   const capDollars = Number.parseFloat(capInput);

@@ -42,11 +42,14 @@ def entity_type_for(stage: str) -> str:
 
 # --------------------------------------------------------------------- pricing
 
-def estimate_cents(provider: str | None, model: str | None, items: int | None) -> int:
-    """Estimated whole cents for ``items`` items on this tier, from the one price
-    table (``common.providers.pricing``) at the rate in force now. Local (and no
-    provider) is free; a metered estimate rounds up so it never shows 0."""
-    return pricing.estimate_run_cents(provider, model, items)
+def estimate_cents(
+    provider: str | None, model: str | None, items: int | None, stage: str | None = None
+) -> int:
+    """Estimated whole cents for ``items`` items of ``stage`` on this tier, from
+    the one price table (``common.providers.pricing``) at the rate in force now.
+    Local (and no provider) is free; a metered estimate rounds up so it never
+    shows 0."""
+    return pricing.estimate_run_cents(provider, model, items, stage=stage)
 
 
 # ------------------------------------------------------------- run assembly
@@ -173,7 +176,7 @@ def start_run(conn: Connection, job_id: int, max_cost_cents: int | None = None) 
     ).fetchone()[0]
     conn.execute(
         "update jobs set state = 'queued', max_cost_cents = ?, cost_estimate_cents = ? where id = ?",
-        (max_cost_cents, estimate_cents(job.get("llm_provider"), job.get("llm_model"), pending), job_id),
+        (max_cost_cents, estimate_cents(job.get("llm_provider"), job.get("llm_model"), pending, job["stage"]), job_id),
     )
 
 

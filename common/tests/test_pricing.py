@@ -167,3 +167,21 @@ def test_local_default_mirrors_the_worker_default():
         pytest.skip("ingredients not installed")
     from ingredients.worker.providers_local import DEFAULT_LOCAL_MODEL
     assert pricing.LOCAL_DEFAULT_MODEL == DEFAULT_LOCAL_MODEL
+
+
+def test_call_cost_uses_the_measured_prompt_size():
+    provider = MagicMock(spec=["model_id"], model_id="claude-haiku-5-5")
+    # One extract-sized call: ~5000 input tokens, not the 1200 per-item default.
+    big = cost.call_cost_cents("anthropic", provider, items=1, input_tokens=5000, now=NOON)
+    assert big == pytest.approx((5000 * 0.10 + 200 * 0.50) / 1e4)
+    # A prompt past 100K tokens bills at the long-context rate.
+    huge = cost.call_cost_cents("anthropic", provider, items=1, input_tokens=200_000, now=NOON)
+    assert huge == pytest.approx((200_000 * 0.50 + 200 * 2.50) / 1e4)
+
+
+def test_extract_estimates_with_page_sized_items():
+    per_default = pricing.estimate_item_cents("anthropic", "claude-haiku-5-5", 1)
+    per_extract = pricing.estimate_item_cents("anthropic", "claude-haiku-5-5", 1, stage="extract-recipe")
+    assert per_extract == pytest.approx((5000 * 0.10 + 600 * 0.50) / 1e4)
+    assert per_extract > per_default
+    assert pricing.estimate_tokens("x" * 300) == 101

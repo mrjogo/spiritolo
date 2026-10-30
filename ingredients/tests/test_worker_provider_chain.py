@@ -159,7 +159,7 @@ class _PricedProvider:
 
 def test_hosted_tier_is_charged_per_pack_from_the_price_table():
     # 13 items at pack size 10 -> packs of 10 and 3, each charged for its own
-    # items (0.022c/item on Haiku 5.5), not one flat per-call unit.
+    # measured prompt and item count, not one flat per-call unit.
     from common.providers import pricing
 
     meter = CostMeter(cap_cents=None)
@@ -167,10 +167,18 @@ def test_hosted_tier_is_charged_per_pack_from_the_price_table():
 
     res = chain.resolve([Item(str(i)) for i in range(13)])
 
-    per_item = pricing.estimate_item_cents("anthropic", "claude-haiku-5-5", 1)
+    from ingredients.worker.providers import _prompt_tokens
+
+    items = [Item(str(i)) for i in range(13)]
+    expected = sum(
+        pricing.estimate_call_cents(
+            "anthropic", "claude-haiku-5-5", _prompt_tokens(g, ""), len(g) * pricing.ITEM_OUTPUT_TOKENS
+        )
+        for g in (items[:10], items[10:])
+    )
     assert res.metered is True
-    assert res.cost_cents == pytest.approx(13 * per_item)
-    assert meter.spent_cents == pytest.approx(13 * per_item)
+    assert res.cost_cents == pytest.approx(expected)
+    assert meter.spent_cents == pytest.approx(expected)
     assert meter.consultations == 2
 
 

@@ -68,6 +68,7 @@ export function RunDetail() {
     activeTier?.model,
     run?.task_count,
     run?.state === 'draft',
+    run?.stage,
   );
 
   if (runStatus === 'loading') return <div className="ops-run-detail">Loading…</div>;

@@ -25,7 +25,7 @@ function optionTitle(t: LlmTier): string | undefined {
 // from what set_run_llm accepts. A tier whose key the server lacks is shown but
 // can't be picked; a run's tier the server no longer lists stays visible as-is.
 export function LlmTierSelect({ value, onChange, disabled }: Props) {
-  const { tiers } = useLlmTiers();
+  const { tiers, status } = useLlmTiers();
   const listed = value == null || tiers.some((t) => tierKey(t) === tierKey(value));
   const options = listed || value == null ? tiers : [value, ...tiers];
   return (
@@ -39,7 +39,9 @@ export function LlmTierSelect({ value, onChange, disabled }: Props) {
         if (next) onChange(next);
       }}
     >
-      {value == null && <option value="">Loading tiers…</option>}
+      {value == null && (
+        <option value="">{status === 'error' ? "Couldn't load LLM tiers" : 'Loading tiers…'}</option>
+      )}
       {options.map((t) => (
         <option
           key={tierKey(t)}

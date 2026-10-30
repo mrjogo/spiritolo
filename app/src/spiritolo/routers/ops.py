@@ -194,8 +194,9 @@ def eligible_pool_facets(body: dict[str, Any], c: Connection = Depends(conn)) ->
 
 
 @router.get("/estimate")
-def estimate(provider: str | None = None, model: str | None = None, items: int = 0) -> dict[str, Any]:
-    return {"cents": R.estimate_cents(provider, model, items)}
+def estimate(provider: str | None = None, model: str | None = None, items: int = 0,
+             stage: str | None = None) -> dict[str, Any]:
+    return {"cents": R.estimate_cents(provider, model, items, stage)}
 
 
 @router.get("/llm-tiers")

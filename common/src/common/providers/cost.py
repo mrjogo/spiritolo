@@ -19,20 +19,23 @@ def call_cost_cents(
     provider: Any | None = None,
     *,
     items: int | None = None,
+    input_tokens: int | None = None,
     now: datetime | None = None,
 ) -> float:
     """Cents for one packed call of ``items`` items (a full default pack when
     omitted) on ``provider``'s model: self-reported `cost_per_call` wins, else
-    the price table (0 for local and unknown providers)."""
+    the price table (0 for local and unknown providers). ``input_tokens`` is
+    the call's measured prompt size; without it the per-item assumption
+    applies. Output is always the per-item assumption."""
     if provider is not None:
         self_reported = getattr(provider, "cost_per_call", None)
         if self_reported is not None:
             return self_reported
     model_id = getattr(provider, "model_id", None) if provider is not None else None
     n = pricing.DEFAULT_PACK_ITEMS if items is None else items
+    tin = n * pricing.ITEM_INPUT_TOKENS if input_tokens is None else input_tokens
     return pricing.estimate_call_cents(
-        provider_id, model_id,
-        n * pricing.ITEM_INPUT_TOKENS, n * pricing.ITEM_OUTPUT_TOKENS, at=now,
+        provider_id, model_id, tin, n * pricing.ITEM_OUTPUT_TOKENS, at=now,
     )
 
 
