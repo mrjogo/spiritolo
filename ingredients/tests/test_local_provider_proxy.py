@@ -209,3 +209,21 @@ def test_local_extra_body_must_be_a_json_object():
 def test_available_providers_lists_local_always():
     assert available_providers({}) == ["local"]
     assert available_providers({"DEEPSEEK_API_KEY": "x"}) == ["local", "deepseek"]
+
+
+def test_local_provider_turns_reasoning_off_by_default():
+    fac = TransportFactory()
+    build_local_provider(client_factory=fac, env={}).resolve(system_prompt="s json", user_prompt="u")
+    assert fac.body()["reasoning_effort"] == "none"
+
+
+def test_local_reasoning_effort_is_configurable_and_omittable():
+    fac = TransportFactory()
+    env = {"LOCAL_LLM_REASONING_EFFORT": "low"}
+    build_local_provider(client_factory=fac, env=env).resolve(system_prompt="s json", user_prompt="u")
+    assert fac.body()["reasoning_effort"] == "low"
+
+    fac = TransportFactory()
+    env = {"LOCAL_LLM_REASONING_EFFORT": ""}
+    build_local_provider(client_factory=fac, env=env).resolve(system_prompt="s json", user_prompt="u")
+    assert "reasoning_effort" not in fac.body()

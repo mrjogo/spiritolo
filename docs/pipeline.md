@@ -147,6 +147,7 @@ tier carry `llm_provider = 'ollama'`, which is still accepted as an alias for
 |---|---|
 | `LOCAL_LLM_BASE_URL` | Server root, without `/v1`: `http://barbot:1234` (LM Studio) or `http://barbot:11434` (Ollama). Falls back to `OLLAMA_BASE_URL` for one release, then to `http://localhost:1234`. |
 | `LOCAL_LLM_MODEL` | Model a `local` run uses when it names none, in the runtime's own naming (LM Studio `qwen/qwen3-14b`, Ollama `qwen3:14b`). |
+| `LOCAL_LLM_REASONING_EFFORT` | Sent as `reasoning_effort`; default `none` (thinking off, see *Thinking* below). Empty string omits it. |
 | `LOCAL_LLM_EXTRA_BODY` | Optional JSON object merged into every request, for runtime-specific switches (see *Thinking* below). |
 | `TAILSCALE_AUTHKEY` (vault) | Joins the container to the tailnet; the entrypoint then sets `TS_LOCAL_PROXY`, and only the local client uses it. |
 
@@ -182,14 +183,35 @@ run of a few items in `/ops` should end with items `applied`.
 
 ### Thinking
 
-A thinking model spends its token budget reasoning before it answers, and with
-the 2048-token cap the visible answer can come back empty. The simplest fix is a
-model that does not think by default: Qwen3.5 0.8B–9B ship with reasoning off
-(Qwen3 14B and the larger Qwen3.5 models have it on). For a model that thinks,
-there is no request flag LM Studio reliably honours on `/v1/chat/completions`:
-`chat_template_kwargs: {"enable_thinking": false}` and `enableThinking: false`
-are both reported ignored there ([lmstudio-bug-tracker#1990](https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1990)).
-Turn it off per model in LM Studio instead: in the model's *Inference →
-Prompt Template*, add `{%- set enable_thinking = false %}` as the first line
-and reload the model. `LOCAL_LLM_EXTRA_BODY` stays available for runtimes
-that do honour a request flag (Ollama, llama.cpp `llama-server`, vLLM).
+A thinking model spends its token budget reasoning before it answers; with the
+2048-token cap the visible answer can come back empty. The local client
+therefore sends `reasoning_effort: "none"` on every request
+(`LOCAL_LLM_REASONING_EFFORT`; set it to an empty string to omit the field for
+a runtime that rejects it). Tested on barbot 2026-10-30 with LM Studio and
+Qwen3.5 9B: `reasoning_effort: "none"` gives zero reasoning tokens and a clean
+JSON answer, while `chat_template_kwargs: {"enable_thinking": false}` and
+`reasoning: {"effort": "none"}` are ignored (the model thinks through the whole
+budget and returns empty content; see also
+[lmstudio-bug-tracker#1990](https://github.com/lmstudio-ai/lmstudio-bug-tracker/issues/1990)).
+LM Studio returns any reasoning separately in `reasoning_content`, never inside
+`content`. `LOCAL_LLM_EXTRA_BODY` stays available for other runtime flags.
+
+### Barbot as configured (2026-10-30)
+
+Barbot's LM Studio engine is shared with the forecash project and set up by
+that repo (`forecash/docs/lms-on-barbot.md`): a headless `llmster` in a
+network-less firejail, with `socat` forwarding port 1234 on `127.0.0.1` and
+the Tailscale IP. Spiritolo uses it as is:
+
+- Endpoint `http://100.91.131.62:1234` (`barbot.dace-barb.ts.net`; the bare
+  name `barbot` needs MagicDNS on the client). Not exposed on the LAN.
+- Model `qwen3.5-9b` (Qwen3.5 9B, Q8_0, about 9 GB of VRAM once loaded on the
+  16 GB RTX 4060 Ti). The jail cannot download, so models are fetched into
+  `~/.lmstudio/models/` by hand, not with `lms get`.
+- JIT loading on, idle TTL 5 minutes (`developer.jitModelTTL` in
+  `~/.lmstudio/settings.json`), previous JIT model unloaded on a new load. A
+  cold first request loads the model in about 15 s.
+- The GPU fits one model at a time: if forecash or another LM Studio holds a
+  model, a JIT load of `qwen3.5-9b` may not fit.
+- The engine does **not** start at boot. After a reboot run
+  `~/code-projects/forecash/scripts/lms-ros.sh up`.

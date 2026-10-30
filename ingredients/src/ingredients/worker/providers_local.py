@@ -46,6 +46,8 @@ LOCAL_TIMEOUT = 600.0
 DEFAULT_LOCAL_BASE_URL = "http://localhost:1234"
 # Used when neither the run nor LOCAL_LLM_MODEL names a model.
 DEFAULT_LOCAL_MODEL = "qwen3:14b"
+# Thinking off by default (see local_reasoning_effort).
+DEFAULT_LOCAL_REASONING_EFFORT = "none"
 # Provider ids that select the local tier. `ollama` is what runs assembled
 # before the generic tier carry in `jobs.llm_provider`.
 LOCAL_PROVIDER_IDS = ("local", "ollama")
@@ -104,10 +106,24 @@ def local_extra_body(env: Env | None = None) -> dict[str, Any]:
     return extra
 
 
+def local_reasoning_effort(env: Env | None = None) -> str | None:
+    """``LOCAL_LLM_REASONING_EFFORT``, sent as ``reasoning_effort`` on every local
+    request. Defaults to ``none``: LM Studio honours it for Qwen3.5 (zero
+    reasoning tokens) where it ignores ``chat_template_kwargs.enable_thinking``,
+    and a thinking model otherwise spends the whole token budget reasoning and
+    returns empty content. Set it to an empty string to omit the field for a
+    runtime that rejects it."""
+    value = _env(env).get("LOCAL_LLM_REASONING_EFFORT", DEFAULT_LOCAL_REASONING_EFFORT)
+    return value or None
+
+
 class _Completions:
-    def __init__(self, inner: Any, extra_body: dict[str, Any]) -> None:
+    def __init__(
+        self, inner: Any, extra_body: dict[str, Any], reasoning_effort: str | None = None
+    ) -> None:
         self._inner = inner
         self._extra_body = extra_body
+        self._reasoning_effort = reasoning_effort
 
     def create(self, **kwargs: Any) -> Any:
         fmt = kwargs.get("response_format")
@@ -115,6 +131,8 @@ class _Completions:
             kwargs["response_format"] = _ANY_OBJECT_FORMAT
         if "max_completion_tokens" in kwargs and "max_tokens" not in kwargs:
             kwargs["max_tokens"] = kwargs["max_completion_tokens"]
+        if self._reasoning_effort and "reasoning_effort" not in kwargs:
+            kwargs["reasoning_effort"] = self._reasoning_effort
         if self._extra_body:
             kwargs["extra_body"] = {**self._extra_body, **(kwargs.get("extra_body") or {})}
         return self._inner.create(**kwargs)
@@ -135,12 +153,16 @@ class _LocalChatClient:
       (LM Studio rejects ``json_object``); a real ``json_schema`` passes through.
     - ``max_completion_tokens`` is mirrored to ``max_tokens``, which older
       OpenAI-compatible servers read instead.
+    - ``reasoning_effort`` (``LOCAL_LLM_REASONING_EFFORT``, default ``none``) is
+      added unless the caller set one, so a thinking model answers directly.
     - ``LOCAL_LLM_EXTRA_BODY`` is merged in as ``extra_body``.
     """
 
-    def __init__(self, inner: Any, extra_body: dict[str, Any]) -> None:
+    def __init__(
+        self, inner: Any, extra_body: dict[str, Any], reasoning_effort: str | None = None
+    ) -> None:
         self._inner = inner
-        self.chat = _Chat(_Completions(inner.chat.completions, extra_body))
+        self.chat = _Chat(_Completions(inner.chat.completions, extra_body, reasoning_effort))
 
     @property
     def base_url(self) -> Any:
@@ -175,7 +197,7 @@ def build_local_provider(
         max_retries=0,
     )
     provider = OpenAIProvider(
-        client=_LocalChatClient(sdk, extra_body),
+        client=_LocalChatClient(sdk, extra_body, local_reasoning_effort(e)),
         model_id=model_id or e.get("LOCAL_LLM_MODEL") or DEFAULT_LOCAL_MODEL,
     )
     provider.cost_per_call = 0  # type: ignore[attr-defined]  # local is unmetered
