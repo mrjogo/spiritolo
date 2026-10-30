@@ -459,30 +459,39 @@ def print_review_report(metrics: dict, failures: list[tuple[dict, str]]) -> None
             print(f"    predicted: {predicted}")
 
 
-def run_review(eval_path: Path, provider) -> int:
+def run_review(eval_path: Path, provider, concurrency: int = 4) -> int:
     entries = load_eval_set(eval_path)
     if not entries:
         print(f"ERROR: no eval rows in {eval_path}", file=sys.stderr)
         return 2
-    rows: list[tuple[str, str]] = []
-    failures: list[tuple[dict, str]] = []
-    for e in entries:
+
+    def score(e: dict) -> tuple[str, str]:
+        """(predicted, predicted_shown) for one eval row; errors become a label."""
         try:
             result = classify_url(
                 url=e["url"], sitemap_source=e.get("sitemap_source"),
                 provider=provider,
             )
-            predicted = result.label
-            if result.confidence is not None:
-                predicted_shown = f"{predicted} (p={result.confidence:.2f})"
-            else:
-                predicted_shown = predicted
         except Exception as err:
-            predicted = predicted_shown = f"ERROR: {err}"
-        expected = e["expected"]
-        rows.append((expected, predicted))
-        if predicted != expected:
-            failures.append((e, predicted_shown))
+            msg = f"ERROR: {err}"
+            return msg, msg
+        if result.confidence is not None:
+            return result.label, f"{result.label} (p={result.confidence:.2f})"
+        return result.label, result.label
+
+    # Calls run `concurrency` at a time (same knob as the main run); results are
+    # consumed in eval order so the report is deterministic. Progress goes to
+    # stderr, since a full set is a few hundred calls and several minutes.
+    progress = make_progress(total=len(entries), out=sys.stderr, every=25)
+    rows: list[tuple[str, str]] = []
+    failures: list[tuple[dict, str]] = []
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as ex:
+        for e, (predicted, predicted_shown) in zip(entries, ex.map(score, entries)):
+            expected = e["expected"]
+            rows.append((expected, predicted))
+            if predicted != expected:
+                failures.append((e, predicted_shown))
+            progress(len(rows))
 
     metrics = review_metrics(rows)
     print_review_report(metrics, failures)
@@ -533,7 +542,10 @@ def _run_sample(args: argparse.Namespace) -> int:
 
 
 def _run_review(args: argparse.Namespace) -> int:
-    return run_review(eval_path=args.eval_path, provider=_build_provider(args))
+    return run_review(
+        eval_path=args.eval_path, provider=_build_provider(args),
+        concurrency=args.concurrency,
+    )
 
 
 # ---------------------------------------------------------------------------
