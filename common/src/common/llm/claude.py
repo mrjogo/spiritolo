@@ -15,6 +15,12 @@ DEFAULT_MAX_TOKENS = 2048
 _NON_TEXT = ("thinking", "redacted_thinking")
 
 
+THINKING_MODES = ("disabled", "adaptive")
+# Thinking counts toward max_tokens on Haiku 5.5, so an adaptive request gets
+# more room than the thinking-off default.
+ADAPTIVE_MAX_TOKENS = 8192
+
+
 def _reasoning_off(model_id: str) -> dict[str, object]:
     """Request kwargs that turn reasoning off for structured retrieval.
 
@@ -34,6 +40,10 @@ class ClaudeProvider:
     client: object               # anthropic.Anthropic; typed as object so tests can pass a Mock.
     model_id: str = DEFAULT_MODEL
     max_tokens: int = DEFAULT_MAX_TOKENS
+    # "disabled" (the default: structured retrieval needs no reasoning) or
+    # "adaptive" (the model decides; Anthropic's Haiku 5.5 guide says to compare
+    # the two on your own evals, and that adaptive tends to score higher).
+    thinking: str = "disabled"
 
     @classmethod
     def from_env(
@@ -42,6 +52,7 @@ class ClaudeProvider:
         model_id: str = DEFAULT_MODEL,
         http_client: object | None = None,
         api_key: str | None = None,
+        thinking: str = "disabled",
     ) -> "ClaudeProvider":
         """Build a provider over the Anthropic SDK. ``http_client`` injects a
         pre-built transport (the worker's direct-route client); ``api_key``
@@ -56,7 +67,9 @@ class ClaudeProvider:
         client_kwargs: dict[str, object] = {"api_key": key}
         if http_client is not None:
             client_kwargs["http_client"] = http_client
-        return cls(client=anthropic.Anthropic(**client_kwargs), model_id=model_id)
+        if thinking not in THINKING_MODES:
+            raise ValueError(f"thinking must be one of {THINKING_MODES}, got {thinking!r}")
+        return cls(client=anthropic.Anthropic(**client_kwargs), model_id=model_id, thinking=thinking)
 
     def resolve(
         self, *, system_prompt: str, user_prompt: str,
@@ -66,8 +79,13 @@ class ClaudeProvider:
             "model": self.model_id,
             "max_tokens": self.max_tokens,
             "messages": [{"role": "user", "content": user_prompt}],
-            **_reasoning_off(self.model_id),
         }
+        if self.thinking == "adaptive":
+            kwargs["thinking"] = {"type": "adaptive"}
+            kwargs["output_config"] = {"effort": "low"}
+            kwargs["max_tokens"] = max(self.max_tokens, ADAPTIVE_MAX_TOKENS)
+        else:
+            kwargs.update(_reasoning_off(self.model_id))
         if system_prompt:
             # The stage prompt is identical across a run's calls: cache it.
             # (Below the model's minimum cacheable length it simply isn't.)

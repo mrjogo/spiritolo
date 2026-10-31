@@ -127,6 +127,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
              "reports a per-label probability stored as confidence.",
     )
     p.add_argument(
+        "--thinking", choices=["disabled", "adaptive"], default="disabled",
+        help="Claude only: 'disabled' (default) sends no reasoning; 'adaptive' lets "
+             "Haiku 5.5 decide, at low effort. Anthropic's guide says to compare "
+             "both on the eval set.",
+    )
+    p.add_argument(
         "--model", default=None,
         help=(
             "Model id for the chosen provider. Defaults per provider: local "
@@ -193,10 +199,17 @@ def _build_provider(args: argparse.Namespace):
         return build_deepseek_provider(api_key=key, **kwargs)
     if provider_name == "openai-decisions":
         from common.llm.openai_decisions import DecisionsProvider
-        return DecisionsProvider.from_env(model_id=model) if model else DecisionsProvider.from_env()
+        from scraper.classify_prompt import LABEL_DESCRIPTIONS
+        kwargs = {"model_id": model} if model else {}
+        provider = DecisionsProvider.from_env(**kwargs)
+        provider.question = "Which category best describes the page at this URL?"
+        provider.choice_descriptions = dict(LABEL_DESCRIPTIONS)
+        return provider
     if provider_name == "claude":
         from common.llm.claude import ClaudeProvider
-        return ClaudeProvider.from_env(model_id=model) if model else ClaudeProvider.from_env()
+        kwargs = {"model_id": model} if model else {}
+        kwargs["thinking"] = getattr(args, "thinking", "disabled") or "disabled"
+        return ClaudeProvider.from_env(**kwargs)
     if provider_name == "openai":
         from common.llm.openai import OpenAIProvider
         return OpenAIProvider.from_env(model_id=model) if model else OpenAIProvider.from_env()

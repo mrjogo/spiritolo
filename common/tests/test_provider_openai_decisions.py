@@ -44,19 +44,34 @@ def test_choices_from_schema_rejects_unusable_schemas(schema):
         choices_from_schema(schema)
 
 
-def test_build_request_is_one_choice_question():
+def test_build_request_is_one_choice_question_over_a_cacheable_developer_prefix():
     body = build_decisions_request(
         model="gpt-6-luna", instructions="sys", user_input="URL: x",
         choices=["a", "b"], question_name="label",
     )
     assert body == {
         "model": "gpt-6-luna",
-        "input": "URL: x",
+        "input": [
+            {"role": "developer", "content": [{"type": "input_text", "text": "sys"}]},
+            {"role": "user", "content": [{"type": "input_text", "text": "URL: x"}]},
+        ],
         "questions": [{
-            "type": "choice", "name": "label", "instructions": "sys",
+            "type": "choice", "name": "label",
+            "instructions": "Which option best describes the input?",
             "choices": [{"value": "a"}, {"value": "b"}],
         }],
     }
+
+
+def test_build_request_takes_a_question_and_choice_descriptions():
+    body = build_decisions_request(
+        model="gpt-6-luna", instructions="sys", user_input="URL: x",
+        choices=["a", "b"], question_name="label",
+        question="Which bucket?", choice_descriptions={"a": "first", "c": "unused"},
+    )
+    q = body["questions"][0]
+    assert q["instructions"] == "Which bucket?"
+    assert q["choices"] == [{"value": "a", "description": "first"}, {"value": "b"}]
 
 
 def test_resolve_posts_to_decisions_and_reserializes_choice_with_confidence():
@@ -81,8 +96,10 @@ def test_resolve_posts_to_decisions_and_reserializes_choice_with_confidence():
     assert args == (DECISIONS_PATH,)
     assert kwargs["cast_to"] is str
     assert kwargs["body"]["model"] == "gpt-6-luna"
-    assert kwargs["body"]["input"] == "URL: x"
-    assert kwargs["body"]["questions"][0]["instructions"] == "sys"
+    assert kwargs["body"]["input"][0]["role"] == "developer"
+    assert kwargs["body"]["input"][0]["content"][0]["text"] == "sys"
+    assert kwargs["body"]["input"][1]["content"][0]["text"] == "URL: x"
+    assert kwargs["body"]["questions"][0]["instructions"] == "Which option best describes the input?"
     assert [c["value"] for c in kwargs["body"]["questions"][0]["choices"]] == ["a", "b", "c"]
 
 
@@ -131,3 +148,18 @@ def test_from_env_requires_key(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     with pytest.raises(RuntimeError):
         DecisionsProvider.from_env()
+
+
+def test_provider_question_and_descriptions_reach_the_request():
+    client = MagicMock()
+    client.post.return_value = _reply(
+        type="choice", name="label", choice="a", confidence=0.9,
+        probabilities=[{"value": "a", "probability": 0.9}],
+    )
+    p = DecisionsProvider(client=client, question="Which one?",
+                          choice_descriptions={"a": "A things", "b": "B things"})
+    p.resolve(system_prompt="sys", user_prompt="URL: x", response_schema=SCHEMA)
+    q = client.post.call_args.kwargs["body"]["questions"][0]
+    assert q["instructions"] == "Which one?"
+    assert q["choices"][0] == {"value": "a", "description": "A things"}
+    assert q["choices"][2] == {"value": "c"}

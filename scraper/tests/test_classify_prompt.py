@@ -44,7 +44,7 @@ def test_system_prompt_documents_exactly_the_model_labels():
     listed = re.findall(r"^- (likely_[a-z_]+):", SYSTEM_PROMPT, flags=re.MULTILINE)
     assert listed == list(MODEL_LABELS)
     # No hardcoded count that can drift from the list again.
-    assert not re.search(r"\b(six|seven|eight)\b", SYSTEM_PROMPT.split("Rules:")[0])
+    assert not re.search(r"\b(six|seven|eight)\b", SYSTEM_PROMPT.split("<rules>")[0])
 
 
 def test_system_prompt_contains_at_least_one_failure_mode_example():
@@ -80,3 +80,19 @@ def test_classify_url_sends_the_response_schema():
     result = classify_url(url="https://x/y", sitemap_source=None, provider=_Provider())
     assert result.label == "likely_junk"
     assert seen["schema"] == RESPONSE_SCHEMA
+
+
+def test_system_prompt_is_sectioned_and_examples_are_tagged():
+    from scraper.classify_prompt import LABEL_DESCRIPTIONS, MODEL_LABELS
+    for tag in ("<categories>", "</categories>", "<rules>", "</rules>", "<examples>", "</examples>"):
+        assert SYSTEM_PROMPT.count(tag) == 1
+    assert SYSTEM_PROMPT.count("<example>") == SYSTEM_PROMPT.count("</example>") >= 3
+    assert SYSTEM_PROMPT.startswith("You are ")
+    assert '{"label": "likely_drink_recipe"}' in SYSTEM_PROMPT
+    assert tuple(LABEL_DESCRIPTIONS) == MODEL_LABELS
+    for label, desc in LABEL_DESCRIPTIONS.items():
+        assert f"- {label}: {desc}" in SYSTEM_PROMPT
+
+
+def test_response_schema_describes_the_label():
+    assert RESPONSE_SCHEMA["properties"]["label"]["description"]

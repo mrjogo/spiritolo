@@ -56,6 +56,10 @@ def classify_url(
         raise ValueError(f"malformed JSON from model: {raw!r}") from e
 
     label = payload.get("label")
+    # Anthropic's structured-outputs doc: enum capitalization is not
+    # guaranteed, so compare case-insensitively.
+    if isinstance(label, str):
+        label = label.strip().lower()
     if label not in LABELS:
         raise ValueError(f"invalid label {label!r} (raw={raw!r})")
 

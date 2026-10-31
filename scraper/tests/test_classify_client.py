@@ -49,3 +49,15 @@ def test_classify_url_passes_system_and_user_prompts():
     assert "user_prompt" in kwargs
     assert "https://example.com/x" in kwargs["user_prompt"]
     assert "recipes.xml" in kwargs["user_prompt"]
+
+
+def test_label_is_matched_case_insensitively():
+    """Anthropic's structured-outputs doc: enum capitalization isn't guaranteed."""
+    from unittest.mock import MagicMock
+    from common.llm.provider import ProviderResult
+    from scraper.classify_client import classify_url
+    provider = MagicMock()
+    provider.resolve.return_value = ProviderResult(
+        raw_text='{"label": "Likely_Drink_Recipe"}', model_id="m")
+    out = classify_url(url="https://x/y", sitemap_source=None, provider=provider)
+    assert out.label == "likely_drink_recipe"

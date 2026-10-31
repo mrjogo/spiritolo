@@ -155,3 +155,23 @@ def test_reply_without_text_block_is_an_error():
     client.messages.create.return_value = MagicMock(content=[types.SimpleNamespace(type="thinking", thinking="")])
     with pytest.raises(ValueError):
         ClaudeProvider(client=client, model_id="claude-haiku-5-5").resolve(system_prompt="s", user_prompt="u")
+
+
+def test_adaptive_thinking_sends_adaptive_low_effort_and_more_room():
+    client = MagicMock()
+    client.messages.create.return_value = MagicMock(
+        content=[MagicMock(type="text", text='{"ok": true}')]
+    )
+    p = ClaudeProvider(client=client, model_id="claude-haiku-5-5", thinking="adaptive")
+    p.resolve(system_prompt="sys", user_prompt="u")
+    kwargs = client.messages.create.call_args.kwargs
+    assert kwargs["thinking"] == {"type": "adaptive"}
+    assert kwargs["output_config"]["effort"] == "low"
+    assert kwargs["max_tokens"] >= 8192
+
+
+def test_from_env_rejects_unknown_thinking_mode(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    import pytest
+    with pytest.raises(ValueError):
+        ClaudeProvider.from_env(thinking="sometimes")

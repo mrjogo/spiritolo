@@ -54,23 +54,45 @@ def choices_from_schema(response_schema: dict | None) -> tuple[str, list[str]]:
     return name, values
 
 
+DEFAULT_QUESTION = "Which option best describes the input?"
+
+
 def build_decisions_request(
     *, model: str, instructions: str, user_input: str,
     choices: list[str], question_name: str,
+    question: str = DEFAULT_QUESTION,
+    choice_descriptions: dict[str, str] | None = None,
 ) -> dict:
-    """The ``/decisions`` request body for one choice question."""
-    return {
+    """The ``/decisions`` request body for one choice question.
+
+    Shaped the way OpenAI's Decisions guide recommends: the shared guidance
+    (``instructions``, our system prompt) goes into ``input`` as a developer
+    message ahead of the per-item user message, so it sits in the cacheable
+    prefix (question text never caches); the question itself is one short
+    sentence; and each choice carries a description of when it applies.
+    """
+    body = {
         "model": model,
-        "input": user_input,
+        "input": [
+            {"role": "developer",
+             "content": [{"type": "input_text", "text": instructions}]},
+            {"role": "user",
+             "content": [{"type": "input_text", "text": user_input}]},
+        ],
         "questions": [
             {
                 "type": "choice",
                 "name": question_name,
-                "instructions": instructions,
-                "choices": [{"value": v} for v in choices],
+                "instructions": question,
+                "choices": [
+                    {"value": v, **({"description": choice_descriptions[v]}
+                                    if choice_descriptions and v in choice_descriptions else {})}
+                    for v in choices
+                ],
             }
         ],
     }
+    return body
 
 
 def parse_decisions_response(payload: dict, *, question_name: str) -> dict:
@@ -107,6 +129,11 @@ class DecisionsProvider:
     model_id: str = DEFAULT_MODEL
     # Set by the last ``resolve`` from the reply's ``usage`` block, for cost reporting.
     last_usage: dict | None = None
+    # The one-sentence question asked of the input; the caller's system prompt
+    # is the shared guidance in ``input``.
+    question: str = DEFAULT_QUESTION
+    # ``{choice value: when it applies}``, sent as each choice's description.
+    choice_descriptions: dict[str, str] | None = None
 
     @classmethod
     def from_env(
@@ -130,6 +157,7 @@ class DecisionsProvider:
         body = build_decisions_request(
             model=self.model_id, instructions=system_prompt, user_input=user_prompt,
             choices=choices, question_name=question_name,
+            question=self.question, choice_descriptions=self.choice_descriptions,
         )
         # cast_to=str hands back the raw response text; the SDK has no
         # Decisions model at this version to parse into.
