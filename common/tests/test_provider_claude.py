@@ -6,7 +6,7 @@ from common.llm.claude import ClaudeProvider
 def _fake_anthropic_client(reply_text: str) -> MagicMock:
     client = MagicMock()
     fake_message = MagicMock()
-    fake_message.content = [MagicMock(text=reply_text)]
+    fake_message.content = [MagicMock(type="text", text=reply_text)]
     client.messages.create.return_value = fake_message
     return client
 
@@ -80,3 +80,36 @@ def test_no_schema_sends_no_output_config():
     client = _fake_anthropic_client("{}")
     ClaudeProvider(client=client).resolve(system_prompt="s", user_prompt="u")
     assert "output_config" not in client.messages.create.call_args.kwargs
+
+
+def test_haiku_5_5_turns_thinking_off_and_reads_the_text_block():
+    """Haiku 5.5 thinks by default and puts a ThinkingBlock first; the provider
+    must disable it (plus low effort) and still read the text block when one
+    comes back anyway."""
+    import types
+    client = MagicMock()
+    thinking = types.SimpleNamespace(type="thinking", thinking="")
+    text = types.SimpleNamespace(type="text", text='{"label": "likely_junk"}')
+    client.messages.create.return_value = MagicMock(content=[thinking, text])
+    p = ClaudeProvider(client=client, model_id="claude-haiku-5-5")
+    out = p.resolve(system_prompt="s", user_prompt="u", response_schema={"type": "object"})
+    assert out.raw_text == '{"label": "likely_junk"}'
+    kwargs = client.messages.create.call_args.kwargs
+    assert kwargs["thinking"] == {"type": "disabled"}
+    assert kwargs["output_config"]["effort"] == "low"
+    assert kwargs["output_config"]["format"]["type"] == "json_schema"
+
+
+def test_haiku_4_5_sends_no_thinking_parameter():
+    client = _fake_anthropic_client('{"label": "x"}')
+    ClaudeProvider(client=client, model_id="claude-haiku-4-5").resolve(system_prompt="s", user_prompt="u")
+    kwargs = client.messages.create.call_args.kwargs
+    assert "thinking" not in kwargs and "output_config" not in kwargs
+
+
+def test_reply_without_text_block_is_an_error():
+    import pytest, types
+    client = MagicMock()
+    client.messages.create.return_value = MagicMock(content=[types.SimpleNamespace(type="thinking", thinking="")])
+    with pytest.raises(ValueError):
+        ClaudeProvider(client=client, model_id="claude-haiku-5-5").resolve(system_prompt="s", user_prompt="u")

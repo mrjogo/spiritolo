@@ -1,4 +1,11 @@
-"""Anthropic Claude provider (sync). Defaults to Haiku 4.5."""
+"""Anthropic Claude provider (sync). Defaults to Haiku 4.5.
+
+Thinking: Haiku 4.5 only thinks when asked, so the request says nothing about
+it. Haiku 5.5 thinks by default (adaptive) and would spend the small token
+budget reasoning about a one-field answer and return a ``thinking`` block
+first, so for it the request turns thinking off and pins low effort. The reply
+is read from its first ``text`` block either way.
+"""
 
 from __future__ import annotations
 
@@ -49,6 +56,9 @@ class ClaudeProvider:
         # is what we want for structured retrieval), and the `effort` parameter
         # is rejected by Haiku 4.5 — setting either would be wrong here.
         kwargs: dict[str, object] = {}
+        if _thinks_by_default(self.model_id):
+            kwargs["thinking"] = {"type": "disabled"}
+            kwargs.setdefault("output_config", {})["effort"] = "low"
         if response_schema is not None:
             # Structured outputs: the reply is constrained to the schema.
             kwargs.setdefault("output_config", {})["format"] = {
@@ -61,5 +71,22 @@ class ClaudeProvider:
             messages=[{"role": "user", "content": user_prompt}],
             **kwargs,
         )
-        text = msg.content[0].text
+        text = _first_text(msg.content)
         return ProviderResult(raw_text=text, model_id=self.model_id)
+
+
+def _thinks_by_default(model_id: str) -> bool:
+    """Haiku 5.x runs adaptive thinking unless told not to; ``disabled`` is
+    accepted there (at effort ``high`` or below). The 4.x models don't think
+    unless asked, and the Opus/Sonnet 5.5 line rejects ``disabled``."""
+    return model_id.startswith("claude-haiku-5")
+
+
+def _first_text(content: list) -> str:
+    """The reply text: the first ``text`` block, skipping ``thinking`` blocks."""
+    for block in content:
+        if getattr(block, "type", None) == "text" or (
+            getattr(block, "type", None) is None and hasattr(block, "text")
+        ):
+            return block.text
+    raise ValueError(f"no text block in reply: {[getattr(b, 'type', '?') for b in content]}")
