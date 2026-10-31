@@ -134,3 +134,28 @@ def test_audit_log_records_the_operator(client, db, admin):
 def test_executor_health_when_disabled(client, admin):
     assert client.get("/api/ops/executor").json() == {"alive": False, "disabled": True}
     assert client.get("/api/health").json()["ok"] is True
+
+
+def test_llm_tiers_lists_priced_tiers_and_marks_missing_keys(client, admin, monkeypatch):
+    for k in ("OPENAI_API_KEY", "DEEPSEEK_API_KEY", "LOCAL_LLM_MODEL"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "k")
+    r = client.get("/api/ops/llm-tiers")
+    assert r.status_code == 200
+    tiers = {t["provider"]: t for t in r.json()["tiers"]}
+    assert list(tiers) == ["local", "deepseek", "openai", "anthropic"]
+    assert tiers["local"]["available"] and not tiers["local"]["metered"] and tiers["local"]["price"] is None
+    assert not tiers["openai"]["available"] and not tiers["deepseek"]["available"]
+    claude = tiers["anthropic"]
+    assert claude["available"] and claude["metered"] and claude["model"] == "claude-haiku-5-5"
+    assert claude["price"]["input_per_mtok"] == 0.10 and claude["price"]["output_per_mtok"] == 0.50
+
+
+def test_llm_tiers_offer_the_configured_local_model(client, admin, monkeypatch):
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "qwen/qwen3-14b")
+    local = client.get("/api/ops/llm-tiers").json()["tiers"][0]
+    assert local["model"] == "qwen/qwen3-14b" and local["label"] == "Local · qwen/qwen3-14b — free (local)"
+
+
+def test_llm_tiers_require_admin(client):
+    assert client.get("/api/ops/llm-tiers").status_code == 401

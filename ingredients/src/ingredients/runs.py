@@ -16,6 +16,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from common.db import SQL_NOW, Connection, jdump, jlist, jload
+from common.providers import pricing
 
 # Entity kind each stage's run operates on.
 STAGE_ENTITY = {
@@ -41,17 +42,14 @@ def entity_type_for(stage: str) -> str:
 
 # --------------------------------------------------------------------- pricing
 
-def estimate_cents(provider: str | None, model: str | None, items: int | None) -> int:
-    """Rough per-item cost: (1200 input + 200 output tokens) at list price.
-    The local tier (``local``, or the old alias ``ollama``) and no provider are free."""
-    n = items or 0
-    per_item = {
-        "deepseek": (1200 * 0.14 + 200 * 0.28) / 10000.0,
-        "openai": (1200 * 0.75 + 200 * 4.50) / 10000.0,
-        "anthropic": (1200 * 1.00 + 200 * 5.00) / 10000.0,
-        "claude": (1200 * 1.00 + 200 * 5.00) / 10000.0,
-    }.get(provider or "", 0.0)
-    return int(round(n * per_item))
+def estimate_cents(
+    provider: str | None, model: str | None, items: int | None, stage: str | None = None
+) -> int:
+    """Estimated whole cents for ``items`` items of ``stage`` on this tier, from
+    the one price table (``common.providers.pricing``) at the rate in force now.
+    Local (and no provider) is free; a metered estimate rounds up so it never
+    shows 0."""
+    return pricing.estimate_run_cents(provider, model, items, stage=stage)
 
 
 # ------------------------------------------------------------- run assembly
@@ -178,7 +176,7 @@ def start_run(conn: Connection, job_id: int, max_cost_cents: int | None = None) 
     ).fetchone()[0]
     conn.execute(
         "update jobs set state = 'queued', max_cost_cents = ?, cost_estimate_cents = ? where id = ?",
-        (max_cost_cents, estimate_cents(job.get("llm_provider"), job.get("llm_model"), pending), job_id),
+        (max_cost_cents, estimate_cents(job.get("llm_provider"), job.get("llm_model"), pending, job["stage"]), job_id),
     )
 
 

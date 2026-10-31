@@ -101,6 +101,12 @@ class Executor:
         c.cancel()
         return True
 
+    @property
+    def env(self) -> Mapping[str, str]:
+        """The environment runs are built from (provider keys, local model)."""
+        env = self._run_kwargs.get("env")
+        return os.environ if env is None else env
+
     def health(self) -> dict[str, Any]:
         return {
             "alive": self.alive,

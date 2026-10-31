@@ -20,8 +20,40 @@ def test_resolve_returns_provider_result_with_model_id():
     client.messages.create.assert_called_once()
     kwargs = client.messages.create.call_args.kwargs
     assert kwargs["model"] == "claude-haiku-4-5"
-    assert kwargs["system"] == "sys"
+    assert kwargs["system"] == [
+        {"type": "text", "text": "sys", "cache_control": {"type": "ephemeral"}}
+    ]
     assert kwargs["messages"][0]["content"] == "u"
+    # Haiku 4.5 thinks only when asked and rejects `effort`: send neither.
+    assert "thinking" not in kwargs
+    assert "output_config" not in kwargs
+
+
+def test_haiku_5_5_turns_thinking_off_at_low_effort():
+    client = _fake_anthropic_client("{}")
+    ClaudeProvider(client=client, model_id="claude-haiku-5-5").resolve(
+        system_prompt="sys", user_prompt="u"
+    )
+    kwargs = client.messages.create.call_args.kwargs
+    assert kwargs["thinking"] == {"type": "disabled"}
+    assert kwargs["output_config"] == {"effort": "low"}
+    # A full packed reply needs room: 256 truncated 10-item envelopes.
+    assert kwargs["max_tokens"] == 2048
+
+
+def test_empty_system_prompt_is_omitted():
+    client = _fake_anthropic_client("{}")
+    ClaudeProvider(client=client).resolve(system_prompt="", user_prompt="u")
+    assert "system" not in client.messages.create.call_args.kwargs
+
+
+def test_reply_text_skips_thinking_blocks():
+    client = MagicMock()
+    msg = MagicMock()
+    msg.content = [MagicMock(type="thinking", text=""), MagicMock(type="text", text='{"ok": 1}')]
+    client.messages.create.return_value = msg
+    out = ClaudeProvider(client=client).resolve(system_prompt="s", user_prompt="u")
+    assert out.raw_text == '{"ok": 1}'
 
 
 def test_model_id_property_matches_constructor():
@@ -39,7 +71,7 @@ def test_from_env_reads_api_key_and_constructs_client(monkeypatch):
     p = ClaudeProvider.from_env()
 
     assert captured == {"api_key": "sk-env"}
-    assert p.model_id == "claude-haiku-4-5"
+    assert p.model_id == "claude-haiku-5-5"
 
 
 def test_from_env_missing_key_raises(monkeypatch):
@@ -62,23 +94,33 @@ def test_from_env_accepts_http_client_and_explicit_key(monkeypatch):
 
     assert captured["api_key"] == "sk-explicit"
     assert captured["http_client"] is http
-    assert p.model_id == "claude-haiku-4-5"
+    assert p.model_id == "claude-haiku-5-5"
 
 
 def test_response_schema_sets_output_config_format():
     client = _fake_anthropic_client('{"a": "x"}')
     schema = {"type": "object", "properties": {"a": {"type": "string"}},
               "required": ["a"], "additionalProperties": False}
-    ClaudeProvider(client=client).resolve(
+    ClaudeProvider(client=client, model_id="claude-haiku-4-5").resolve(
         system_prompt="sys", user_prompt="u", response_schema=schema
     )
     kwargs = client.messages.create.call_args.kwargs
     assert kwargs["output_config"] == {"format": {"type": "json_schema", "schema": schema}}
 
 
+def test_response_schema_keeps_haiku_5_5_effort():
+    client = _fake_anthropic_client("{}")
+    schema = {"type": "object"}
+    ClaudeProvider(client=client).resolve(system_prompt="s", user_prompt="u", response_schema=schema)
+    kwargs = client.messages.create.call_args.kwargs
+    assert kwargs["output_config"] == {
+        "effort": "low", "format": {"type": "json_schema", "schema": schema},
+    }
+
+
 def test_no_schema_sends_no_output_config():
     client = _fake_anthropic_client("{}")
-    ClaudeProvider(client=client).resolve(system_prompt="s", user_prompt="u")
+    ClaudeProvider(client=client, model_id="claude-haiku-4-5").resolve(system_prompt="s", user_prompt="u")
     assert "output_config" not in client.messages.create.call_args.kwargs
 
 

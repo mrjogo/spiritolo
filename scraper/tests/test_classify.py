@@ -673,7 +673,8 @@ def test_build_provider_deepseek(monkeypatch):
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ds")
     args = build_arg_parser().parse_args(["--provider", "deepseek"])
     p = _build_provider(args)
-    assert p.model_id == "deepseek-v4-flash"
+    from common.llm.deepseek import DEEPSEEK_DEFAULT_MODEL
+    assert p.model_id == DEEPSEEK_DEFAULT_MODEL
     assert p.supports_json_schema is False
     assert p.extra_body == {"thinking": {"type": "disabled"}}
     assert captured["base_url"] == "https://api.deepseek.com"

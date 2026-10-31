@@ -38,7 +38,7 @@ def test_openai_uses_the_runs_model():
 def test_openai_falls_back_to_default_model():
     prov = build_provider_for_run("openai", None, env={"OPENAI_API_KEY": "sk-o"})
     assert prov is not None
-    assert prov.model_id == "gpt-5.4-mini"  # DEFAULT
+    assert prov.model_id == "gpt-6-luna"  # DEFAULT
 
 
 def test_openai_without_key_is_none():
@@ -55,13 +55,13 @@ def test_claude_uses_the_runs_model():
 
 def test_claude_falls_back_to_default_model():
     prov = build_provider_for_run("claude", None, env={"ANTHROPIC_API_KEY": "sk-a"})
-    assert prov.model_id == "claude-haiku-4-5"  # DEFAULT
+    assert prov.model_id == "claude-haiku-5-5"  # DEFAULT
 
 
 def test_deepseek_builds_an_openai_compatible_provider():
     prov = build_provider_for_run("deepseek", None, env={"DEEPSEEK_API_KEY": "sk-d"})
     assert isinstance(prov, OpenAIProvider)
-    assert prov.model_id == "deepseek-v4-flash"  # DEFAULT
+    assert prov.model_id == "deepseek-flash"  # DEFAULT
 
 
 def test_deepseek_without_key_is_none():

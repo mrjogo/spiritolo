@@ -2,8 +2,9 @@
 
 DeepSeek's API is OpenAI-compatible (same Chat Completions shape and Python
 SDK), so we don't need a separate client: we point ``OpenAIProvider`` at
-DeepSeek's base URL, default model, and API key. ``deepseek-v4-flash`` is not a
-gpt-5 model, so the OpenAI resolve path already omits ``reasoning_effort``.
+DeepSeek's base URL, default model (from ``common.providers.pricing``), and API
+key. DeepSeek ids are not gpt-5/gpt-6 models, so the OpenAI resolve path
+already omits ``reasoning_effort``.
 
 Two DeepSeek-specific quirks. Its API has JSON mode
 (``response_format={"type": "json_object"}``) but no ``json_schema`` structured
@@ -16,10 +17,12 @@ appended schema text) always contain it.
 
 from __future__ import annotations
 
+from common.providers.pricing import DEFAULT_MODEL as _DEFAULTS
+
 from .openai import OpenAIProvider
 
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-flash"
+DEEPSEEK_DEFAULT_MODEL = _DEFAULTS["deepseek"]
 
 
 def build_deepseek_provider(

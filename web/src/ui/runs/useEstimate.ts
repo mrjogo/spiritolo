@@ -11,12 +11,15 @@ export function useEstimatedRunCents(
   model: string | null | undefined,
   items: number | null | undefined,
   enabled: boolean,
+  /** The run's stage: some stages' items are much bigger than the default. */
+  stage?: string,
 ): number | null {
   const q = useQuery({
-    queryKey: ['estimateRunCents', provider, model, items],
+    queryKey: ['estimateRunCents', provider, model, items, stage],
     enabled: enabled && provider != null && model != null && items != null,
     queryFn: async () => {
       const params = new URLSearchParams({ provider: provider ?? '', model: model ?? '', items: String(items ?? 0) });
+      if (stage) params.set('stage', stage);
       return (await api<{ cents: number }>(`/api/ops/estimate?${params}`)).cents;
     },
   });

@@ -47,6 +47,14 @@ def test_resolve_omits_reasoning_effort_for_non_gpt5_models():
     assert "reasoning_effort" not in kwargs
 
 
+def test_gpt6_family_also_turns_reasoning_off():
+    """A gpt-6 id must not silently get reasoning back on (the old check was
+    startswith("gpt-5"))."""
+    client = _fake_openai_client("{}")
+    OpenAIProvider(client=client, model_id="gpt-6-luna").resolve(system_prompt="s", user_prompt="u")
+    assert client.chat.completions.create.call_args.kwargs["reasoning_effort"] == "none"
+
+
 def test_model_id_property_matches_constructor():
     p = OpenAIProvider(client=MagicMock(), model_id="gpt-4o-mini")
     assert p.model_id == "gpt-4o-mini"
@@ -62,7 +70,7 @@ def test_from_env_reads_api_key_and_constructs_client(monkeypatch):
     p = OpenAIProvider.from_env()
 
     assert captured == {"api_key": "sk-env"}
-    assert p.model_id == "gpt-5.4-mini"
+    assert p.model_id == "gpt-6-luna"
 
 
 def test_from_env_missing_key_raises(monkeypatch):
