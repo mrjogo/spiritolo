@@ -3,7 +3,7 @@ means editing one file and bumping PROMPT_VERSION."""
 
 # v5: the reply is schema-constrained to MODEL_LABELS, and the prompt no longer
 # hardcodes a category count.
-PROMPT_VERSION = "v6"
+PROMPT_VERSION = "v7"
 
 # The labels the model chooses from; SYSTEM_PROMPT documents exactly these.
 MODEL_LABELS = (
@@ -49,8 +49,8 @@ Categories:
 - likely_food_recipe: an individual food recipe. A single dish, with a cooking method or food ingredients.
 - likely_drink_article: drink-related editorial that is NOT a single recipe — listicles, bar guides, "best-of" roundups, technique explainers, news, glossary entries, ingredient explainers, series landing pages.
 - likely_food_article: food-related editorial that is NOT a single recipe — tips, restaurant guides, health pieces, cooking technique explainers, reviews.
-- likely_junk: structural/meta/commercial pages with no editorial content. This includes about/FAQ/privacy/contact/terms/sitemap pages, author bios, tag/category/topic indexes, brand landing/marketing pages, retail/affiliate/shop pages, product reviews, advertise/subscribe pages, and bare section indexes like /recipes/. Also editorial with no food or drink angle on a food site (home decor, cleaning, paint, crafts, weddings, gardening, flower arranging): it never leads to a recipe, so it is junk, not likely_food_article.
-- likely_user_generated: user-submitted content — forum threads, community/member/reader recipes and galleries. A recipe-shaped URL under a member path (`/recipes/member/`, `/community/`, `/people/our-readers/`, a `<name>s-recipe` slug on a cocktail database) is user_generated, not a recipe label, even when the slug reads like a single recipe. Guest authors are editorial and do NOT belong here.
+- likely_junk: structural/meta/commercial pages with no editorial content. This includes about/FAQ/privacy/contact/terms/sitemap pages, author bios, tag/category/topic indexes, brand landing/marketing pages, retail/affiliate/shop pages, product reviews, advertise/subscribe pages, and bare section indexes like /recipes/. Also editorial with no food, drink or kitchen angle on a food site (home decor, paint colours, fabric care, crafts, weddings, gardening, flower arranging): it never leads to a recipe, so it is junk, not likely_food_article. Kitchen content stays editorial — cookware, knives, storage, stoves, cleaning with food (`white-bread-cleaning`), cooking tips — is likely_food_article.
+- likely_user_generated: user-submitted content — forum threads, community/member/reader recipes and galleries. A recipe-shaped URL under a member path (`/recipes/member/`, `/community/`, `/people/our-readers/`) is user_generated, not a recipe label, even when the slug reads like a single recipe; so is a cocktail-database recipe whose slug ends in a submitter's name plus `-recipe` (diffordsguide `/cocktails/recipe/<id>/singapore-sling-franks-recipe`). A possessive bartender or author name in an editorial site's recipe slug (`/recipes/jelani-johnsons-painkiller/`) is an attributed house recipe, NOT user-generated. Guest posts and guest authors (`guest-post-*`) are editorial and do NOT belong here.
 
 Rules:
 - Read the slug as a sentence. "household-uses-for-vodka" is NOT a recipe just because it contains "vodka".
