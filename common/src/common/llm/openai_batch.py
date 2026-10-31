@@ -18,9 +18,9 @@ from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 
 from .batch_provider import BatchRequest, BatchResult, BatchStatus, BatchSubmission
-from .openai import _reasoning_effort_off, response_format_for
+from .openai import DEFAULT_MODEL, _reasoning_effort_off, response_format_for
 
-DEFAULT_MODEL = "gpt-5.4-mini"
+# The batch default is the sync OpenAI default (common.providers.pricing).
 # gpt-5-family charges reasoning tokens against max_completion_tokens; see
 # common.llm.openai.OpenAIProvider for the full rationale. 2048 leaves
 # headroom; reasoning_effort='none' (set below for gpt-5*/gpt-6*) disables reasoning

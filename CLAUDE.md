@@ -97,7 +97,7 @@ Zone 2 (`ingredients/`):
 
 - **`classify.py`** — classifies `content_type IS NULL` rows via LLM. Provider: `--provider local` (default: the LM Studio tier from `common/llm/local.py`, same env as the executor), `--provider claude`, `--provider openai`, `--provider deepseek` (JSON mode, thinking off, `DEEPSEEK_API_KEY`), or `--provider openai-decisions` (the OpenAI Decisions API over gpt-6-luna, `common/llm/openai_decisions.py`: one *choice* question built from `RESPONSE_SCHEMA`'s label enum; the reply's probability for the chosen label is stored as `classify_url_runs.confidence`, NULL for every other provider). Iterate prompts via `--review` against the checked-in eval set (`scraper/eval/classify-urls.jsonl`, ~300 URLs, `sitemap_source` null for the 2026-10 additions) — it prints accuracy, macro F1, a per-label precision/recall/F1 table and the confusion pairs; `--eval-path` scores another JSONL. Use `--sample` for spot-checks. Bump `PROMPT_VERSION` after edits.
 
-  **Batch mode (OpenAI only):** 50% off real-time, ~24h SLA. Submit once, ingest later.
+  **Batch mode (OpenAI only):** 50% off real-time, ~24h SLA, same default model as sync (`gpt-6-luna`, from `common.providers.pricing`). Submit once, ingest later.
 
   ```bash
   # Submit and exit (prints batch_id + sidecar path).
