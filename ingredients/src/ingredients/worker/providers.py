@@ -21,7 +21,7 @@ the chain is a single LLM tier plus per-call cost enforcement.
   provider as ``response_schema`` (its native structured-output mode);
 - **meters cost** — before each metered call it charges the job's ``CostMeter``,
   which raises ``CostCapExceeded`` if the call would breach ``max_cost_cents``.
-  Local (``ollama``) tiers are free and never consult the cap.
+  Local (``local``, alias ``ollama``) tiers are free and never consult the cap.
 
 It reuses the ``common.providers`` primitives (cost table, request packing, the
 ``ChainResult`` / ``TierResult`` shapes) rather than re-deriving them.

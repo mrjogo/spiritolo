@@ -130,6 +130,11 @@ class OpenAIProvider:
             kwargs["extra_body"] = dict(self.extra_body)
         resp = self.client.chat.completions.create(**kwargs)
         text = resp.choices[0].message.content or ""
+        if not self.supports_json_schema and not text.strip():
+            # DeepSeek's JSON-mode doc: output the API could not read as JSON
+            # comes back as spaces with finish_reason 'stop'; it says to retry.
+            resp = self.client.chat.completions.create(**kwargs)
+            text = resp.choices[0].message.content or ""
         # See common.llm.openai_batch._strip_nul_from_json_text for why.
         from .openai_batch import _strip_nul_from_json_text
         text = _strip_nul_from_json_text(text) or ""

@@ -28,11 +28,11 @@ from scraper.classify_prompt import (
     build_user_message,
 )
 from scraper.db import Database
-from scraper.ollama_client import classify_url
+from scraper.classify_client import classify_url
 
 DATA_DIR = Path(__file__).resolve().parent.parent.parent / "data"
 DEFAULT_DB_PATH = DATA_DIR / "scraper.db"
-DEFAULT_EVAL_PATH = Path(__file__).resolve().parent.parent / "eval" / "classify-urls.jsonl"
+DEFAULT_EVAL_PATH = Path(__file__).resolve().parent.parent.parent / "eval" / "classify-urls.jsonl"
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +68,7 @@ def classify_one(
         raw_response=result.raw_response,
         latency_ms=result.latency_ms,
         pages_content_type_before=row.get("content_type"),
+        confidence=result.confidence,
     )
     return True
 
@@ -117,14 +118,26 @@ def build_arg_parser() -> argparse.ArgumentParser:
     p.add_argument("--concurrency", type=int, default=4,
                    help="Concurrent in-flight provider requests (default: 4).")
     p.add_argument(
-        "--provider", choices=["ollama", "claude", "openai"], default="ollama",
-        help="LLM provider for classification (default: ollama, free local).",
+        "--provider",
+        choices=["local", "claude", "openai", "openai-decisions", "deepseek"],
+        default="local",
+        help="LLM provider for classification (default: local, the free LM Studio "
+             "tier at LOCAL_LLM_BASE_URL). "
+             "openai-decisions uses the Decisions API (gpt-6-luna), which also "
+             "reports a per-label probability stored as confidence.",
     )
     p.add_argument(
-        "--model", default="qwen3:14b",
+        "--thinking", choices=["disabled", "adaptive"], default="disabled",
+        help="Claude only: 'disabled' (default) sends no reasoning; 'adaptive' lets "
+             "Haiku 5.5 decide, at low effort. Anthropic's guide says to compare "
+             "both on the eval set.",
+    )
+    p.add_argument(
+        "--model", default=None,
         help=(
-            "Model id for the chosen provider (default: qwen3:14b for ollama). "
-            "For claude pass e.g. claude-haiku-4-5; for openai pass e.g. gpt-5-mini."
+            "Model id for the chosen provider. Defaults per provider: local "
+            "LOCAL_LLM_MODEL, claude/openai/deepseek their library defaults, "
+            "openai-decisions gpt-6-luna."
         ),
     )
     p.add_argument("--db", default=str(DEFAULT_DB_PATH), help="Path to scraper.db.")
@@ -132,6 +145,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
                    help="Rows pulled from DB per batch (keeps task-object memory bounded). Default: 1000.")
     p.add_argument("--review", action="store_true",
                    help="Run the prompt against the checked-in eval set instead of the DB.")
+    p.add_argument("--eval-path", type=Path, default=DEFAULT_EVAL_PATH,
+                   help="For --review: the eval JSONL to score (default: the checked-in set).")
     p.add_argument("--sample", action="store_true",
                    help="Print N random (site, url, label, raw) rows. Optionally filter "
                         "with --site and/or --category, or look up specific URLs with --urls.")
@@ -169,14 +184,32 @@ def build_arg_parser() -> argparse.ArgumentParser:
 
 def _build_provider(args: argparse.Namespace):
     """Instantiate the chosen sync LLM provider."""
-    provider_name = getattr(args, "provider", "ollama") or "ollama"
+    provider_name = getattr(args, "provider", "local") or "local"
     model = getattr(args, "model", None)
-    if provider_name == "ollama":
-        from common.llm.ollama import OllamaProvider
-        return OllamaProvider.from_env(model_id=model) if model else OllamaProvider.from_env()
+    if provider_name == "local":
+        from common.llm.local import build_local_provider
+        return build_local_provider(model_id=model)
+    if provider_name == "deepseek":
+        import os
+        from common.llm.deepseek import build_deepseek_provider
+        key = os.environ.get("DEEPSEEK_API_KEY")
+        if not key:
+            raise RuntimeError("DEEPSEEK_API_KEY not set. Export it before using this provider.")
+        kwargs = {"model_id": model} if model else {}
+        return build_deepseek_provider(api_key=key, **kwargs)
+    if provider_name == "openai-decisions":
+        from common.llm.openai_decisions import DecisionsProvider
+        from scraper.classify_prompt import LABEL_DESCRIPTIONS
+        kwargs = {"model_id": model} if model else {}
+        provider = DecisionsProvider.from_env(**kwargs)
+        provider.question = "Which category best describes the page at this URL?"
+        provider.choice_descriptions = dict(LABEL_DESCRIPTIONS)
+        return provider
     if provider_name == "claude":
         from common.llm.claude import ClaudeProvider
-        return ClaudeProvider.from_env(model_id=model) if model else ClaudeProvider.from_env()
+        kwargs = {"model_id": model} if model else {}
+        kwargs["thinking"] = getattr(args, "thinking", "disabled") or "disabled"
+        return ClaudeProvider.from_env(**kwargs)
     if provider_name == "openai":
         from common.llm.openai import OpenAIProvider
         return OpenAIProvider.from_env(model_id=model) if model else OpenAIProvider.from_env()
@@ -192,7 +225,7 @@ def run_main(args: argparse.Namespace) -> int:
     Batching keeps that bounded and is otherwise indistinguishable from a
     single big run because the work queue is just `content_type IS NULL`.
 
-    If a batch produces zero successful classifications (e.g. ollama is down),
+    If a batch produces zero successful classifications (e.g. the local LLM server is down),
     we abort rather than spin forever on the same NULL rows.
     """
     db = Database(args.db)
@@ -374,34 +407,107 @@ def load_eval_set(path: Path) -> list[dict]:
     return entries
 
 
-def run_review(eval_path: Path, provider) -> int:
-    entries = load_eval_set(eval_path)
-    correct = 0
-    failures: list[tuple[dict, str]] = []
-    for e in entries:
-        try:
-            result = classify_url(
-                url=e["url"], sitemap_source=e.get("sitemap_source"),
-                provider=provider,
-            )
-            predicted = result.label
-        except Exception as err:
-            predicted = f"ERROR: {err}"
-        expected = e["expected"]
-        if predicted == expected:
-            correct += 1
-        else:
-            failures.append((e, predicted))
+def review_metrics(rows: list[tuple[str, str]]) -> dict:
+    """Per-label precision / recall / F1 and a confusion table over
+    ``(expected, predicted)`` pairs. A failed call shows up as the predicted
+    label it was recorded as (``ERROR: …``), counting against recall."""
+    expected_labels = sorted({e for e, _ in rows})
+    predicted_labels = sorted({p for _, p in rows})
+    labels = sorted(set(expected_labels) | {p for p in predicted_labels if p in LABELS})
+    confusion = Counter(rows)
+    per_label = {}
+    for lab in labels:
+        tp = confusion[(lab, lab)]
+        support = sum(confusion[(lab, p)] for p in predicted_labels)
+        predicted = sum(confusion[(e, lab)] for e in expected_labels)
+        precision = tp / predicted if predicted else None
+        recall = tp / support if support else None
+        f1 = (
+            2 * precision * recall / (precision + recall)
+            if precision and recall else (0.0 if support or predicted else None)
+        )
+        per_label[lab] = {
+            "support": support, "predicted": predicted, "tp": tp,
+            "precision": precision, "recall": recall, "f1": f1,
+        }
+    scored = [m["f1"] for m in per_label.values() if m["support"] and m["f1"] is not None]
+    return {
+        "total": len(rows),
+        "correct": sum(1 for e, p in rows if e == p),
+        "labels": labels,
+        "per_label": per_label,
+        "macro_f1": sum(scored) / len(scored) if scored else None,
+        "confusion": confusion,
+    }
 
-    total = len(entries)
-    print(f"{correct}/{total} correct ({100*correct/total:.1f}%)")
+
+def _short(label: str) -> str:
+    return label[len("likely_"):] if label.startswith("likely_") else label
+
+
+def _pct(x: float | None) -> str:
+    return "   -  " if x is None else f"{100 * x:5.1f}%"
+
+
+def print_review_report(metrics: dict, failures: list[tuple[dict, str]]) -> None:
+    total, correct = metrics["total"], metrics["correct"]
+    print(f"{correct}/{total} correct ({100 * correct / total:.1f}%)"
+          + (f", macro F1 {100 * metrics['macro_f1']:.1f}%" if metrics["macro_f1"] is not None else ""))
+    print()
+    print(f"{'label':<26} {'n':>4} {'precision':>9} {'recall':>7} {'f1':>7}")
+    for lab in metrics["labels"]:
+        m = metrics["per_label"][lab]
+        print(f"{_short(lab):<26} {m['support']:>4} {_pct(m['precision']):>9} "
+              f"{_pct(m['recall']):>7} {_pct(m['f1']):>7}")
     if failures:
+        print("\nConfusion (expected -> predicted: count):")
+        for (e, p), n in sorted(metrics["confusion"].items(), key=lambda kv: (-kv[1], kv[0])):
+            if e != p:
+                print(f"  {_short(e)} -> {_short(p)}: {n}")
         print("\nFailures:")
         for e, predicted in failures:
             print(f"  {e['url']}")
             print(f"    expected:  {e['expected']}")
             print(f"    predicted: {predicted}")
-    return 0 if correct == total else 1
+
+
+def run_review(eval_path: Path, provider, concurrency: int = 4) -> int:
+    entries = load_eval_set(eval_path)
+    if not entries:
+        print(f"ERROR: no eval rows in {eval_path}", file=sys.stderr)
+        return 2
+
+    def score(e: dict) -> tuple[str, str]:
+        """(predicted, predicted_shown) for one eval row; errors become a label."""
+        try:
+            result = classify_url(
+                url=e["url"], sitemap_source=e.get("sitemap_source"),
+                provider=provider,
+            )
+        except Exception as err:
+            msg = f"ERROR: {err}"
+            return msg, msg
+        if result.confidence is not None:
+            return result.label, f"{result.label} (p={result.confidence:.2f})"
+        return result.label, result.label
+
+    # Calls run `concurrency` at a time (same knob as the main run); results are
+    # consumed in eval order so the report is deterministic. Progress goes to
+    # stderr, since a full set is a few hundred calls and several minutes.
+    progress = make_progress(total=len(entries), out=sys.stderr, every=25)
+    rows: list[tuple[str, str]] = []
+    failures: list[tuple[dict, str]] = []
+    with ThreadPoolExecutor(max_workers=max(1, concurrency)) as ex:
+        for e, (predicted, predicted_shown) in zip(entries, ex.map(score, entries)):
+            expected = e["expected"]
+            rows.append((expected, predicted))
+            if predicted != expected:
+                failures.append((e, predicted_shown))
+            progress(len(rows))
+
+    metrics = review_metrics(rows)
+    print_review_report(metrics, failures)
+    return 0 if metrics["correct"] == metrics["total"] else 1
 
 
 def run_sample(
@@ -448,7 +554,10 @@ def _run_sample(args: argparse.Namespace) -> int:
 
 
 def _run_review(args: argparse.Namespace) -> int:
-    return run_review(eval_path=DEFAULT_EVAL_PATH, provider=_build_provider(args))
+    return run_review(
+        eval_path=args.eval_path, provider=_build_provider(args),
+        concurrency=args.concurrency,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -606,11 +715,7 @@ def run_batch(args: argparse.Namespace) -> int:
 
     db = Database(args.db)
     try:
-        provider_kwargs = (
-            {"model_id": args.model}
-            if args.model and args.model != "qwen3:14b"
-            else {}
-        )
+        provider_kwargs = {"model_id": args.model} if args.model else {}
         provider = OpenAIBatchProvider.from_env(**provider_kwargs)
 
         if args.ingest:

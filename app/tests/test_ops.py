@@ -54,7 +54,7 @@ def test_run_lifecycle_through_the_api_and_executor(client, db, admin, app, monk
     run = client.get(f"/api/ops/runs/{job_id}").json()
     assert run["state"] == "draft" and run["created_by"] == "ruddick" and run["task_count"] == 0
 
-    assert client.post(f"/api/ops/runs/{job_id}/llm", json={"provider": "ollama", "model": "qwen3:14b"}).status_code == 200
+    assert client.post(f"/api/ops/runs/{job_id}/llm", json={"provider": "local", "model": "qwen3.5-9b"}).status_code == 200
     r = client.post(f"/api/ops/runs/{job_id}/items", json={"entity_type": "recipe", "entity_ids": [str(i) for i in ids]})
     assert r.json() == {"added": 3}
     assert client.get(f"/api/ops/runs/{job_id}").json()["never_run_count"] == 3
@@ -70,7 +70,7 @@ def test_run_lifecycle_through_the_api_and_executor(client, db, admin, app, monk
     assert removed == {"removed": 1}
 
     assert client.get("/api/ops/estimate", params={"provider": "openai", "model": "x", "items": 100}).json()["cents"] > 0
-    assert client.get("/api/ops/estimate", params={"provider": "ollama", "model": "x", "items": 100}).json()["cents"] == 0
+    assert client.get("/api/ops/estimate", params={"provider": "local", "model": "x", "items": 100}).json()["cents"] == 0
 
     assert client.post(f"/api/ops/runs/{job_id}/start", json={"max_cost_cents": 0}).status_code == 200
     assert client.get(f"/api/ops/runs/{job_id}").json()["state"] == "queued"

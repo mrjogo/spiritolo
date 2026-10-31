@@ -24,7 +24,7 @@ from pathlib import Path
 from scraper.structured import extract_structured, iter_recipes
 
 DEFAULT_EVAL_PATH = (
-    Path(__file__).resolve().parent.parent / "eval" / "classify-drink.jsonl"
+    Path(__file__).resolve().parent.parent.parent / "eval" / "classify-drink.jsonl"
 )
 
 

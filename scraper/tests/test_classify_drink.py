@@ -508,3 +508,8 @@ def test_instructions_as_list_of_howto_steps():
         ],
     })
     assert ("instructions_shake_ice", 3) in r.rules
+
+
+def test_default_eval_path_points_at_the_checked_in_set():
+    from scraper.classify_drink import DEFAULT_EVAL_PATH
+    assert DEFAULT_EVAL_PATH.is_file(), DEFAULT_EVAL_PATH

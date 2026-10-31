@@ -73,7 +73,8 @@ CREATE TABLE IF NOT EXISTS classify_url_runs (
     raw_response               TEXT,
     latency_ms                 INTEGER,
     evaluated_at               TEXT NOT NULL,
-    pages_content_type_before  TEXT
+    pages_content_type_before  TEXT,
+    confidence                 REAL
 );
 """
 
@@ -266,6 +267,11 @@ def _apply_legacy_migrations(conn: sqlite3.Connection) -> None:
         conn.commit()
     # Legacy `classifications` table was superseded by `classify_url_runs`.
     conn.execute("DROP TABLE IF EXISTS classifications")
+    # classify_url_runs.confidence (2026-10): the provider's probability for
+    # the chosen label, only filled by providers that report one.
+    cur_cols = {row["name"] for row in conn.execute("PRAGMA table_info(classify_url_runs)")}
+    if cur_cols and "confidence" not in cur_cols:
+        conn.execute("ALTER TABLE classify_url_runs ADD COLUMN confidence REAL")
     # `extract_runs` bookkeeping moved to the Zone-2 extract-recipe stage; drop
     # the table so an existing DB re-migrates to the current schema instead of
     # tripping the drift check with a table migrate() no longer creates.
@@ -429,6 +435,7 @@ class Database:
         raw_response: str | None,
         latency_ms: int | None,
         pages_content_type_before: str | None,
+        confidence: float | None = None,
     ) -> None:
         """UPSERT the classify_url_runs row for this page and update
         pages.content_type atomically. Latest-only — re-running overwrites
@@ -440,8 +447,8 @@ class Database:
                 INSERT INTO classify_url_runs
                     (page_id, run_id, label, model, prompt_version,
                      raw_response, latency_ms, evaluated_at,
-                     pages_content_type_before)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     pages_content_type_before, confidence)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(page_id) DO UPDATE SET
                     run_id = excluded.run_id,
                     label = excluded.label,
@@ -450,10 +457,11 @@ class Database:
                     raw_response = excluded.raw_response,
                     latency_ms = excluded.latency_ms,
                     evaluated_at = excluded.evaluated_at,
-                    pages_content_type_before = excluded.pages_content_type_before
+                    pages_content_type_before = excluded.pages_content_type_before,
+                    confidence = excluded.confidence
                 """,
                 (page_id, run_id, label, model, prompt_version, raw_response,
-                 latency_ms, now, pages_content_type_before),
+                 latency_ms, now, pages_content_type_before, confidence),
             )
             self.conn.execute(
                 "UPDATE pages SET content_type = ? WHERE id = ?",

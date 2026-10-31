@@ -5,7 +5,7 @@ import pytest
 from common.llm.provider import ProviderResult
 from scraper.classify import classify_one, run_classify_pool
 from scraper.db import Database
-from scraper.ollama_client import ClassificationResult
+from scraper.classify_client import ClassificationResult
 
 
 def _stub_provider(reply: str = '{"label": "likely_drink_recipe"}', model_id: str = "qwen3:14b") -> MagicMock:
@@ -29,8 +29,8 @@ def test_arg_parser_defaults():
     assert args.site is None
     assert args.limit is None
     assert args.concurrency == 4
-    assert args.model == "qwen3:14b"
-    assert args.provider == "ollama"
+    assert args.model is None  # per-provider default, resolved in _build_provider
+    assert args.provider == "local"
     assert args.review is False
     assert args.sample is False
 
@@ -538,3 +538,158 @@ def test_run_main_builds_provider_once(tmp_db, monkeypatch):
     assert rc == 0
     # Exactly one provider constructed, even across 3 batches of 5 URLs total.
     assert constructed_count["n"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Review metrics + confidence (Phase 5)
+# ---------------------------------------------------------------------------
+
+import json  # noqa: E402
+
+from scraper.classify import review_metrics, _build_provider  # noqa: E402
+
+
+def test_review_metrics_per_label_precision_recall():
+    rows = [
+        ("likely_drink_recipe", "likely_drink_recipe"),
+        ("likely_drink_recipe", "likely_drink_article"),
+        ("likely_junk", "likely_junk"),
+        ("likely_junk", "ERROR: boom"),
+    ]
+    m = review_metrics(rows)
+    assert m["total"] == 4 and m["correct"] == 2
+    recipe = m["per_label"]["likely_drink_recipe"]
+    assert recipe["support"] == 2 and recipe["precision"] == 1.0 and recipe["recall"] == 0.5
+    article = m["per_label"]["likely_drink_article"]
+    assert article["support"] == 0 and article["predicted"] == 1 and article["precision"] == 0.0
+    assert "ERROR: boom" not in m["per_label"]
+    assert m["confusion"][("likely_junk", "ERROR: boom")] == 1
+    assert m["macro_f1"] == pytest.approx((2 / 3 + 2 / 3) / 2)
+
+
+def test_run_review_prints_per_label_table_and_confusion(tmp_path, capsys):
+    eval_path = tmp_path / "eval.jsonl"
+    eval_path.write_text(
+        '{"url": "https://a.com/1", "sitemap_source": null, "expected": "likely_drink_recipe"}\n'
+        '{"url": "https://b.com/1", "sitemap_source": null, "expected": "likely_junk"}\n'
+    )
+
+    class FakeProvider:
+        model_id = "gpt-6-luna"
+
+        def resolve(self, *, system_prompt, user_prompt, **_kw):
+            label = "likely_drink_recipe" if "a.com" in user_prompt else "likely_drink_article"
+            return ProviderResult(
+                raw_text=json.dumps({"label": label, "confidence": 0.8}), model_id=self.model_id)
+
+    rc = run_review(eval_path=eval_path, provider=FakeProvider())
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "1/2 correct" in out
+    assert "macro F1" in out
+    assert "drink_recipe" in out and "precision" in out
+    assert "junk -> drink_article: 1" in out
+    assert "predicted: likely_drink_article (p=0.80)" in out
+
+
+def test_run_review_uses_eval_path_arg(tmp_path, monkeypatch):
+    eval_path = tmp_path / "other.jsonl"
+    eval_path.write_text('{"url": "https://a.com/1", "sitemap_source": null, "expected": "likely_junk"}\n')
+    seen = {}
+
+    class FakeProvider:
+        model_id = "x"
+
+        def resolve(self, *, system_prompt, user_prompt, **_kw):
+            seen["prompt"] = user_prompt
+            return ProviderResult(raw_text='{"label": "likely_junk"}', model_id="x")
+
+    import scraper.classify as mod
+    monkeypatch.setattr(mod, "_build_provider", lambda args: FakeProvider())
+    args = build_arg_parser().parse_args(["--review", "--eval-path", str(eval_path)])
+    assert mod.main(["--review", "--eval-path", str(eval_path)]) == 0
+    assert args.eval_path == eval_path
+    assert "https://a.com/1" in seen["prompt"]
+
+
+def test_classify_one_stores_confidence(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("x", "https://x.com/r")
+    row = db.get_unclassified()[0]
+    provider = MagicMock()
+    provider.model_id = "gpt-6-luna"
+    provider.resolve.return_value = ProviderResult(
+        raw_text='{"label": "likely_drink_recipe", "confidence": 0.93}', model_id="gpt-6-luna")
+    assert classify_one(row, provider, db, prompt_version="v5") is True
+    got = db.conn.execute("SELECT label, confidence FROM classify_url_runs").fetchone()
+    assert (got["label"], got["confidence"]) == ("likely_drink_recipe", 0.93)
+    db.close()
+
+
+def test_classify_one_leaves_confidence_null_for_plain_replies(tmp_db):
+    db = Database(tmp_db)
+    db.add_url("x", "https://x.com/r")
+    row = db.get_unclassified()[0]
+    provider = MagicMock()
+    provider.model_id = "qwen3:14b"
+    provider.resolve.return_value = ProviderResult(
+        raw_text='{"label": "likely_junk"}', model_id="qwen3:14b")
+    classify_one(row, provider, db, prompt_version="v5")
+    assert db.conn.execute("SELECT confidence FROM classify_url_runs").fetchone()[0] is None
+    db.close()
+
+
+def test_arg_parser_accepts_openai_decisions_provider():
+    args = build_arg_parser().parse_args(["--provider", "openai-decisions"])
+    assert args.provider == "openai-decisions"
+    assert args.model is None
+
+
+def test_build_provider_openai_decisions(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    from common.llm.openai_decisions import DecisionsProvider
+    args = build_arg_parser().parse_args(["--provider", "openai-decisions"])
+    p = _build_provider(args)
+    assert isinstance(p, DecisionsProvider) and p.model_id == "gpt-6-luna"
+    args = build_arg_parser().parse_args(["--provider", "openai-decisions", "--model", "gpt-6-luna-2"])
+    assert _build_provider(args).model_id == "gpt-6-luna-2"
+
+
+def test_build_provider_local_default_model(monkeypatch):
+    monkeypatch.setenv("LOCAL_LLM_BASE_URL", "http://barbot:1234")
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "qwen3.5-9b")
+    args = build_arg_parser().parse_args([])
+    p = _build_provider(args)
+    assert p.model_id == "qwen3.5-9b"
+    assert str(p.client.base_url).startswith("http://barbot:1234/v1")
+    p = _build_provider(build_arg_parser().parse_args(["--model", "other"]))
+    assert p.model_id == "other"
+
+
+def test_build_provider_deepseek(monkeypatch):
+    import openai
+    captured = {}
+    monkeypatch.setattr(openai, "OpenAI", lambda **kw: captured.update(kw) or object())
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-ds")
+    args = build_arg_parser().parse_args(["--provider", "deepseek"])
+    p = _build_provider(args)
+    from common.llm.deepseek import DEEPSEEK_DEFAULT_MODEL
+    assert p.model_id == DEEPSEEK_DEFAULT_MODEL
+    assert p.supports_json_schema is False
+    assert p.extra_body == {"thinking": {"type": "disabled"}}
+    assert captured["base_url"] == "https://api.deepseek.com"
+    assert captured["api_key"] == "sk-ds"
+    args = build_arg_parser().parse_args(["--provider", "deepseek", "--model", "deepseek-flash"])
+    assert _build_provider(args).model_id == "deepseek-flash"
+
+
+def test_build_provider_deepseek_requires_key(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    with pytest.raises(RuntimeError):
+        _build_provider(build_arg_parser().parse_args(["--provider", "deepseek"]))
+
+
+def test_default_eval_path_points_at_the_checked_in_set():
+    from scraper.classify import DEFAULT_EVAL_PATH
+    assert DEFAULT_EVAL_PATH.is_file(), DEFAULT_EVAL_PATH
+    assert len(load_eval_set(DEFAULT_EVAL_PATH)) > 300

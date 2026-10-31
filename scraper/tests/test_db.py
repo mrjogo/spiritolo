@@ -492,6 +492,7 @@ def test_classify_url_runs_table_exists(tmp_db):
     assert cols == {
         "page_id", "run_id", "label", "model", "prompt_version",
         "raw_response", "latency_ms", "evaluated_at", "pages_content_type_before",
+        "confidence",
     }
     # page_id is the PK, enforcing one row per page (latest-only).
     pk_cols = [r[1] for r in db.conn.execute("PRAGMA table_info(classify_url_runs)") if r[5]]
@@ -1047,4 +1048,24 @@ def test_db_safe_from_multiple_threads(tmp_db):
     assert errors == []
     rows = db.conn.execute("SELECT COUNT(*) AS c FROM pages").fetchone()
     assert rows["c"] == 10
+    db.close()
+
+
+def test_confidence_column_is_added_to_a_pre_existing_db(tmp_path):
+    """A DB whose classify_url_runs predates the confidence column gets it on
+    migrate(), and the drift check then passes."""
+    import sqlite3
+    from scraper.db import migrate, Database
+
+    db_path = tmp_path / "old.db"
+    migrate(db_path)
+    conn = sqlite3.connect(db_path)
+    conn.execute("ALTER TABLE classify_url_runs DROP COLUMN confidence")
+    conn.commit()
+    conn.close()
+
+    migrate(db_path)
+    db = Database(db_path)
+    cols = {r[1] for r in db.conn.execute("PRAGMA table_info(classify_url_runs)")}
+    assert "confidence" in cols
     db.close()

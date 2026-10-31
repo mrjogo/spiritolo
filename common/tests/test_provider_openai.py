@@ -141,3 +141,25 @@ def test_json_mode_only_endpoint_gets_schema_as_text():
     system = kwargs["messages"][0]["content"]
     assert system.startswith("sys") and json.dumps(_SCHEMA) in system
     assert "json" in system
+
+
+def test_json_mode_only_endpoint_retries_once_on_blank_content():
+    """DeepSeek's JSON-mode doc: unreadable output comes back as spaces; retry."""
+    client = MagicMock()
+    blank = MagicMock(); blank.choices = [MagicMock(message=MagicMock(content="   "))]
+    good = MagicMock(); good.choices = [MagicMock(message=MagicMock(content='{"a": 1}'))]
+    client.chat.completions.create.side_effect = [blank, good]
+    p = OpenAIProvider(client=client, model_id="deepseek-flash", supports_json_schema=False)
+    out = p.resolve(system_prompt="sys json", user_prompt="u")
+    import json
+    assert json.loads(out.raw_text) == {"a": 1}
+    assert client.chat.completions.create.call_count == 2
+
+
+def test_strict_schema_endpoint_does_not_retry_blank_content():
+    client = MagicMock()
+    blank = MagicMock(); blank.choices = [MagicMock(message=MagicMock(content=""))]
+    client.chat.completions.create.return_value = blank
+    p = OpenAIProvider(client=client, model_id="gpt-6-luna")
+    p.resolve(system_prompt="sys", user_prompt="u")
+    assert client.chat.completions.create.call_count == 1
